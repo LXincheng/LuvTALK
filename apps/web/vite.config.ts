@@ -31,6 +31,14 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@ionic/pwa-elements/loader'],
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_PROXY_API ?? 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
