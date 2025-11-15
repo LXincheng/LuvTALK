@@ -22,10 +22,12 @@
     "@types/react-router": "^5.1.20",
     "@types/react-router-dom": "^5.3.3",
     "ionicons": "^7.4.0",
+    "@ionic/pwa-elements": "^3.3.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-router": "^5.3.4",
-    "react-router-dom": "^5.3.4"
+    "react-router-dom": "^5.3.4",
+    "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@capacitor/cli": "7.4.4",
@@ -37,6 +39,7 @@
     "@types/react-dom": "19.0.4",
     "@vitejs/plugin-legacy": "^5.0.0",
     "@vitejs/plugin-react": "^4.0.1",
+    "vite-plugin-pwa": "^0.20.5",
     "cypress": "^13.5.0",
     "eslint": "^9.20.1",
     "eslint-plugin-react": "^7.32.2",

@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FavoriteType {
+  phrase
+  cultural
+  vocabulary
+  scenario
+}
+
+model Conversation {
+  id             String    @id @default(cuid())
+  scenarioId     String
+  targetLanguage String
+  messages       Json
+  score          Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  favorites      Favorite[]
+}
+
+model Favorite {
+  id              String        @id @default(cuid())
+  title           String
+  content         String
+  type            FavoriteType
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+  conversationId  String?
+  conversation    Conversation? @relation(fields: [conversationId], references: [id])
+}
+
+model TranslationRecord {
+  id              String   @id @default(cuid())
+  sourceLanguage  String
+  targetLanguage  String
+  sourceText      String
+  translatedText  String
+  romanization    String?
+  cultureNote     String?
+  createdAt       DateTime @default(now())
+}

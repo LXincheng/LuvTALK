@@ -1,131 +1,81 @@
-/* For information on how to create your own theme, please refer to:
-http://ionicframework.com/docs/theming/ */
+/* Ionic Theme overrides tailored for the Apple-inspired palette */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
+  --ion-font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  --app-surface: rgba(255, 255, 255, 0.95);
+  --app-border: rgba(15, 23, 42, 0.08);
+  --app-radius: 24px;
+
   /** primary **/
-  --ion-color-primary: #3880ff;
-  --ion-color-primary-rgb: 56, 128, 255;
+  --ion-color-primary: #5a63ff;
+  --ion-color-primary-rgb: 90, 99, 255;
   --ion-color-primary-contrast: #ffffff;
   --ion-color-primary-contrast-rgb: 255, 255, 255;
-  --ion-color-primary-shade: #3171e0;
-  --ion-color-primary-tint: #4c8dff;
+  --ion-color-primary-shade: #4f57e0;
+  --ion-color-primary-tint: #6b73ff;
 
   /** secondary **/
-  --ion-color-secondary: #3dc2ff;
-  --ion-color-secondary-rgb: 61, 194, 255;
+  --ion-color-secondary: #8dd8ff;
+  --ion-color-secondary-rgb: 141, 216, 255;
   --ion-color-secondary-contrast: #ffffff;
   --ion-color-secondary-contrast-rgb: 255, 255, 255;
-  --ion-color-secondary-shade: #36abe0;
-  --ion-color-secondary-tint: #50c8ff;
+  --ion-color-secondary-shade: #7cc0e0;
+  --ion-color-secondary-tint: #9fe0ff;
 
   /** tertiary **/
-  --ion-color-tertiary: #5260ff;
-  --ion-color-tertiary-rgb: 82, 96, 255;
+  --ion-color-tertiary: #f4aaff;
+  --ion-color-tertiary-rgb: 244, 170, 255;
   --ion-color-tertiary-contrast: #ffffff;
   --ion-color-tertiary-contrast-rgb: 255, 255, 255;
-  --ion-color-tertiary-shade: #4854e0;
-  --ion-color-tertiary-tint: #6370ff;
+  --ion-color-tertiary-shade: #d797e0;
+  --ion-color-tertiary-tint: #f5b5ff;
 
   /** success **/
-  --ion-color-success: #2dd36f;
-  --ion-color-success-rgb: 45, 211, 111;
+  --ion-color-success: #30d158;
+  --ion-color-success-rgb: 48, 209, 88;
   --ion-color-success-contrast: #ffffff;
   --ion-color-success-contrast-rgb: 255, 255, 255;
-  --ion-color-success-shade: #28ba62;
-  --ion-color-success-tint: #42d77d;
+  --ion-color-success-shade: #2ab84d;
+  --ion-color-success-tint: #45d86a;
 
   /** warning **/
-  --ion-color-warning: #ffc409;
-  --ion-color-warning-rgb: 255, 196, 9;
+  --ion-color-warning: #ffd60a;
+  --ion-color-warning-rgb: 255, 214, 10;
   --ion-color-warning-contrast: #000000;
   --ion-color-warning-contrast-rgb: 0, 0, 0;
-  --ion-color-warning-shade: #e0ac08;
-  --ion-color-warning-tint: #ffca22;
+  --ion-color-warning-shade: #e0bc09;
+  --ion-color-warning-tint: #ffda29;
 
   /** danger **/
-  --ion-color-danger: #eb445a;
-  --ion-color-danger-rgb: 235, 68, 90;
+  --ion-color-danger: #ff3b30;
+  --ion-color-danger-rgb: 255, 59, 48;
   --ion-color-danger-contrast: #ffffff;
   --ion-color-danger-contrast-rgb: 255, 255, 255;
-  --ion-color-danger-shade: #cf3c4f;
-  --ion-color-danger-tint: #ed576b;
+  --ion-color-danger-shade: #e0342a;
+  --ion-color-danger-tint: #ff4f45;
 
   /** dark **/
-  --ion-color-dark: #222428;
-  --ion-color-dark-rgb: 34, 36, 40;
+  --ion-color-dark: #0f172a;
+  --ion-color-dark-rgb: 15, 23, 42;
   --ion-color-dark-contrast: #ffffff;
   --ion-color-dark-contrast-rgb: 255, 255, 255;
-  --ion-color-dark-shade: #1e2023;
-  --ion-color-dark-tint: #383a3e;
+  --ion-color-dark-shade: #0d1424;
+  --ion-color-dark-tint: #222b3d;
 
   /** medium **/
-  --ion-color-medium: #92949c;
-  --ion-color-medium-rgb: 146, 148, 156;
+  --ion-color-medium: #8c97b9;
+  --ion-color-medium-rgb: 140, 151, 185;
   --ion-color-medium-contrast: #ffffff;
   --ion-color-medium-contrast-rgb: 255, 255, 255;
-  --ion-color-medium-shade: #808289;
-  --ion-color-medium-tint: #9d9fa6;
+  --ion-color-medium-shade: #7a83a1;
+  --ion-color-medium-tint: #99a4c1;
 
   /** light **/
-  --ion-color-light: #f4f5f8;
-  --ion-color-light-rgb: 244, 245, 248;
+  --ion-color-light: #f6f7fb;
+  --ion-color-light-rgb: 246, 247, 251;
   --ion-color-light-contrast: #000000;
   --ion-color-light-contrast-rgb: 0, 0, 0;
-  --ion-color-light-shade: #d7d8da;
-  --ion-color-light-tint: #f5f6f9;
-}
-
-/*
-   * Dark Colors
-   * -------------------------------------------
-   */
-
-body.ion-palette-dark {
-  --ion-color-primary: #42a5f5;
-  --ion-color-primary-rgb: 66, 165, 245;
-  --ion-color-primary-contrast: #000000;
-  --ion-color-primary-contrast-rgb: 0, 0, 0;
-  --ion-color-primary-shade: #3a92d7;
-  --ion-color-primary-tint: #55aff6;
-
-  --ion-color-secondary: #50c8ff;
-  --ion-color-secondary-rgb: 80, 200, 255;
-  --ion-color-secondary-contrast: #000000;
-  --ion-color-secondary-contrast-rgb: 0, 0, 0;
-  --ion-color-secondary-shade: #46b0e0;
-  --ion-color-secondary-tint: #62ceff;
-
-  --ion-color-tertiary: #6a64ff;
-  --ion-color-tertiary-rgb: 106, 100, 255;
-  --ion-color-tertiary-contrast: #ffffff;
-  --ion-color-tertiary-contrast-rgb: 255, 255, 255;
-  --ion-color-tertiary-shade: #5d58e0;
-  --ion-color-tertiary-tint: #7974ff;
-
-  --ion-color-success: #2fdf75;
-  --ion-color-warning: #ffd534;
-  --ion-color-danger: #ff4961;
-
-  --ion-color-dark: #f4f5f8;
-  --ion-color-medium: #989aa2;
-  --ion-color-light: #222428;
-
-  /**
-   * Set the background and text colors for the entire app
-   */
-  --ion-background-color: #121212;
-  --ion-background-color-rgb: 18,18,18;
-
-  --ion-text-color: #ffffff;
-  --ion-text-color-rgb: 255,255,255;
-
-  /**
-   * Set the background for specific components in dark mode to make them stand out.
-   * #1e1e1e is a slightly lighter grey than the main background, creating a sense of elevation.
-   */
-  --ion-toolbar-background: #1e1e1e;
-
-  ion-card {
-    --background: #1e1e1e;
-  }
+  --ion-color-light-shade: #d7d9e0;
+  --ion-color-light-tint: #f7f8fc;
 }
