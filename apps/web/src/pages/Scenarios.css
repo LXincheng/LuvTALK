@@ -1,0 +1,10 @@
+ion-card {
+  cursor: pointer;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  height: 95%; /* Make cards in the same row have a similar height */
+}
+
+ion-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--ion-color-primary-tint) 0px 4px 16px, var(--ion-color-primary-shade) 0px 8px 24px, var(--ion-color-primary) 0px 16px 56px;
+}
