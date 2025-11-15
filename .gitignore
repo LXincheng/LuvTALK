@@ -1,0 +1,25 @@
+# 操作系统
+.DS_Store
+*.local
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 缓存和产物
+.turbo/
+dist/
+build/
+coverage/
+
+# 环境变量
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
