@@ -1,8 +1,8 @@
 /* Ionic Theme overrides tailored for the Apple-inspired palette */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&display=swap');
 
 :root {
-  --ion-font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  --ion-font-family: 'Inter', 'Noto Sans SC', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --app-surface: rgba(255, 255, 255, 0.95);
   --app-border: rgba(15, 23, 42, 0.08);
   --app-radius: 24px;
@@ -78,4 +78,13 @@
   --ion-color-light-contrast-rgb: 0, 0, 0;
   --ion-color-light-shade: #d7d9e0;
   --ion-color-light-tint: #f7f8fc;
+}
+
+body.ion-palette-dark {
+  --app-surface: rgba(22, 28, 43, 0.92);
+  --app-border: rgba(255, 255, 255, 0.09);
+  --ion-color-dark: #f8fafc;
+  --ion-color-dark-contrast: #0f172a;
+  --ion-background-color: #0b1221;
+  --ion-text-color: #f8fafc;
 }

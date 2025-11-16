@@ -1,9 +1,12 @@
 import { IonIcon } from '@ionic/react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import './AppDock.css';
+import { LocaleKey, useLocale } from '../../shared/i18n/LocaleProvider';
+
+type DockLabelKey = Extract<LocaleKey, 'navConversation' | 'navFavorites'>;
 
 export interface DockItem {
-  label: string;
+  labelKey: DockLabelKey;
   icon: string;
   href: string;
 }
@@ -14,20 +17,27 @@ interface AppDockProps {
 }
 
 const AppDock: React.FC<AppDockProps> = ({ items, active }) => {
+  const location = useLocation();
+  const { t } = useLocale();
+
   return (
     <nav className="app-dock" aria-label="Primary navigation">
       <div className="app-dock-shell">
-        {items.map(item => (
-          <Link
-            key={item.label}
-            to={item.href}
-            aria-label={item.label}
-            aria-current={active === item.href ? 'page' : undefined}
-            className={`app-dock-button ${active === item.href ? 'app-dock-button-active' : ''}`}
-          >
-            <IonIcon icon={item.icon} />
-          </Link>
-        ))}
+        {items.map(item => {
+          const isActive = (active ?? location.pathname) === item.href;
+          return (
+            <Link
+              key={item.href}
+              to={item.href}
+              aria-label={t(item.labelKey)}
+              aria-current={isActive ? 'page' : undefined}
+              className={`app-dock-button ${isActive ? 'app-dock-button-active' : ''}`}
+            >
+              <IonIcon icon={item.icon} />
+              <span>{t(item.labelKey)}</span>
+            </Link>
+          );
+        })}
       </div>
     </nav>
   );

@@ -7,59 +7,63 @@ import {
   IonHeader,
   IonIcon,
   IonPage,
+  IonPopover,
   IonSpinner,
   IonText,
   IonTextarea,
-  IonTitle,
   IonToolbar,
 } from '@ionic/react';
-import { bookmarkOutline, chatbubbleEllipsesOutline, micOutline, sendOutline } from 'ionicons/icons';
-import React, { useEffect, useMemo, useState } from 'react';
+import {
+  bookmarkOutline,
+  bookOutline,
+  chevronDownOutline,
+  micOutline,
+  sendOutline,
+  sparklesOutline,
+} from 'ionicons/icons';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router';
-import AppDock from '../../components/navigation/AppDock';
+import AppDock, { DockItem } from '../../components/navigation/AppDock';
 import ThemeToggle from '../../components/ThemeToggle';
 import { useAppStore } from '../../store/useAppStore';
 import { ConversationMessage } from '../../types/api';
-import { LANGUAGE_LABELS, LanguageCode } from '../../types/language';
+import { LANGUAGE_LABELS, LanguageCode, UI_LANGUAGE_LABELS, UiLanguage, UI_LANGUAGE_TO_NATIVE } from '../../types/language';
+import { useLocale } from '../../shared/i18n/LocaleProvider';
+import { SCENARIO_IDS, SCENARIO_LABELS, ScenarioId } from '../../shared/constants/scenarios';
 import './Conversation.css';
 
-const scenarioOptions = [
-  { id: 'daily', label: '日常' },
-  { id: 'restaurant', label: '餐厅' },
-  { id: 'shopping', label: '购物' },
-  { id: 'directions', label: '问路' },
+const dockItems: DockItem[] = [
+  { labelKey: 'navConversation', icon: sparklesOutline, href: '/' },
+  { labelKey: 'navFavorites', icon: bookOutline, href: '/favorites' },
 ];
 
-const languageOptions: { id: LanguageCode; label: string }[] = [
-  { id: 'cantonese', label: '粤语' },
-  { id: 'mandarin', label: '普通话' },
-  { id: 'english', label: 'English' },
-];
+const learningLanguageOrder: LanguageCode[] = ['cantonese', 'english', 'mandarin'];
 
-const dockItems = [
-  { label: 'AI 问答', icon: chatbubbleEllipsesOutline, href: '/' },
-  { label: '收藏夹', icon: bookmarkOutline, href: '/favorites' },
-];
+const ensureScenario = (value?: string): ScenarioId =>
+  SCENARIO_IDS.includes(value as ScenarioId) ? (value as ScenarioId) : 'daily';
 
 const ConversationPage: React.FC = () => {
-  const { scenarioId } = useParams<{ scenarioId?: string }>();
+  const { scenarioId } = useParams<{ scenarioId?: ScenarioId }>();
   const location = useLocation();
+  const { uiLanguage, setUiLanguage, t } = useLocale();
   const conversation = useAppStore(state => state.conversation);
   const favorites = useAppStore(state => state.favorites);
 
-  const languageOrder: LanguageCode[] = ['cantonese', 'english', 'mandarin'];
-  const [language, setLanguage] = useState<LanguageCode>(languageOrder[0]);
-  const [activeScenario, setActiveScenario] = useState(scenarioId ?? 'daily');
+  const [learningLanguage, setLearningLanguage] = useState<LanguageCode>(learningLanguageOrder[0]);
+  const [activeScenario, setActiveScenario] = useState<ScenarioId>(ensureScenario(scenarioId));
   const [input, setInput] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [languagePopoverEvent, setLanguagePopoverEvent] = useState<MouseEvent | undefined>(undefined);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setActiveScenario(scenarioId ?? 'daily');
+    setActiveScenario(ensureScenario(scenarioId));
   }, [scenarioId]);
 
   useEffect(() => {
-    conversation.start({ scenarioId: activeScenario, targetLanguage: language });
-  }, [activeScenario, language]);
+    const nativeLanguage = UI_LANGUAGE_TO_NATIVE[uiLanguage];
+    conversation.start({ scenarioId: activeScenario, targetLanguage: learningLanguage, nativeLanguage });
+  }, [activeScenario, learningLanguage, uiLanguage]);
 
   useEffect(() => {
     if (!favorites.items.length) {
@@ -68,6 +72,7 @@ const ConversationPage: React.FC = () => {
   }, []);
 
   const session = conversation.session;
+  const messagesCount = session?.messages.length ?? 0;
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -77,18 +82,11 @@ const ConversationPage: React.FC = () => {
 
   const handleFavorite = async (message: ConversationMessage) => {
     await favorites.add({
-      title: message.sender === 'ai' ? 'AI 回复' : '我的表达',
+      title: message.sender === 'ai' ? 'AI Reply' : 'Learner Note',
       content: message.text,
       type: message.sender === 'ai' ? 'cultural' : 'phrase',
       metadata: { language: message.language, scenario: activeScenario },
     });
-  };
-
-  const coachNotes = useMemo(() => session?.coach, [session]);
-
-  const cycleLanguage = () => {
-    const index = languageOrder.indexOf(language);
-    setLanguage(languageOrder[(index + 1) % languageOrder.length]);
   };
 
   const handleMicrophone = () => {
@@ -96,12 +94,40 @@ const ConversationPage: React.FC = () => {
     if (!isRecording) {
       setTimeout(() => {
         setIsRecording(false);
-        setInput('我想练习点餐对话');
+        setInput(t('conversationMicSeedText'));
       }, 1800);
     }
   };
 
+  useEffect(() => {
+    if (!messagesContainerRef.current) {
+      return;
+    }
+    messagesContainerRef.current.scrollTo({
+      top: messagesContainerRef.current.scrollHeight,
+      behavior: 'smooth',
+    });
+  }, [messagesCount]);
+
   const activeDock = location.pathname.startsWith('/favorites') ? '/favorites' : '/';
+  const scenarioName = SCENARIO_LABELS[uiLanguage][activeScenario];
+  const uiLanguageLabel = UI_LANGUAGE_LABELS[uiLanguage];
+  const learningLanguageLabel = LANGUAGE_LABELS[uiLanguage][learningLanguage];
+
+  const openLanguageMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setLanguagePopoverEvent(event.nativeEvent);
+  };
+
+  const handleLanguageSelect = (language: LanguageCode) => {
+    setLearningLanguage(language);
+    setLanguagePopoverEvent(undefined);
+  };
+
+  const handleUiLanguageSelect = (language: UiLanguage) => {
+    setUiLanguage(language);
+    setLanguagePopoverEvent(undefined);
+  };
 
   return (
     <IonPage className="conversation-page">
@@ -109,87 +135,121 @@ const ConversationPage: React.FC = () => {
         <IonToolbar className="conversation-toolbar">
           <div className="conversation-brand">
             <span className="brand-pill">LuvTALK</span>
-            <IonButton size="small" fill="clear" onClick={cycleLanguage}>
-              {LANGUAGE_LABELS[language]}
-            </IonButton>
+            <button className="language-menu-trigger" type="button" onClick={openLanguageMenu}>
+              <span>{t('conversationLanguageHeading')}</span>
+              <strong>
+                {learningLanguageLabel} · {uiLanguageLabel}
+              </strong>
+              <IonIcon icon={chevronDownOutline} />
+            </button>
           </div>
           <IonButtons slot="end">
             <ThemeToggle />
           </IonButtons>
         </IonToolbar>
       </IonHeader>
+      <IonPopover
+        isOpen={Boolean(languagePopoverEvent)}
+        event={languagePopoverEvent}
+        onDidDismiss={() => setLanguagePopoverEvent(undefined)}
+        arrow={false}
+        className="language-menu-popover"
+      >
+        <div className="language-menu">
+          <section>
+            <p>{t('conversationUiLanguageLabel')}</p>
+            <div className="language-menu-options">
+              {(['zh', 'en'] as UiLanguage[]).map(option => (
+                <button
+                  key={option}
+                  type="button"
+                  className={uiLanguage === option ? 'active' : ''}
+                  onClick={() => handleUiLanguageSelect(option)}
+                >
+                  <span>{UI_LANGUAGE_LABELS[option]}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <p>{t('conversationLanguageHeading')}</p>
+            <div className="language-menu-options">
+              {learningLanguageOrder.map(option => (
+                <button
+                  key={option}
+                  type="button"
+                  className={learningLanguage === option ? 'active' : ''}
+                  onClick={() => handleLanguageSelect(option)}
+                >
+                  <span>{LANGUAGE_LABELS[uiLanguage][option]}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      </IonPopover>
       <IonContent fullscreen className="conversation-content">
-        <section className="conversation-panel">
-          <header>
-            <div>
-              <p>目标场景</p>
-              <strong>{scenarioOptions.find(option => option.id === activeScenario)?.label}</strong>
-            </div>
-          </header>
-          <div className="conversation-presets" role="tablist">
-            {scenarioOptions.map(option => (
-              <IonChip
-                key={option.id}
-                color={activeScenario === option.id ? 'primary' : 'medium'}
-                onClick={() => setActiveScenario(option.id)}
-              >
-                {option.label}
-              </IonChip>
-            ))}
-          </div>
-          <div className="language-chip-row" aria-label="选择目标语言">
-            {languageOptions.map(option => (
-              <IonChip
-                key={option.id}
-                color={language === option.id ? 'primary' : 'medium'}
-                onClick={() => setLanguage(option.id)}
-              >
-                {option.label}
-              </IonChip>
-            ))}
-          </div>
-          {coachNotes && (
-            <div className="conversation-coach-card">
-              <div className="coach-score">
-                <span>评分</span>
-                <strong>{coachNotes.overallScore}</strong>
+        <div className="conversation-layout">
+          <section className="conversation-stream-card">
+            <div className="conversation-controls">
+              <div>
+                <p>{t('conversationScenarioHeading')}</p>
+                <strong>{scenarioName}</strong>
               </div>
-              <div className="coach-details">
-                {coachNotes.correction && <p>{coachNotes.correction}</p>}
-                {coachNotes.cultureNote && <p>{coachNotes.cultureNote}</p>}
+              <div className="conversation-presets" role="tablist" aria-label={t('conversationScenarioAria')}>
+                {SCENARIO_IDS.map(option => (
+                  <IonChip
+                    key={option}
+                    color={activeScenario === option ? 'primary' : 'medium'}
+                    onClick={() => setActiveScenario(option)}
+                  >
+                    {SCENARIO_LABELS[uiLanguage][option]}
+                  </IonChip>
+                ))}
               </div>
             </div>
-          )}
-        </section>
 
-        {conversation.loading && !session && (
-          <div className="conversation-loading">
-            <IonSpinner name="crescent" />
-            <p>AI 正在准备场景…</p>
-          </div>
-        )}
-
-        <div className="conversation-messages">
-          {session?.messages.map(message => (
-            <article key={message.id} className={`message-row message-${message.sender}`}>
-              <img src={message.avatar} alt={`${message.senderName} avatar`} className="message-avatar" />
-              <div className="message-bubble">
-                <div className="message-header">
-                  <strong>{message.senderName}</strong>
-                  <IonText color="medium">
-                    {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </IonText>
-                </div>
-                <p>{message.text}</p>
-                <div className="message-meta">
-                  {message.meta?.score && <span>得分 {message.meta.score}</span>}
-                  <IonButton fill="clear" size="small" onClick={() => handleFavorite(message)} title="收藏此内容">
-                    <IonIcon icon={bookmarkOutline} />
-                  </IonButton>
-                </div>
+            {conversation.loading && !session && (
+              <div className="conversation-loading">
+                <IonSpinner name="crescent" />
+                <p>{t('conversationLoading')}</p>
               </div>
-            </article>
-          ))}
+            )}
+
+            <div className="conversation-messages" ref={messagesContainerRef}>
+              {session?.messages.map(message => (
+                <article key={message.id} className={`message-row message-${message.sender}`}>
+                  <img src={message.avatar} alt={`${message.senderName} avatar`} className="message-avatar" />
+                  <div className="message-bubble">
+                    <div className="message-header">
+                      <strong>{message.senderName}</strong>
+                      <IonText color="medium">
+                        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </IonText>
+                    </div>
+                    <p>{message.text}</p>
+                    <div className="message-meta">
+                      {message.meta?.score && (
+                        <span className="message-score">
+                          <IonIcon icon={sparklesOutline} />
+                          {message.meta.score}
+                          {message.meta.scoreReason ? ` · ${message.meta.scoreReason}` : ''}
+                        </span>
+                      )}
+                      <IonButton
+                        fill="clear"
+                        size="small"
+                        onClick={() => handleFavorite(message)}
+                        title={t('conversationFavoriteButton')}
+                      >
+                        <IonIcon icon={bookmarkOutline} />
+                      </IonButton>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
         </div>
       </IonContent>
       <IonFooter>
@@ -199,7 +259,7 @@ const ConversationPage: React.FC = () => {
               autoGrow
               rows={1}
               value={input}
-              placeholder="输入或长按语音按钮开始说话…"
+              placeholder={t('conversationInputPlaceholder')}
               onIonChange={event => setInput(event.detail.value ?? '')}
             />
             <div className="conversation-input-actions">

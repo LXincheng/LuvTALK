@@ -1,7 +1,7 @@
-import { FavoriteTypeEnum } from '../enums/favorite-type.enum';
-import { LanguageCode } from '../enums/language-code.enum';
+import { FavoriteTypeEnum } from "../enums/favorite-type.enum";
+import { LanguageCode } from "../enums/language-code.enum";
 
-export type MessageSender = 'user' | 'ai';
+export type MessageSender = "user" | "ai";
 
 export interface ConversationMessage {
   id: string;
@@ -13,6 +13,7 @@ export interface ConversationMessage {
   avatar?: string;
   meta?: {
     score?: number;
+    scoreReason?: string;
     translation?: string;
     audioUrl?: string;
   };
@@ -29,6 +30,7 @@ export interface ConversationSession {
   id: string;
   scenarioId: string;
   targetLanguage: LanguageCode;
+  nativeLanguage?: LanguageCode;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];

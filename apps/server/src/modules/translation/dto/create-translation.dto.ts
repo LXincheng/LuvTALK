@@ -1,5 +1,5 @@
-import { IsEnum, IsString, MinLength } from 'class-validator';
-import { LanguageCode } from '../../../common/enums/language-code.enum';
+import { IsEnum, IsString, MinLength } from "class-validator";
+import { LanguageCode } from "../../../common/enums/language-code.enum";
 
 export class CreateTranslationDto {
   @IsEnum(LanguageCode)

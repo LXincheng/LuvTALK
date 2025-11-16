@@ -1,12 +1,13 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import "./common/config/load-env";
+import { Logger, ValidationPipe } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });
-  const logger = new Logger('Bootstrap');
+  const logger = new Logger("Bootstrap");
 
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix("api");
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
@@ -23,4 +24,4 @@ async function bootstrap() {
   await app.listen(port);
   logger.log(`API listening on http://localhost:${port}/api/health`);
 }
-bootstrap();
+void bootstrap();

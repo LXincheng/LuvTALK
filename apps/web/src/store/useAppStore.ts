@@ -1,15 +1,27 @@
-import { create } from 'zustand';
-import { FavoriteItem, ConversationSession } from '../types/api';
-import { LanguageCode } from '../types/language';
-import { createFavorite, fetchFavorites, FavoritePayload, removeFavorite } from '../services/favoritesService';
-import { sendConversationMessage, startConversation } from '../services/conversationService';
+﻿import { create } from "zustand";
+import { FavoriteItem, ConversationSession } from "../types/api";
+import { LanguageCode } from "../types/language";
+import {
+  createFavorite,
+  fetchFavorites,
+  FavoritePayload,
+  removeFavorite,
+} from "../services/favoritesService";
+import {
+  sendConversationMessage,
+  startConversation,
+} from "../services/conversationService";
 
 interface ConversationSlice {
   session?: ConversationSession;
   scenarioId?: string;
   loading: boolean;
   error?: string;
-  start: (params: { scenarioId?: string; targetLanguage: LanguageCode }) => Promise<void>;
+  start: (params: {
+    scenarioId?: string;
+    targetLanguage: LanguageCode;
+    nativeLanguage?: LanguageCode;
+  }) => Promise<void>;
   send: (message: string) => Promise<void>;
   reset: () => void;
 }
@@ -34,11 +46,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     scenarioId: undefined,
     loading: false,
     error: undefined,
-    async start({ scenarioId, targetLanguage }) {
-      set(state => ({ conversation: { ...state.conversation, loading: true, error: undefined } }));
+    async start({ scenarioId, targetLanguage, nativeLanguage }) {
+      set((state) => ({
+        conversation: {
+          ...state.conversation,
+          loading: true,
+          error: undefined,
+        },
+      }));
       try {
-        const session = await startConversation({ scenarioId, targetLanguage });
-        set(state => ({
+        const session = await startConversation({
+          scenarioId,
+          targetLanguage,
+          nativeLanguage,
+        });
+        set((state) => ({
           conversation: {
             ...state.conversation,
             loading: false,
@@ -47,11 +69,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           },
         }));
       } catch (error) {
-        set(state => ({
+        set((state) => ({
           conversation: {
             ...state.conversation,
             loading: false,
-            error: error instanceof Error ? error.message : '会话启动失败',
+            error: error instanceof Error ? error.message : "开始会话失败",
           },
         }));
       }
@@ -61,25 +83,39 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!session || !message.trim()) {
         return;
       }
-      set(state => ({ conversation: { ...state.conversation, loading: true, error: undefined } }));
+      set((state) => ({
+        conversation: {
+          ...state.conversation,
+          loading: true,
+          error: undefined,
+        },
+      }));
       try {
         const updated = await sendConversationMessage(session.id, message);
-        set(state => ({
-          conversation: { ...state.conversation, loading: false, session: updated },
-        }));
-      } catch (error) {
-        set(state => ({
+        set((state) => ({
           conversation: {
             ...state.conversation,
             loading: false,
-            error: error instanceof Error ? error.message : '发送失败',
+            session: updated,
+          },
+        }));
+      } catch (error) {
+        set((state) => ({
+          conversation: {
+            ...state.conversation,
+            loading: false,
+            error: error instanceof Error ? error.message : "发送消息失败",
           },
         }));
       }
     },
     reset: () =>
-      set(state => ({
-        conversation: { ...state.conversation, session: undefined, scenarioId: undefined },
+      set((state) => ({
+        conversation: {
+          ...state.conversation,
+          session: undefined,
+          scenarioId: undefined,
+        },
       })),
   },
   favorites: {
@@ -87,38 +123,47 @@ export const useAppStore = create<AppState>((set, get) => ({
     loading: false,
     error: undefined,
     async load() {
-      set(state => ({ favorites: { ...state.favorites, loading: true, error: undefined } }));
+      set((state) => ({
+        favorites: { ...state.favorites, loading: true, error: undefined },
+      }));
       try {
         const items = await fetchFavorites();
-        set(state => ({ favorites: { ...state.favorites, loading: false, items } }));
+        set((state) => ({
+          favorites: { ...state.favorites, loading: false, items },
+        }));
       } catch (error) {
-        set(state => ({
+        set((state) => ({
           favorites: {
             ...state.favorites,
             loading: false,
-            error: error instanceof Error ? error.message : '无法加载收藏',
+            error: error instanceof Error ? error.message : "加载收藏失败",
           },
         }));
       }
     },
     async add(payload) {
-      set(state => ({ favorites: { ...state.favorites, loading: true, error: undefined } }));
+      set((state) => ({
+        favorites: { ...state.favorites, loading: true, error: undefined },
+      }));
       try {
         const created = await createFavorite(payload);
-        set(state => ({
+        set((state) => ({
           favorites: {
             ...state.favorites,
             loading: false,
-            items: [created, ...state.favorites.items.filter(item => item.id !== created.id)],
+            items: [
+              created,
+              ...state.favorites.items.filter((item) => item.id !== created.id),
+            ],
           },
         }));
         return created;
       } catch (error) {
-        set(state => ({
+        set((state) => ({
           favorites: {
             ...state.favorites,
             loading: false,
-            error: error instanceof Error ? error.message : '收藏失败',
+            error: error instanceof Error ? error.message : "添加收藏失败",
           },
         }));
         return undefined;
@@ -126,13 +171,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     },
     async remove(id) {
       const { items } = get().favorites;
-      set(state => ({
-        favorites: { ...state.favorites, items: items.filter(item => item.id !== id) },
+      set((state) => ({
+        favorites: {
+          ...state.favorites,
+          items: items.filter((item) => item.id !== id),
+        },
       }));
       try {
         await removeFavorite(id);
       } catch (error) {
-        console.warn('Failed to remove favorite', error);
+        console.warn("Failed to remove favorite", error);
       }
     },
   },

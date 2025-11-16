@@ -1,5 +1,12 @@
-import { IsBoolean, IsEnum, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
-import { FavoriteTypeEnum } from '../../../common/enums/favorite-type.enum';
+import {
+  IsBoolean,
+  IsEnum,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
+import { FavoriteTypeEnum } from "../../../common/enums/favorite-type.enum";
 
 export class CreateFavoriteDto {
   @IsString()

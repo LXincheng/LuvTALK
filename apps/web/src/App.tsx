@@ -4,6 +4,8 @@ import { IonReactRouter } from "@ionic/react-router";
 import ConversationPage from "./pages/Conversation";
 import FavoritesPage from "./pages/Favorites";
 import { ThemeProvider } from "./hooks/useTheme";
+import { LocaleProvider } from "./shared/i18n/LocaleProvider";
+import { fadePageTransition } from "./shared/transitions/fade";
 /* Core CSS required for Ionic components to work properly */
 import "@ionic/react/css/core.css";
 
@@ -37,18 +39,20 @@ setupIonicReact();
 
 const App: React.FC = () => {
   return (
-    <ThemeProvider>
-      <IonApp>
-        <IonReactRouter>
-          <IonRouterOutlet>
-            <Route exact path="/" component={ConversationPage} />
-            <Route exact path="/conversation/:scenarioId?" component={ConversationPage} />
-            <Route exact path="/favorites" component={FavoritesPage} />
-            <Redirect to="/" />
-          </IonRouterOutlet>
-        </IonReactRouter>
-      </IonApp>
-    </ThemeProvider>
+    <LocaleProvider>
+      <ThemeProvider>
+        <IonApp>
+          <IonReactRouter>
+            <IonRouterOutlet animation={fadePageTransition}>
+              <Route exact path="/" component={ConversationPage} />
+              <Route exact path="/conversation/:scenarioId?" component={ConversationPage} />
+              <Route exact path="/favorites" component={FavoritesPage} />
+              <Redirect to="/" />
+            </IonRouterOutlet>
+          </IonReactRouter>
+        </IonApp>
+      </ThemeProvider>
+    </LocaleProvider>
   );
 };
 
