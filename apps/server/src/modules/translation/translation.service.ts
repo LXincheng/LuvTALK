@@ -1,20 +1,25 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { envConfig } from "../../common/config/env.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { TranslationRecord } from "../../common/types/conversation.types";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { CreateTranslationDto } from "./dto/create-translation.dto";
+
+const DEFAULT_MODEL = "deepseek-chat";
+const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
 @Injectable()
 export class TranslationService {
   private readonly logger = new Logger(TranslationService.name);
   private readonly history: TranslationRecord[] = [];
   private readonly dictionary = this.buildDictionary();
+  private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
 
   constructor(private readonly prisma: PrismaService) {}
 
   async translate(dto: CreateTranslationDto): Promise<TranslationRecord> {
-    const translated = this.performTranslation(
+    const translated = await this.performTranslation(
       dto.text,
       dto.sourceLanguage,
       dto.targetLanguage,
@@ -32,7 +37,7 @@ export class TranslationService {
     };
 
     this.history.unshift(record);
-    this.history.splice(8); // keep last 8
+    this.history.splice(8);
 
     if (this.prisma.canUseDatabase()) {
       await this.prisma.translationRecord.create({
@@ -55,7 +60,7 @@ export class TranslationService {
     return this.history;
   }
 
-  private performTranslation(
+  private async performTranslation(
     text: string,
     sourceLanguage: LanguageCode,
     targetLanguage: LanguageCode,
@@ -86,20 +91,31 @@ export class TranslationService {
     this.logger.debug(
       `Dictionary miss for text "${normalized}", synthesizing translation.`,
     );
+    const aiTranslation = await this.requestAiTranslation(
+      normalized,
+      sourceLanguage,
+      targetLanguage,
+    );
+    if (aiTranslation) {
+      return {
+        text: aiTranslation,
+        romanization: this.toRomanization(aiTranslation, targetLanguage),
+        cultureNote: "AI 翻译结果，供快速理解使用。",
+        variations: [],
+      };
+    }
+
     return {
-      text: `${normalized} (${targetLanguage})`,
+      text: normalized,
       romanization: this.toRomanization(normalized, targetLanguage),
-      cultureNote: "AI 生成的表达，适合日常交流。",
-      variations: [
-        { label: "Formal", text: `${normalized}，请多指教。` },
-        { label: "Casual", text: `${normalized}!` },
-      ],
+      cultureNote: "暂未取得翻译，保留原文。",
+      variations: [],
     };
   }
 
   private toRomanization(text: string, target: LanguageCode): string {
     if (target === LanguageCode.Cantonese) {
-      return "nei5 hou2"; // placeholder
+      return "nei5 hou2";
     }
     if (target === LanguageCode.Mandarin) {
       return "nǐ hǎo";
@@ -109,7 +125,7 @@ export class TranslationService {
 
   private buildDictionary() {
     return {
-      你好: {
+      "你好": {
         mandarin: "你好",
         cantonese: "你好",
         english: "Hello",
@@ -134,16 +150,16 @@ export class TranslationService {
           ],
         },
       },
-      謝謝: {
-        mandarin: "谢谢你",
-        cantonese: "多謝晒",
+      "谢谢": {
+        mandarin: "谢谢",
+        cantonese: "多谢晒",
         english: "Thank you so much",
         romanization: {
           mandarin: "xiè xiè nǐ",
           cantonese: "do1 ze6 saai3",
           english: "thank you",
         },
-        cultureNote: "粤语中常在感谢后补一句「唔使客气」。",
+        cultureNote: "粤语中常在感谢后补一句“唔使客气”。",
         variations: {
           mandarin: [
             { label: "口语", text: "太感谢啦！" },
@@ -173,5 +189,88 @@ export class TranslationService {
         >;
       }
     >;
+  }
+
+  private async requestAiTranslation(
+    text: string,
+    sourceLanguage: LanguageCode,
+    targetLanguage: LanguageCode,
+  ): Promise<string | undefined> {
+    const apiKey =
+      envConfig.deepseek.apiKey ||
+      process.env.DEEPSEEK_API_KEY ||
+      process.env.DS_AI_API_KEY;
+    if (!apiKey) {
+      return undefined;
+    }
+
+    const body = {
+      model:
+        envConfig.deepseek.model ||
+        process.env.DS_AI_MODEL ||
+        DEFAULT_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a helpful translation assistant. Respond with only the translated sentence.",
+        },
+        {
+          role: "user",
+          content: `Translate the following text from ${this.describeLanguage(sourceLanguage)} to ${this.describeLanguage(targetLanguage)}:\n"""${text}"""`,
+        },
+      ],
+      temperature: 0.2,
+      stream: false,
+    };
+
+    const response = await fetch(this.deepSeekEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      this.logger.warn(
+        `DeepSeek translation request failed (${response.status})`,
+      );
+      return undefined;
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return data.choices?.[0]?.message?.content?.trim() || undefined;
+  }
+
+  private describeLanguage(language: LanguageCode): string {
+    switch (language) {
+      case LanguageCode.Cantonese:
+        return "Cantonese Chinese";
+      case LanguageCode.Mandarin:
+        return "Mandarin Chinese";
+      case LanguageCode.English:
+        return "English";
+      default:
+        return language;
+    }
+  }
+
+  private resolveDeepSeekEndpoint(): string {
+    const raw =
+      envConfig.deepseek.apiUrl ||
+      process.env.DS_AI_API_URL ||
+      DEFAULT_BASE_URL;
+    const normalized = raw.replace(/\/$/, "");
+    if (normalized.endsWith("/chat/completions")) {
+      return normalized;
+    }
+    if (normalized.endsWith("/v1")) {
+      return `${normalized}/chat/completions`;
+    }
+    return `${normalized}/v1/chat/completions`;
   }
 }

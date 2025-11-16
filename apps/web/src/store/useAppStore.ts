@@ -41,6 +41,69 @@ interface AppState {
   favorites: FavoritesSlice;
 }
 
+const seedFavorites: FavoriteItem[] = [
+  {
+    id: 'seed-1',
+    type: 'cultural',
+    title: '问路礼貌开场',
+    content: '请问一下，最近的地铁站怎么走？',
+    metadata: { language: 'mandarin', scenario: 'directions' },
+    createdAt: new Date().toISOString(),
+    avatar: '/favicon.png',
+    authorName: 'AI Tutor',
+  },
+  {
+    id: 'seed-2',
+    type: 'phrase',
+    title: '餐厅订位',
+    content: 'Can I get a table for two by the window?',
+    metadata: { language: 'english', scenario: 'restaurant' },
+    createdAt: new Date().toISOString(),
+    avatar: '/favicon.png',
+    authorName: 'AI Tutor',
+  },
+  {
+    id: 'seed-3',
+    type: 'vocabulary',
+    title: '表达感谢',
+    content: '多谢晒你啊！',
+    metadata: { language: 'cantonese', scenario: 'daily' },
+    createdAt: new Date().toISOString(),
+    avatar: '/favicon.png',
+    authorName: 'AI Tutor',
+  },
+  {
+    id: 'seed-4',
+    type: 'scenario',
+    title: '机场值机',
+    content: "Hello, I'm checking in for flight CX902. Could I have a window seat?",
+    metadata: { language: 'english', scenario: 'travel' },
+    createdAt: new Date().toISOString(),
+    avatar: '/favicon.png',
+    authorName: 'AI Tutor',
+  },
+  {
+    id: 'seed-5',
+    type: 'phrase',
+    title: '重述请求',
+    content: '唔好意思，我听唔清楚，可以再讲一次吗？',
+    metadata: { language: 'cantonese', scenario: 'daily' },
+    createdAt: new Date().toISOString(),
+    avatar: '/favicon.png',
+    authorName: 'AI Tutor',
+  },
+  {
+    id: 'seed-6',
+    type: 'vocabulary',
+    title: '点餐推荐',
+    content: '请推荐一份当地人最常点的家常菜。',
+    metadata: { language: 'mandarin', scenario: 'restaurant' },
+    createdAt: new Date().toISOString(),
+    avatar: '/favicon.png',
+    authorName: 'AI Tutor',
+  },
+];
+
 export const useAppStore = create<AppState>((set, get) => {
   let stream: EventSource | undefined;
 
@@ -64,6 +127,25 @@ export const useAppStore = create<AppState>((set, get) => {
       closeStream();
       stream = source;
     }
+  };
+
+  const deriveUserAvatar = (session: ConversationSession | undefined) => {
+    if (!session?.messages?.length) {
+      return "/favicon.png";
+    }
+    for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+      const message = session.messages[i];
+      if (message.sender === "user" && message.avatar) {
+        return message.avatar;
+      }
+    }
+    for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+      const message = session.messages[i];
+      if (message.sender === "ai" && message.avatar) {
+        return message.avatar.replace("coach", "learner");
+      }
+    }
+    return "/favicon.png";
   };
 
   return {
@@ -115,6 +197,7 @@ export const useAppStore = create<AppState>((set, get) => {
         const optimistic: ConversationMessage = {
           id: `local-${Date.now()}`,
           sender: "user",
+          avatar: deriveUserAvatar(session),
           text: trimmed,
           language: session.targetLanguage,
           createdAt: new Date().toISOString(),
@@ -168,8 +251,9 @@ export const useAppStore = create<AppState>((set, get) => {
         }));
         try {
           const items = await fetchFavorites();
+          const hydrated = items.length ? items : seedFavorites;
           set((state) => ({
-            favorites: { ...state.favorites, loading: false, items },
+            favorites: { ...state.favorites, loading: false, items: hydrated },
           }));
         } catch (error) {
           set((state) => ({

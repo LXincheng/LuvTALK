@@ -6,6 +6,9 @@
   --app-surface: rgba(255, 255, 255, 0.95);
   --app-border: rgba(15, 23, 42, 0.08);
   --app-radius: 24px;
+  --glass-surface: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(15, 23, 42, 0.12);
+  --glass-shadow: 0 18px 32px rgba(15, 23, 42, 0.12);
 
   /** primary **/
   --ion-color-primary: #5a63ff;
@@ -87,4 +90,19 @@ body.ion-palette-dark {
   --ion-color-dark-contrast: #0f172a;
   --ion-background-color: #0b1221;
   --ion-text-color: #f8fafc;
+  --glass-surface: rgba(17, 22, 35, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
+}
+
+.glass-panel {
+  background: var(--glass-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--app-radius);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(160%);
+}
+
+.glass-panel-flat {
+  border-radius: 0;
 }

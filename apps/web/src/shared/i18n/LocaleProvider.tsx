@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+﻿import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 export type UiLanguage = 'zh' | 'en';
 
@@ -22,14 +22,16 @@ const translations = {
     conversationFavoriteButton: '收藏此内容',
     conversationInputPlaceholder: '输入或按住语音按钮开始练习',
     conversationMicSeedText: '我想练习点餐对话',
+    conversationScenarioCurrentLabel: '当前场景',
+    conversationReplyPending: '正在生成...',
     favoritesTitle: '收藏夹',
     favoritesHeroLabel: '学习资产',
-    favoritesHeroDescription: '收藏的文化提示、句型和语音片段都会保存在这里。',
+    favoritesHeroDescription: '收藏的文化提示、短语和语音片段都会保存在这里。',
     favoritesLoading: '正在同步收藏内容...',
     favoritesEmptyTitle: '点击 AI 回复旁的书签即可收藏',
-    favoritesEmptyDescription: '文化解释、语音片段都会自动同步到这里。',
+    favoritesEmptyDescription: '文化提示和语音片段会自动同步到这里。',
     favoritesRemoveButton: '移除此收藏',
-    favoriteTypePhrase: '语音片段',
+    favoriteTypePhrase: '常用句型',
     favoriteTypeCultural: '文化提示',
     favoriteTypeVocabulary: '词汇',
     favoriteTypeScenario: '场景灵感',
@@ -52,6 +54,8 @@ const translations = {
     conversationFavoriteButton: 'Save to favorites',
     conversationInputPlaceholder: 'Type or hold the mic to practice',
     conversationMicSeedText: 'I want to practice ordering food',
+    conversationScenarioCurrentLabel: 'Current scenario',
+    conversationReplyPending: 'Thinking…',
     favoritesTitle: 'Favorites',
     favoritesHeroLabel: 'Learning assets',
     favoritesHeroDescription: 'Saved culture tips, phrases, and clips live here.',

@@ -13,6 +13,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.png'],
+      devOptions: {
+        enabled: false,
+      },
       manifest: {
         name: 'LuvTALK',
         short_name: 'LuvTALK',

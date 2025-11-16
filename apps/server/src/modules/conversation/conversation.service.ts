@@ -19,6 +19,7 @@ import {
   AiResponseSchema,
 } from '../../common/types/ai-response.schema';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TranslationService } from '../translation/translation.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
 
@@ -36,7 +37,10 @@ export class ConversationService {
   };
   private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly translation: TranslationService,
+  ) {}
 
   async startSession(dto: StartConversationDto): Promise<ConversationSession> {
     const now = new Date().toISOString();
@@ -78,6 +82,7 @@ export class ConversationService {
       'user',
       trimmed,
       session.targetLanguage,
+      session.nativeLanguage,
     );
     session.messages.push(userMessage);
 
@@ -85,14 +90,22 @@ export class ConversationService {
       (await this.requestDsAi(session, trimmed)) ??
       this.composeAiResponse(trimmed, session.targetLanguage, session.scenarioId);
 
+    const translationText = await this.translateForNativeLanguage(
+      aiPayload.reply,
+      session.targetLanguage,
+      session.nativeLanguage ?? LanguageCode.Mandarin,
+    );
+
     const aiMessage = this.buildMessage(
       'ai',
       aiPayload.reply,
       session.targetLanguage,
+      session.nativeLanguage,
       {
         meta: {
           score: aiPayload.score,
           scoreReason: aiPayload.scoreReason,
+          translation: translationText,
         },
       },
     );
@@ -156,16 +169,15 @@ export class ConversationService {
     timestamp: string,
   ): ConversationMessage {
     const title = this.describeScenario(scenarioId, nativeLanguage);
-    return this.buildMessage(
-      'ai',
-      `👋 欢迎来到「${title}」练习场景。\n我会用${this.describeLanguage(
-        targetLanguage,
-      )}陪你练习，并用${this.describeLanguage(
-        nativeLanguage,
-      )}提供提示。我们先进行热身的寒暄吧。`,
-      targetLanguage,
-      { createdAt: timestamp },
-    );
+    const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
+    const nativeLabel = this.describeLanguage(nativeLanguage, nativeLanguage);
+    const prefersEnglish = nativeLanguage === LanguageCode.English;
+    const welcomeText = prefersEnglish
+      ? `👋 Welcome to the “${title}” scenario.\nI’ll coach you in ${targetLabel} and share hints in ${nativeLabel}. Let’s warm up with a friendly greeting.`
+      : `👋 欢迎来到「${title}」练习场景。\n我会用${targetLabel}陪你练习，并用${nativeLabel}提供提示。我们先从寒暄热身开始吧。`;
+    return this.buildMessage('ai', welcomeText, targetLanguage, nativeLanguage, {
+      createdAt: timestamp,
+    });
   }
 
   private describeScenario(
@@ -191,14 +203,18 @@ export class ConversationService {
     return map[scenarioId] ?? (prefersEnglish ? 'Conversation practice' : '沉浸对话');
   }
 
-  private describeLanguage(language: LanguageCode): string {
+  private describeLanguage(
+    language: LanguageCode,
+    nativeLanguage: LanguageCode,
+  ): string {
+    const prefersEnglish = nativeLanguage === LanguageCode.English;
     switch (language) {
       case LanguageCode.Cantonese:
-        return '粤语';
+        return prefersEnglish ? 'Cantonese' : '粤语';
       case LanguageCode.Mandarin:
-        return '普通话';
+        return prefersEnglish ? 'Mandarin' : '普通话';
       case LanguageCode.English:
-        return 'English';
+        return prefersEnglish ? 'English' : '英语';
       default:
         return language;
     }
@@ -296,6 +312,29 @@ export class ConversationService {
     }
   }
 
+  private async translateForNativeLanguage(
+    text: string,
+    sourceLanguage: LanguageCode,
+    targetLanguage: LanguageCode,
+  ): Promise<string | undefined> {
+    if (sourceLanguage === targetLanguage) {
+      return text;
+    }
+    try {
+      const record = await this.translation.translate({
+        text,
+        sourceLanguage,
+        targetLanguage,
+      });
+      return record.translatedText;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to translate AI reply: ${(error as Error).message}`,
+      );
+      return undefined;
+    }
+  }
+
   private composeAiResponse(
     message: string,
     language: LanguageCode,
@@ -335,7 +374,7 @@ export class ConversationService {
       return `I heard "${message}". Here is a natural ${scenarioId} response to keep things flowing.`;
     }
     if (language === LanguageCode.Cantonese) {
-      return `我聽到你講：「${message}」。等我用地道講法繼續對話。`;
+      return `我聽到你講：「${message}」。等我用地道講法繼續对话。`;
     }
     return `我听到你说：“${message}”。我来示范一个自然的续写方式。`;
   }
@@ -344,15 +383,19 @@ export class ConversationService {
     sender: 'user' | 'ai',
     text: string,
     language: LanguageCode,
+    nativeLanguage?: LanguageCode,
     extra?: Partial<ConversationMessage>,
   ): ConversationMessage {
+    const prefersEnglish = nativeLanguage === LanguageCode.English;
+    const aiName = prefersEnglish ? 'LuvTALK Tutor' : 'LuvTALK 导师';
+    const userName = prefersEnglish ? 'You' : '我';
     return {
       id: randomUUID(),
       sender,
       text,
       language,
       createdAt: extra?.createdAt ?? new Date().toISOString(),
-      senderName: sender === 'ai' ? 'LuvTALK 导师' : 'Learner',
+      senderName: sender === 'ai' ? aiName : userName,
       avatar: sender === 'ai' ? this.avatars.ai : this.avatars.user,
       meta: extra?.meta,
     };

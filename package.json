@@ -3,7 +3,9 @@
   "private": true,
   "packageManager": "pnpm@10.3.0",
   "scripts": {
-    "dev": "turbo run dev --parallel --filter=web --filter=server",
+    "dev": "node scripts/dev.js",
+    "dev:server": "pnpm --filter server dev",
+    "dev:web": "pnpm --filter web dev",
     "build": "turbo run build",
     "lint": "turbo run lint"
   },

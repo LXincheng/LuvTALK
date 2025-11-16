@@ -3,19 +3,16 @@ import {
   IonButtons,
   IonChip,
   IonContent,
-  IonFooter,
   IonHeader,
   IonIcon,
   IonPage,
   IonSpinner,
-  IonText,
   IonTitle,
   IonToolbar,
 } from '@ionic/react';
-import { bookOutline, trashOutline, sparklesOutline } from 'ionicons/icons';
+import { bookOutline, homeOutline, trashOutline } from 'ionicons/icons';
 import { useEffect } from 'react';
 import ThemeToggle from '../../components/ThemeToggle';
-import AppDock, { DockItem } from '../../components/navigation/AppDock';
 import { FavoriteItem, FavoriteType } from '../../types/api';
 import { useAppStore } from '../../store/useAppStore';
 import { useLocale } from '../../shared/i18n/LocaleProvider';
@@ -31,11 +28,6 @@ const typeLabelKeys: Record<FavoriteType, 'favoriteTypePhrase' | 'favoriteTypeCu
   scenario: 'favoriteTypeScenario',
 };
 
-const dockItems: DockItem[] = [
-  { labelKey: 'navConversation', icon: sparklesOutline, href: '/' },
-  { labelKey: 'navFavorites', icon: bookOutline, href: '/favorites' },
-];
-
 const FavoritesPage = () => {
   const favorites = useAppStore(state => state.favorites);
   const { t } = useLocale();
@@ -45,23 +37,23 @@ const FavoritesPage = () => {
   }, []);
 
   const renderCard = (item: FavoriteItem) => (
-    <article key={item.id} className="favorite-card">
+    <article key={item.id} className="favorite-card glass-panel glass-panel-flat">
       <header>
         <div className="favorite-author">
           <img src={item.avatar} alt="avatar" />
           <div>
             <strong>{item.authorName ?? 'AI Tutor'}</strong>
-            <span>{formatDate(item.createdAt)}</span>
+            <span style={{padding:'0.2rem'}}>{formatDate(item.createdAt)}</span>
           </div>
         </div>
-        <IonChip color="light">{t(typeLabelKeys[item.type])}</IonChip>
+        <IonChip>{t(typeLabelKeys[item.type])}</IonChip>
       </header>
       <p>{item.content}</p>
       <div className="favorite-meta">
         {item.metadata && (
           <small>
             {item.metadata.language ? `${t('labelLanguage')}: ${item.metadata.language}` : ''}
-            {item.metadata.language && item.metadata.scenario ? ' · ' : ''}
+            {item.metadata.language && item.metadata.scenario ? ' / ' : ''}
             {item.metadata.scenario ? `${t('labelScenario')}: ${item.metadata.scenario}` : ''}
           </small>
         )}
@@ -79,8 +71,18 @@ const FavoritesPage = () => {
 
   return (
     <IonPage className="favorites-page">
-      <IonHeader translucent>
-        <IonToolbar>
+      <IonHeader translucent={false}>
+        <IonToolbar className="favorites-toolbar">
+          <IonButtons slot="start">
+            <IonButton
+              className="header-toggle-button"
+              routerLink="/"
+              routerDirection="back"
+              title={t('navConversation')}
+            >
+              <IonIcon icon={homeOutline} slot="icon-only" />
+            </IonButton>
+          </IonButtons>
           <IonTitle>{t('favoritesTitle')}</IonTitle>
           <IonButtons slot="end">
             <ThemeToggle />
@@ -88,12 +90,12 @@ const FavoritesPage = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen className="favorites-content">
-        <section className="favorites-hero">
-          <div>
-            <p>{t('favoritesHeroLabel')}</p>
+        <section className="favorites-hero glass-panel glass-panel-flat">
+          <div className="favorites-hero-line">
+            <span>{t('favoritesHeroLabel')}</span>
             <strong>{favorites.items.length.toString().padStart(2, '0')}</strong>
           </div>
-          <IonText color="medium">{t('favoritesHeroDescription')}</IonText>
+          <p>{t('favoritesHeroDescription')}</p>
         </section>
 
         {favorites.loading ? (
@@ -105,17 +107,12 @@ const FavoritesPage = () => {
           <div className="favorites-grid">{favorites.items.map(renderCard)}</div>
         ) : (
           <div className="favorites-empty-state">
-            <IonIcon icon={bookmarkOutline} />
+            <IonIcon icon={bookOutline} />
             <h2>{t('favoritesEmptyTitle')}</h2>
             <p>{t('favoritesEmptyDescription')}</p>
           </div>
         )}
       </IonContent>
-      <IonFooter>
-        <div className="favorites-footer">
-          <AppDock items={dockItems} active="/favorites" />
-        </div>
-      </IonFooter>
     </IonPage>
   );
 };
