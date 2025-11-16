@@ -55,6 +55,7 @@ const ConversationPage: React.FC = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [languagePopoverEvent, setLanguagePopoverEvent] = useState<MouseEvent | undefined>(undefined);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isSending, setIsSending] = useState(false);
 
   useEffect(() => {
     setActiveScenario(ensureScenario(scenarioId));
@@ -75,9 +76,17 @@ const ConversationPage: React.FC = () => {
   const messagesCount = session?.messages.length ?? 0;
 
   const handleSend = async () => {
-    if (!input.trim()) return;
-    await conversation.send(input);
-    setInput('');
+    const text = input.trim();
+    if (!text || !conversation.session || isSending) {
+      return;
+    }
+    setIsSending(true);
+    try {
+      await conversation.send(text);
+      setInput('');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleFavorite = async (message: ConversationMessage) => {
@@ -266,7 +275,12 @@ const ConversationPage: React.FC = () => {
               <IonButton fill={isRecording ? 'solid' : 'clear'} color="primary" onClick={handleMicrophone}>
                 <IonIcon icon={micOutline} />
               </IonButton>
-              <IonButton shape="round" onClick={handleSend} disabled={conversation.loading}>
+              <IonButton
+                className="conversation-send-button"
+                fill="clear"
+                onClick={handleSend}
+                disabled={!session || !input.trim() || isSending}
+              >
                 <IonIcon icon={sendOutline} slot="icon-only" />
               </IonButton>
             </div>

@@ -1,160 +1,53 @@
-﻿## AI 规范
-- LLM 必须运行在 JSON Mode，并通过 common/types/ai-response.schema.ts 校验
-- Service 仅返回 { reply, correction, cultureNote, associativePhrases, score } 结构
-- DeepSeek 接入：设置 DS_AI_API_KEY（必填）、DS_AI_API_URL=https://api.deepseek.com/v1、DS_AI_MODEL=deepseek-chat
-- SDK 兼容 OpenAI，可沿用如下示例：
+# Tech Notes
 
-  `	s
-  import OpenAI from 'openai';
+## 开发日志
+### 2025-11-16
+- DeepSeek 配置整理：统一读取 `.env` 中的 `DS_AI_*`/`DEEPSEEK_*`，标准化 baseURL 为 `https://api.deepseek.com/v1/chat/completions`，请求前记录日志，失败时回退到本地模板回复，避免 503 直接抛到前端。
+- Conversation 页面：语言切换入口移至顶部导航，下拉菜单在明暗模式下都有清晰的背景/文字；发送按钮改为无底色圆角样式并增加 `isSending` 状态；消息、评分和收藏按钮行内展示，自动滚动到底部。
+- Favorites 页面：卡片网格增加外边距，内容压缩留白，删除按钮和信息同列展示，时间改为仅显示年月日。
+- 文案与日志：清理历史乱码文本，本文档记录最新规范与变更。
+- 新增实时交互方案评估记录（见 `docs/Realtime.md`），并在后端/前端落地 SSE 推送，提升消息响应体验。
 
-  const openai = new OpenAI({
-    baseURL: process.env.DS_AI_API_URL ?? 'https://api.deepseek.com',
-    apiKey: process.env.DS_AI_API_KEY!,
-  });
+### 2025-11-16（续）
+- 后端：`ConversationService` 增加 SSE 广播（`@Sse`）、会话 Subject 管理，DeepSeek 请求按标准 baseURL/模型发送，中文 fallback 文案恢复为 UTF-8。
+- 前端：Zustand 增加乐观消息+EventSource 订阅，避免发送时卡顿；语言菜单未选中项在白天模式增加可见背景；收藏卡片的操作按钮与元信息同行，减少空白。
 
-  const completion = await openai.chat.completions.create({
-    model: process.env.DS_AI_MODEL ?? 'deepseek-chat',
-    messages: [{ role: 'system', content: 'You are a helpful assistant.' }],
-  });
-  `
+## 项目概况
+LuvTALK 是面向粤语/英语学习者的语言练习 PWA，提供实时对话、AI 纠错、收藏和文化提示。前端为 React 19 + Ionic React 8，后端为 NestJS 11 + Prisma，AI 能力对接 DeepSeek。
 
-- Key 缺失时后端会落回模板响应，仅用于本地调试，部署务必写入变量
----11-16  
-> 鑼冨洿锛歁onorepo锛坅pps/web, apps/server锛夌幇鐘跺榻?
----
+## 核心技术栈
+- **Monorepo**：Turborepo + pnpm
+- **前端**：React 19、Ionic React 8、Vite、Zustand、`vite-plugin-pwa`
+- **后端**：NestJS 11、Prisma、PostgreSQL
+- **AI**：DeepSeek API（OpenAI 兼容），输出使用 `AiResponseSchema` 校验
 
-## 鐩綍
-- 椤圭洰姒傝堪
-- 鏍稿績鎶€鏈爤
-- 缁熶竴绾︽潫
-- 鍓嶇锛坅pps/web锛夎鑼?- 鍚庣锛坅pps/server锛夎鑼?- 鏁版嵁搴?Prisma
-- AI 瑙勮寖
-- Monorepo 缁撴瀯
-- 閮ㄧ讲涓庡懡浠?
----
+## 统一约束
+- TypeScript 全量启用严格模式；前后端共享类型时保持 `.ts/.tsx`。
+- Lint/Format 由 `pnpm lint` + 项目内 ESLint/Prettier 负责。
+- API 输入需 DTO + `class-validator` 校验；AI 响应必须通过 Zod 校验后返回。
+- 数据模型唯一来源 `apps/server/prisma/schema.prisma`，迁移用 `prisma migrate`。
 
-## 椤圭洰姒傝堪
-luvTALK 鏄竴娆?AI 椹卞姩鐨勮瑷€瀛︿範 PWA锛堢菠璇?鑻辫锛夛紝鎻愪緵瀹炴椂瀵硅瘽銆佺籂閿欍€佺炕璇戝拰鏀惰棌銆?
----
+## 前端约定
+- 页面组件包裹 `<IonPage>`，路由使用 `<IonReactRouter>` + `<IonRouterOutlet>`。
+- 组件样式放于同名 `.css`，主题变量集中在 `theme/variables.css`。
+- 目录结构：`components/`、`pages/Conversation|Favorites`、`services/`、`shared/`、`store/`、`theme/`、`types/`。
+- API 调用集中在 `services/*Service.ts`，状态在 `store/useAppStore.ts`。
 
-## 鏍稿績鎶€鏈爤
-- Monorepo锛歍urborepo + pnpm
-- 璇█锛歍ypeScript
-- 鍓嶇锛歊eact 19 + Ionic React 8, Vite, Zustand
-- 鍚庣锛歂estJS 11锛孭risma锛孭ostgreSQL
-- AI锛欸emini锛圝SON mode锛夈€丟oogle STT/TTS
+## 后端约定
+- 模块化：Controller 只处理路由和 DTO，Service 写业务逻辑，PrismaService 负责 DB。
+- `conversation.service.ts` 通过 DeepSeek + fallback 组合输出，Prompt 统一在 `prompt.config.ts`。
+- AI 输出结构化对象，不直接返回字符串。
 
----
+## 数据层 / Prisma
+- Schema：`apps/server/prisma/schema.prisma`，模型包括 `Conversation`、`Favorite`、`TranslationRecord` 及 `FavoriteType` 枚举。
+- 常用命令：
+  - `pnpm --filter server prisma:migrate dev`
+  - `pnpm --filter server prisma:generate`
 
-## 缁熶竴绾︽潫
-- TS 鍏ㄩ噺浣跨敤 `.ts/.tsx`锛屼弗鏍兼ā寮忥紱鍓嶇/鍚庣鍏变韩 TypeScript-first銆?- Lint 涓庢牸寮忥細閬靛惊椤圭洰鍐?eslint/prettier 閰嶇疆锛坄pnpm lint`锛夈€?- API 杈撳叆蹇呴』 DTO锛坈lass-validator锛夛紱AI 缁撴瀯蹇呴』 Zod 鏍￠獙銆?- 鏁版嵁鏉ユ簮鍞竴锛歅risma Schema锛涜縼绉荤敤 `prisma migrate`銆?- 鍝嶅簲缁撴瀯锛堝悗绔?Interceptor锛夛細`{ data?: any; error?: { message: string; code?: string } }`
-
----
-
-## 鍓嶇锛坅pps/web锛夎鑼?**妗嗘灦涓庝緷璧?*  
-- Ionic React 8锛坄@ionic/react`, `@ionic/react-router`锛夛紝React Router v5銆?- PWA锛歚vite-plugin-pwa` + `@ionic/pwa-elements`锛堥渶鍦ㄥ叆鍙ｅ姞杞斤級銆?
-**鐩綍缁撴瀯锛堢幇鐘讹級**
-```
-apps/web/src
-鈹溾攢 components/        # 绾?UI 缁勪欢
-鈹? 鈹斺攢 navigation/     # 搴曢儴瀵艰埅绛?鈹溾攢 hooks/
-鈹溾攢 pages/
-鈹? 鈹溾攢 Conversation/
-鈹? 鈹斺攢 Favorites/
-鈹溾攢 services/          # API 璋冪敤
-鈹溾攢 shared/            # 鍏变韩缁勪欢/鐘舵€?绫诲瀷
-鈹溾攢 store/             # Zustand
-鈹溾攢 theme/             # 鏍峰紡涓庡彉閲?鈹溾攢 types/
-鈹溾攢 App.tsx
-鈹斺攢 main.tsx
-```
-
-**椤甸潰涓庤矾鐢?*
-- 鎵€鏈夐〉闈㈢粍浠跺繀椤诲 `<IonPage>`銆?- 璺敱浣跨敤 `<IonReactRouter>` + `<IonRouterOutlet>`锛涜矾寰勪笌鏂囦欢澶瑰悕淇濇寔 PascalCase 椤甸潰鐩綍銆?
-**鏍峰紡**
-- 涓婚鍙橀噺闆嗕腑 `theme/variables.css`锛岀粍浠舵牱寮忓悓绾?`.css`銆?
-**鍛藉悕寤鸿锛堣嫢璋冩暣锛?*
-- 椤甸潰鐩綍缁存寔 PascalCase锛涙湇鍔℃枃浠跺皬鍐欓┘宄帮紙宸查伒瀹堬紝濡?`conversationService.ts`锛夈€?- `shared` 涓嬪瓙鐩綍璇箟鍖栧懡鍚嶏紝閬垮厤绌虹洰褰曪紙褰撳墠 `shared/api` 涓虹┖锛屽彲娓呯悊鎴栬ˉ鍏呯被鍨嬶級銆?
----
-
-## 鍚庣锛坅pps/server锛夎鑼?**妗嗘灦涓庝緷璧?*  
-- NestJS 11锛孋ommonJS 鏋勫缓锛涗弗鏍间娇鐢?`@Injectable` + 鏋勯€犳敞鍏ャ€?
-**鐩綍缁撴瀯锛堢幇鐘讹級**
-```
-apps/server/src
-鈹溾攢 common/
-鈹? 鈹溾攢 enums/          # e.g., favorite-type.enum.ts
-鈹? 鈹斺攢 types/          # e.g., ai-response.schema.ts
-鈹溾攢 core/
-鈹? 鈹斺攢 prisma/         # prisma.module.ts, prisma.service.ts
-鈹溾攢 modules/
-鈹? 鈹溾攢 conversation/
-鈹? 鈹? 鈹溾攢 dto/
-鈹? 鈹? 鈹溾攢 conversation.controller.ts
-鈹? 鈹? 鈹斺攢 conversation.service.ts
-鈹? 鈹溾攢 favorites/
-鈹? 鈹? 鈹溾攢 dto/
-鈹? 鈹? 鈹溾攢 favorites.controller.ts
-鈹? 鈹? 鈹斺攢 favorites.service.ts
-鈹? 鈹溾攢 health/
-鈹? 鈹斺攢 translation/
-鈹溾攢 app.module.ts
-鈹斺攢 main.ts
-```
-
-**鍒嗗眰瑕佹眰**
-- Module 瀹氫箟杈圭晫锛汣ontroller 浠呰矾鐢?DTO 缁戝畾锛汼ervice 鍐欎笟鍔★紱PrismaService 浣滀负鍞竴鏁版嵁璁块棶銆?- DTO: `class-validator` 鍏ㄩ噺鏍￠獙鍏ュ彛銆?- 涓嶅厑璁哥洿鎺ュ湪 Controller 浣跨敤 Prisma Client銆?
-**鍛藉悕浼樺寲寤鸿**
-- `core/prisma` 鍛藉悕绗﹀悎瑙勮寖锛涙棤闇€璋冩暣銆?- `common/types` 閲?AI Schema 搴斾互 `*.schema.ts` 鍛藉悕锛堝凡绗﹀悎锛夈€?
----
-
-## 鏁版嵁搴?/ Prisma
-- Schema 浣嶇疆锛歚apps/server/prisma/schema.prisma`
-- 鍏抽敭妯″瀷锛堢幇鐘讹級锛?  - `Conversation`锛坢essages JSON锛宻core 鍙€夛紝鍏宠仈 favorites锛?  - `Favorite`锛坱itle/content/type/metadata锛屽彲鍏宠仈 conversation锛?  - `TranslationRecord`
-  - `enum FavoriteType { phrase | cultural | vocabulary | scenario }`
-- 杩佺Щ涓庣敓鎴愶細
-  - 寮€鍙戯細`pnpm prisma migrate dev --schema apps/server/prisma/schema.prisma`
-  - 閮ㄧ讲锛歚pnpm prisma migrate deploy --schema apps/server/prisma/schema.prisma`
-  - Client锛歚pnpm prisma generate --schema apps/server/prisma/schema.prisma`
+## 常用脚本
+- 根目录：`pnpm dev / build / lint`
+- 前端：`pnpm --filter web dev|build|preview`
+- 后端：`pnpm --filter server dev|build|start:prod|test`
 
 ---
-
-## AI 瑙勮寖
-- LLM 蹇呴』浣跨敤 JSON Mode锛涜緭鍑虹粡 Zod 鏍￠獙鍚庡啀杩斿洖涓氬姟灞傘€?- Service 涓嶈繑鍥炲師濮嬪瓧绗︿覆锛屽彧杩斿洖缁撴瀯鍖栧璞°€?- 寤鸿鍦?`common/types/ai-response.schema.ts` 鎸佺画缁存姢 Zod Schema銆?
----
-
-## Monorepo 缁撴瀯锛堢幇鐘讹級
-```
-luvtalk/
-鈹溾攢 apps/
-鈹? 鈹溾攢 web/           # Ionic PWA
-鈹? 鈹斺攢 server/        # NestJS API
-鈹溾攢 node_modules/
-鈹溾攢 pnpm-workspace.yaml
-鈹溾攢 package.json      # Turbo tasks
-鈹斺攢 turbo.json
-```
-- 褰撳墠鏃?`packages/` 鐩綍锛涘闇€鍏变韩绫诲瀷鍙悗缁柊澧?`packages/shared`銆?
----
-
-## 閮ㄧ讲涓庡懡浠?**鏍圭骇**
-- 寮€鍙戯細`pnpm dev`锛坱urbo 骞惰 web/server锛?- 鏋勫缓锛歚pnpm build`
-- Lint锛歚pnpm lint`
-
-**鍓嶇**
-- 寮€鍙戯細`pnpm --filter web dev`
-- 鏋勫缓锛歚pnpm --filter web build`
-- 棰勮锛歚pnpm --filter web preview`
-
-**鍚庣**
-- 寮€鍙戯細`pnpm --filter server dev`
-- 鏋勫缓锛歚pnpm --filter server build`
-- 杩愯 prod锛歚pnpm --filter server start:prod`
-- 娴嬭瘯锛歚pnpm --filter server test`
-- Prisma锛歚pnpm --filter server prisma:migrate`
-
----
-
-## 寰呬紭鍖栧缓璁?- 娓呯悊 `apps/web/src/shared/api` 绌虹洰褰曟垨琛ュ厖鍏变韩 API 绫诲瀷锛堥伩鍏嶇┖鏂囦欢澶癸級銆?- 鑻ヨ鍒掑叡浜?DTO/绫诲瀷锛屾柊澧?`packages/shared` 骞剁敤璺緞鍒悕澶嶇敤銆?- 纭 web 绔?PWA 鍒濆鍖栧湪鍏ュ彛宸茶皟鐢?`@ionic/pwa-elements/loader`锛堝綋鍓嶉渶妫€鏌?App 鍏ュ彛钀藉疄锛夈€?
-
-
+如需补充新规范或遇到兼容问题，请在本文件下追加日期+说明（UTF-8）。***

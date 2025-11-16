@@ -1,5 +1,5 @@
-﻿import { create } from "zustand";
-import { FavoriteItem, ConversationSession } from "../types/api";
+import { create } from "zustand";
+import { FavoriteItem, ConversationMessage, ConversationSession } from "../types/api";
 import { LanguageCode } from "../types/language";
 import {
   createFavorite,
@@ -11,6 +11,7 @@ import {
   sendConversationMessage,
   startConversation,
 } from "../services/conversationService";
+import { createConversationStream } from "../services/conversationStream";
 
 interface ConversationSlice {
   session?: ConversationSession;
@@ -40,148 +41,188 @@ interface AppState {
   favorites: FavoritesSlice;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
-  conversation: {
-    session: undefined,
-    scenarioId: undefined,
-    loading: false,
-    error: undefined,
-    async start({ scenarioId, targetLanguage, nativeLanguage }) {
+export const useAppStore = create<AppState>((set, get) => {
+  let stream: EventSource | undefined;
+
+  const closeStream = () => {
+    if (stream) {
+      stream.close();
+      stream = undefined;
+    }
+  };
+
+  const openStream = (sessionId: string) => {
+    const source = createConversationStream(sessionId, (latest) => {
       set((state) => ({
         conversation: {
           ...state.conversation,
-          loading: true,
-          error: undefined,
+          session: latest,
         },
       }));
-      try {
-        const session = await startConversation({
-          scenarioId,
-          targetLanguage,
-          nativeLanguage,
-        });
+    });
+    if (source) {
+      closeStream();
+      stream = source;
+    }
+  };
+
+  return {
+    conversation: {
+      session: undefined,
+      scenarioId: undefined,
+      loading: false,
+      error: undefined,
+      async start({ scenarioId, targetLanguage, nativeLanguage }) {
         set((state) => ({
           conversation: {
             ...state.conversation,
-            loading: false,
-            session,
+            loading: true,
+            error: undefined,
+          },
+        }));
+        try {
+          const session = await startConversation({
             scenarioId,
-          },
-        }));
-      } catch (error) {
+            targetLanguage,
+            nativeLanguage,
+          });
+          set((state) => ({
+            conversation: {
+              ...state.conversation,
+              loading: false,
+              session,
+              scenarioId,
+            },
+          }));
+          openStream(session.id);
+        } catch (error) {
+          set((state) => ({
+            conversation: {
+              ...state.conversation,
+              loading: false,
+              error: error instanceof Error ? error.message : "无法开启会话",
+            },
+          }));
+        }
+      },
+      async send(message) {
+        const trimmed = message.trim();
+        const { session } = get().conversation;
+        if (!session || !trimmed) {
+          return;
+        }
+        const previous = session;
+        const optimistic: ConversationMessage = {
+          id: `local-${Date.now()}`,
+          sender: "user",
+          text: trimmed,
+          language: session.targetLanguage,
+          createdAt: new Date().toISOString(),
+        };
         set((state) => ({
           conversation: {
             ...state.conversation,
-            loading: false,
-            error: error instanceof Error ? error.message : "开始会话失败",
+            session: {
+              ...session,
+              messages: [...session.messages, optimistic],
+              updatedAt: new Date().toISOString(),
+            },
           },
         }));
-      }
-    },
-    async send(message) {
-      const { session } = get().conversation;
-      if (!session || !message.trim()) {
-        return;
-      }
-      set((state) => ({
-        conversation: {
-          ...state.conversation,
-          loading: true,
-          error: undefined,
-        },
-      }));
-      try {
-        const updated = await sendConversationMessage(session.id, message);
+        try {
+          const updated = await sendConversationMessage(session.id, trimmed);
+          set((state) => ({
+            conversation: {
+              ...state.conversation,
+              session: updated,
+            },
+          }));
+        } catch (error) {
+          set((state) => ({
+            conversation: {
+              ...state.conversation,
+              error: error instanceof Error ? error.message : "发送消息失败",
+              session: previous,
+            },
+          }));
+        }
+      },
+      reset: () => {
+        closeStream();
         set((state) => ({
           conversation: {
             ...state.conversation,
-            loading: false,
-            session: updated,
+            session: undefined,
+            scenarioId: undefined,
           },
         }));
-      } catch (error) {
-        set((state) => ({
-          conversation: {
-            ...state.conversation,
-            loading: false,
-            error: error instanceof Error ? error.message : "发送消息失败",
-          },
-        }));
-      }
+      },
     },
-    reset: () =>
-      set((state) => ({
-        conversation: {
-          ...state.conversation,
-          session: undefined,
-          scenarioId: undefined,
-        },
-      })),
-  },
-  favorites: {
-    items: [],
-    loading: false,
-    error: undefined,
-    async load() {
-      set((state) => ({
-        favorites: { ...state.favorites, loading: true, error: undefined },
-      }));
-      try {
-        const items = await fetchFavorites();
+    favorites: {
+      items: [],
+      loading: false,
+      error: undefined,
+      async load() {
         set((state) => ({
-          favorites: { ...state.favorites, loading: false, items },
+          favorites: { ...state.favorites, loading: true, error: undefined },
         }));
-      } catch (error) {
+        try {
+          const items = await fetchFavorites();
+          set((state) => ({
+            favorites: { ...state.favorites, loading: false, items },
+          }));
+        } catch (error) {
+          set((state) => ({
+            favorites: {
+              ...state.favorites,
+              loading: false,
+              error: error instanceof Error ? error.message : "无法加载收藏",
+            },
+          }));
+        }
+      },
+      async add(payload) {
+        set((state) => ({
+          favorites: { ...state.favorites, loading: true, error: undefined },
+        }));
+        try {
+          const created = await createFavorite(payload);
+          set((state) => ({
+            favorites: {
+              ...state.favorites,
+              loading: false,
+              items: [
+                created,
+                ...state.favorites.items.filter((item) => item.id !== created.id),
+              ],
+            },
+          }));
+          return created;
+        } catch (error) {
+          set((state) => ({
+            favorites: {
+              ...state.favorites,
+              loading: false,
+              error: error instanceof Error ? error.message : "保存收藏失败",
+            },
+          }));
+          return undefined;
+        }
+      },
+      async remove(id) {
+        const { items } = get().favorites;
         set((state) => ({
           favorites: {
             ...state.favorites,
-            loading: false,
-            error: error instanceof Error ? error.message : "加载收藏失败",
+            items: items.filter((item) => item.id !== id),
           },
         }));
-      }
+        try {
+          await removeFavorite(id);
+        } catch (error) {
+          console.warn("Failed to remove favorite", error);
+        }
+      },
     },
-    async add(payload) {
-      set((state) => ({
-        favorites: { ...state.favorites, loading: true, error: undefined },
-      }));
-      try {
-        const created = await createFavorite(payload);
-        set((state) => ({
-          favorites: {
-            ...state.favorites,
-            loading: false,
-            items: [
-              created,
-              ...state.favorites.items.filter((item) => item.id !== created.id),
-            ],
-          },
-        }));
-        return created;
-      } catch (error) {
-        set((state) => ({
-          favorites: {
-            ...state.favorites,
-            loading: false,
-            error: error instanceof Error ? error.message : "添加收藏失败",
-          },
-        }));
-        return undefined;
-      }
-    },
-    async remove(id) {
-      const { items } = get().favorites;
-      set((state) => ({
-        favorites: {
-          ...state.favorites,
-          items: items.filter((item) => item.id !== id),
-        },
-      }));
-      try {
-        await removeFavorite(id);
-      } catch (error) {
-        console.warn("Failed to remove favorite", error);
-      }
-    },
-  },
-}));
+  };
+});

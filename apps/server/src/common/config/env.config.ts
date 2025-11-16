@@ -8,12 +8,10 @@ export const envConfig = {
   deepseek: {
     apiKey: (
       process.env.DS_AI_API_KEY ??
-      process.env.DEEPSEEK_API_KEY ??
       ""
     ).trim(),
     apiUrl:
       process.env.DS_AI_API_URL ??
-      process.env.DEEPSEEK_API_URL ??
       "https://api.deepseek.com/v1",
     model: process.env.DS_AI_MODEL ?? "deepseek-chat",
   },

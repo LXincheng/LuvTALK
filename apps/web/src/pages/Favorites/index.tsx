@@ -21,6 +21,9 @@ import { useAppStore } from '../../store/useAppStore';
 import { useLocale } from '../../shared/i18n/LocaleProvider';
 import './Favorites.css';
 
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
+
 const typeLabelKeys: Record<FavoriteType, 'favoriteTypePhrase' | 'favoriteTypeCultural' | 'favoriteTypeVocabulary' | 'favoriteTypeScenario'> = {
   phrase: 'favoriteTypePhrase',
   cultural: 'favoriteTypeCultural',
@@ -48,22 +51,29 @@ const FavoritesPage = () => {
           <img src={item.avatar} alt="avatar" />
           <div>
             <strong>{item.authorName ?? 'AI Tutor'}</strong>
-            <span>{new Date(item.createdAt).toLocaleString()}</span>
+            <span>{formatDate(item.createdAt)}</span>
           </div>
         </div>
         <IonChip color="light">{t(typeLabelKeys[item.type])}</IonChip>
       </header>
       <p>{item.content}</p>
-      {item.metadata && (
-        <small>
-          {item.metadata.language ? `${t('labelLanguage')}: ${item.metadata.language}` : ''}
-          {item.metadata.language && item.metadata.scenario ? ' · ' : ''}
-          {item.metadata.scenario ? `${t('labelScenario')}: ${item.metadata.scenario}` : ''}
-        </small>
-      )}
-      <IonButton fill="clear" size="small" onClick={() => favorites.remove(item.id)} title={t('favoritesRemoveButton')}>
-        <IonIcon icon={trashOutline} slot="icon-only" />
-      </IonButton>
+      <div className="favorite-meta">
+        {item.metadata && (
+          <small>
+            {item.metadata.language ? `${t('labelLanguage')}: ${item.metadata.language}` : ''}
+            {item.metadata.language && item.metadata.scenario ? ' · ' : ''}
+            {item.metadata.scenario ? `${t('labelScenario')}: ${item.metadata.scenario}` : ''}
+          </small>
+        )}
+        <IonButton
+          fill="clear"
+          size="small"
+          onClick={() => favorites.remove(item.id)}
+          title={t('favoritesRemoveButton')}
+        >
+          <IonIcon icon={trashOutline} slot="icon-only" />
+        </IonButton>
+      </div>
     </article>
   );
 

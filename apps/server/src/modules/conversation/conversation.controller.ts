@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Sse, MessageEvent } from "@nestjs/common";
+import { Observable } from "rxjs";
+import { map } from "rxjs/operators";
 import { ConversationService } from "./conversation.service";
 import { StartConversationDto } from "./dto/start-conversation.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
@@ -23,5 +25,16 @@ export class ConversationController {
   @Get(":conversationId")
   getSession(@Param("conversationId") conversationId: string) {
     return this.conversationService.getSession(conversationId);
+  }
+
+  @Sse(":conversationId/events")
+  streamSession(
+    @Param("conversationId") conversationId: string,
+  ): Observable<MessageEvent> {
+    return this.conversationService.streamSession(conversationId).pipe(
+      map((session) => ({
+        data: session,
+      })),
+    );
   }
 }
