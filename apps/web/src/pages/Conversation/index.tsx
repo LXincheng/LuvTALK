@@ -9,7 +9,7 @@ import {
   IonPopover,
   IonSpinner,
   IonText,
-  IonTextarea,
+  IonToast,
   IonToolbar,
 } from "@ionic/react";
 import {
@@ -68,7 +68,12 @@ const ConversationPage: React.FC = () => {
     MouseEvent | undefined
   >(undefined);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [isAwaitingReply, setIsAwaitingReply] = useState(false);
+  const [favoriteToast, setFavoriteToast] = useState<{
+    status: "success" | "error";
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     setActiveScenario(ensureScenario(scenarioId));
@@ -91,6 +96,15 @@ const ConversationPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!composerInputRef.current) {
+      return;
+    }
+    const element = composerInputRef.current;
+    element.style.height = "auto";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [input]);
+
   const session = conversation.session;
   const messagesCount = session?.messages.length ?? 0;
 
@@ -111,12 +125,23 @@ const ConversationPage: React.FC = () => {
   };
 
   const handleFavorite = async (message: ConversationMessage) => {
-    await favorites.add({
-      title: message.sender === "ai" ? "AI Reply" : "Learner Note",
-      content: message.text,
-      type: message.sender === "ai" ? "cultural" : "phrase",
-      metadata: { language: message.language, scenario: activeScenario },
-    });
+    try {
+      const created = await favorites.add({
+        title: message.sender === "ai" ? "AI Reply" : "Learner Note",
+        content: message.text,
+        type: message.sender === "ai" ? "cultural" : "phrase",
+        metadata: { language: message.language, scenario: activeScenario },
+      });
+      setFavoriteToast({
+        status: created ? "success" : "error",
+        message: created ? t("favoritesAddSuccess") : t("favoritesAddError"),
+      });
+    } catch {
+      setFavoriteToast({
+        status: "error",
+        message: t("favoritesAddError"),
+      });
+    }
   };
 
   const handleMicrophone = () => {
@@ -408,6 +433,14 @@ const ConversationPage: React.FC = () => {
           </section>
         </div>
       </IonContent>
+      <IonToast
+        isOpen={Boolean(favoriteToast)}
+        message={favoriteToast?.message ?? ""}
+        duration={500}
+        onDidDismiss={() => setFavoriteToast(null)}
+        className={`conversation-toast ${favoriteToast?.status ?? "success"}`}
+        position="top"
+      />
       <div className="conversation-composer glass-panel">
         <div className="composer-inner">
           <button
@@ -423,12 +456,14 @@ const ConversationPage: React.FC = () => {
               isRecording ? "recording" : ""
             }`}
           >
-            <IonTextarea
-              autoGrow
+            <textarea
+              ref={composerInputRef}
+              className="conversation-textarea"
               rows={1}
               value={input}
               placeholder={t("conversationInputPlaceholder")}
-              onIonChange={(event) => setInput(event.detail.value ?? "")}
+              onChange={(event) => setInput(event.target.value)}
+              aria-label={t("conversationInputPlaceholder")}
             />
           </div>
           <div className="conversation-input-actions">

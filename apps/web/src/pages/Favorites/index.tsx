@@ -8,10 +8,11 @@ import {
   IonPage,
   IonSpinner,
   IonTitle,
+  IonToast,
   IonToolbar,
 } from "@ionic/react";
 import { bookOutline, homeOutline, trashOutline } from "ionicons/icons";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import ThemeToggle from "../../components/ThemeToggle";
 import { FavoriteItem, FavoriteType } from "../../types/api";
 import { useAppStore } from "../../store/useAppStore";
@@ -40,6 +41,10 @@ const typeLabelKeys: Record<
 
 const FavoritesPage = () => {
   const favorites = useAppStore((state) => state.favorites);
+  const [toast, setToast] = useState<{
+    status: "success" | "error";
+    message: string;
+  } | null>(null);
   const { t } = useLocale();
 
   useEffect(() => {
@@ -81,7 +86,15 @@ const FavoritesPage = () => {
         <IonButton
           fill="clear"
           size="small"
-          onClick={() => favorites.remove(item.id)}
+          onClick={async () => {
+            const removed = await favorites.remove(item.id);
+            setToast({
+              status: removed ? "success" : "error",
+              message: removed
+                ? t("favoritesRemoveSuccess")
+                : t("favoritesRemoveError"),
+            });
+          }}
           title={t("favoritesRemoveButton")}
         >
           <IonIcon icon={trashOutline} slot="icon-only" />
@@ -111,6 +124,14 @@ const FavoritesPage = () => {
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen className="favorites-content">
+        <IonToast
+          isOpen={Boolean(toast)}
+          message={toast?.message ?? ""}
+          duration={500}
+          onDidDismiss={() => setToast(null)}
+          className={`conversation-toast ${toast?.status ?? "success"}`}
+          position="top"
+        />
         <section className="favorites-hero glass-panel glass-panel-flat">
           <div className="favorites-hero-line">
             <span>{t("favoritesHeroLabel")}</span>

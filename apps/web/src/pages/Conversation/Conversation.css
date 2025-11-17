@@ -407,44 +407,20 @@ ion-content.conversation-content {
 
 .conversation-input-row {
   display: flex;
+  align-items: center;
   margin: auto;
   border: 1px solid var(--glass-border);
   border-radius: 1.25rem;
-  padding: 0.15rem 0.55rem;
+  padding: 0;
   background: rgba(255, 255, 255, 0.78);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
   transition: border 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  overflow: hidden;
 }
 
 .conversation-input-row.recording {
   border-color: #5a63ff;
   box-shadow: 0 0 0 3px rgba(90, 99, 255, 0.15);
-}
-
-.conversation-input-row ion-textarea {
-  --padding-start: 0.4rem;
-  --padding-end: 0.4rem;
-  --padding-top: 0.2rem;
-  --padding-bottom: 0.2rem;
-  --background: transparent;
-  --color: var(--ion-color-dark);
-  --placeholder-color: rgba(15, 23, 42, 0.5);
-  --placeholder-opacity: 1;
-  --border-width: 0;
-  --highlight-color-focused: transparent;
-  --highlight-color-invalid: transparent;
-  --highlight-color-valid: transparent;
-  --inner-padding-bottom: 0;
-  flex: 1;
-}
-
-.conversation-input-row ion-textarea textarea {
-  color: var(--ion-color-dark);
-}
-
-.conversation-input-row ion-textarea textarea::placeholder {
-  text-align: center;
-  color: rgba(15, 23, 42, 0.6);
 }
 
 .speech-indicator {
@@ -465,13 +441,6 @@ ion-content.conversation-content {
   color: var(--ion-color-primary);
 }
 
-.app-toast {
-  --background: rgba(15, 23, 42, 0.75);
-  --color: #f8fafc;
-  --border-radius: 999px;
-  text-align: center;
-  backdrop-filter: blur(18px);
-}
 
 .voice-memo-preview {
   margin-top: 0.55rem;
@@ -540,10 +509,6 @@ ion-content.conversation-content {
   100% {
     transform: scale(1);
   }
-}
-
-.conversation-input-row ion-textarea textarea {
-  color: var(--ion-color-dark);
 }
 
 .conversation-input-actions {
@@ -677,4 +642,32 @@ body.ion-palette-dark .voice-memo-icon {
 
 body.ion-palette-dark .voice-memo-dismiss {
   color: rgba(226, 232, 240, 0.7);
+}
+.conversation-textarea {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: transparent;
+  resize: none;
+  outline: none;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.4;
+  padding: 0.5rem 0.85rem;
+  color: var(--ion-color-dark);
+  caret-color: var(--ion-color-primary);
+  min-height: 44px;
+}
+
+.conversation-textarea::placeholder {
+  color: rgba(15, 23, 42, 0.65);
+}
+
+body.ion-palette-dark .conversation-textarea {
+  color: #f8fafc;
+  caret-color: #c7d2fe;
+}
+
+body.ion-palette-dark .conversation-textarea::placeholder {
+  color: rgba(226, 232, 240, 0.85);
 }

@@ -295,16 +295,25 @@ export const useAppStore = create<AppState>((set, get) => {
       },
       async remove(id) {
         const { items } = get().favorites;
+        const nextItems = items.filter((item) => item.id !== id);
         set((state) => ({
           favorites: {
             ...state.favorites,
-            items: items.filter((item) => item.id !== id),
+            items: nextItems,
           },
         }));
         try {
           await removeFavorite(id);
+          return true;
         } catch (error) {
           console.warn("Failed to remove favorite", error);
+          set((state) => ({
+            favorites: {
+              ...state.favorites,
+              items,
+            },
+          }));
+          return false;
         }
       },
     },
