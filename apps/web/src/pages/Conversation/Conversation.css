@@ -441,7 +441,6 @@ ion-content.conversation-content {
   color: var(--ion-color-primary);
 }
 
-
 .voice-memo-preview {
   margin-top: 0.55rem;
   padding: 0.65rem 0.85rem;
@@ -651,7 +650,7 @@ body.ion-palette-dark .voice-memo-dismiss {
   resize: none;
   outline: none;
   font: inherit;
-  font-size: 1rem;
+  font-size: 0.9rem;
   line-height: 1.4;
   padding: 0.5rem 0.85rem;
   color: var(--ion-color-dark);

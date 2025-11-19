@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { FavoriteItem, ConversationMessage, ConversationSession } from "../types/api";
+import {
+  FavoriteItem,
+  ConversationMessage,
+  ConversationSession,
+} from "../types/api";
 import { LanguageCode } from "../types/language";
 import {
   createFavorite,
@@ -41,70 +45,7 @@ interface AppState {
   favorites: FavoritesSlice;
 }
 
-const seedFavorites: FavoriteItem[] = [
-  {
-    id: 'seed-1',
-    type: 'cultural',
-    title: '问路礼貌开场',
-    content: '请问一下，最近的地铁站怎么走？',
-    metadata: { language: 'mandarin', scenario: 'directions' },
-    createdAt: new Date().toISOString(),
-    avatar: '/favicon.png',
-    authorName: 'AI Tutor',
-  },
-  {
-    id: 'seed-2',
-    type: 'phrase',
-    title: '餐厅订位',
-    content: 'Can I get a table for two by the window?',
-    metadata: { language: 'english', scenario: 'restaurant' },
-    createdAt: new Date().toISOString(),
-    avatar: '/favicon.png',
-    authorName: 'AI Tutor',
-  },
-  {
-    id: 'seed-3',
-    type: 'vocabulary',
-    title: '表达感谢',
-    content: '多谢晒你啊！',
-    metadata: { language: 'cantonese', scenario: 'daily' },
-    createdAt: new Date().toISOString(),
-    avatar: '/favicon.png',
-    authorName: 'AI Tutor',
-  },
-  {
-    id: 'seed-4',
-    type: 'scenario',
-    title: '机场值机',
-    content: "Hello, I'm checking in for flight CX902. Could I have a window seat?",
-    metadata: { language: 'english', scenario: 'travel' },
-    createdAt: new Date().toISOString(),
-    avatar: '/favicon.png',
-    authorName: 'AI Tutor',
-  },
-  {
-    id: 'seed-5',
-    type: 'phrase',
-    title: '重述请求',
-    content: '唔好意思，我听唔清楚，可以再讲一次吗？',
-    metadata: { language: 'cantonese', scenario: 'daily' },
-    createdAt: new Date().toISOString(),
-    avatar: '/favicon.png',
-    authorName: 'AI Tutor',
-  },
-  {
-    id: 'seed-6',
-    type: 'vocabulary',
-    title: '点餐推荐',
-    content: '请推荐一份当地人最常点的家常菜。',
-    metadata: { language: 'mandarin', scenario: 'restaurant' },
-    createdAt: new Date().toISOString(),
-    avatar: '/favicon.png',
-    authorName: 'AI Tutor',
-  },
-];
-
-export const useAppStore = create<AppState>((set, get) => {
+export const useAppStore = create<AppState>((set, get)  => {
   let stream: EventSource | undefined;
 
   const closeStream = () => {
@@ -251,7 +192,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }));
         try {
           const items = await fetchFavorites();
-          const hydrated = items.length ? items : seedFavorites;
+          const hydrated = items;
           set((state) => ({
             favorites: { ...state.favorites, loading: false, items: hydrated },
           }));
@@ -277,7 +218,9 @@ export const useAppStore = create<AppState>((set, get) => {
               loading: false,
               items: [
                 created,
-                ...state.favorites.items.filter((item) => item.id !== created.id),
+                ...state.favorites.items.filter(
+                  (item) => item.id !== created.id
+                ),
               ],
             },
           }));

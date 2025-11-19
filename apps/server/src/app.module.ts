@@ -6,6 +6,7 @@ import { CultureModule } from "./modules/culture/culture.module";
 import { FavoritesModule } from "./modules/favorites/favorites.module";
 import { HealthModule } from "./modules/health/health.module";
 import { TranslationModule } from "./modules/translation/translation.module";
+import { VoiceTutorModule } from "./modules/voice-tutor/voice-tutor.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TranslationModule } from "./modules/translation/translation.module";
     TranslationModule,
     FavoritesModule,
     HealthModule,
+    VoiceTutorModule,
   ],
 })
 export class AppModule {}

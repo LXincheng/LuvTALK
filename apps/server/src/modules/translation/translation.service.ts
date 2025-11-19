@@ -125,7 +125,7 @@ export class TranslationService {
 
   private buildDictionary() {
     return {
-      "你好": {
+      你好: {
         mandarin: "你好",
         cantonese: "你好",
         english: "Hello",
@@ -150,7 +150,7 @@ export class TranslationService {
           ],
         },
       },
-      "谢谢": {
+      谢谢: {
         mandarin: "谢谢",
         cantonese: "多谢晒",
         english: "Thank you so much",
@@ -206,9 +206,7 @@ export class TranslationService {
 
     const body = {
       model:
-        envConfig.deepseek.model ||
-        process.env.DS_AI_MODEL ||
-        DEFAULT_MODEL,
+        envConfig.deepseek.model || process.env.DS_AI_MODEL || DEFAULT_MODEL,
       messages: [
         {
           role: "system",

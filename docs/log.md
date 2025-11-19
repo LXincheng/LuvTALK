@@ -12,6 +12,11 @@
 - 后端：`ConversationService` 增加 SSE 广播（`@Sse`）、会话 Subject 管理，DeepSeek 请求按标准 baseURL/模型发送，中文 fallback 文案恢复为 UTF-8。
 - 前端：Zustand 增加乐观消息+EventSource 订阅，避免发送时卡顿；语言菜单未选中项在白天模式增加可见背景；收藏卡片的操作按钮与元信息同行，减少空白。
 
+### 2025-11-19
+- 语音 Tutor 阶段一：新增 `VoiceTutorModule`（controller/service），暴露 `POST /conversation/:conversationId/voice`，通过 `multer` 内存存储+类型守卫校验音频，仅接受 webm/wav/m4a/mp4/mpeg，限制 5 MB。
+- 上传链路：接口会先校验会话是否存在，再把文件落盘到 `tmp/voice-uploads/<conversationId>/voice-op-<timestamp>-<uuid>.<ext>`，返回 `{ operationId, status: "received" }` 供后续 GPT-5/DS 分析追踪。
+- 使用说明：客户端以 `multipart/form-data` 发送 `audio` 字段即可。若缺文件/格式不符/超限返回 400，会话不存在返回 404。当前阶段只负责音频落盘，为下个阶段的语音识别与 AI 分析铺路。
+
 ## 项目概况
 LuvTALK 是面向粤语/英语学习者的语言练习 PWA，提供实时对话、AI 纠错、收藏和文化提示。前端为 React 19 + Ionic React 8，后端为 NestJS 11 + Prisma，AI 能力对接 DeepSeek。
 

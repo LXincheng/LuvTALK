@@ -44,7 +44,7 @@ export const buildCulturePrompt = ({
     `Target language: ${describeLanguage(targetLanguage)}.`,
     "Generate 3 concise culture cards for language learners.",
     "Each card must include: title, scenario, expression (target language), explanation (native language), tip (actionable advice).",
-    "Return ONLY JSON shaped as {\"cards\":[{\"title\":\"\",\"scenario\":\"\",\"expression\":\"\",\"explanation\":\"\",\"tip\":\"\"}]}",
+    'Return ONLY JSON shaped as {"cards":[{"title":"","scenario":"","expression":"","explanation":"","tip":""}]}',
     "Cards must be practical, mention etiquette or context, and avoid generic filler.",
   ].join("\n");
 };

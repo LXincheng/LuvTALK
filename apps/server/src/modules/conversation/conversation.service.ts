@@ -1,39 +1,38 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { randomUUID } from 'crypto';
-import { Observable, Subject } from 'rxjs';
-import { envConfig } from '../../common/config/env.config';
-import { buildConversationSystemPrompt } from '../../common/config/prompt.config';
-import { LanguageCode } from '../../common/enums/language-code.enum';
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { randomUUID } from "crypto";
+import { Observable, Subject } from "rxjs";
+import { envConfig } from "../../common/config/env.config";
+import { buildConversationSystemPrompt } from "../../common/config/prompt.config";
+import { LanguageCode } from "../../common/enums/language-code.enum";
 import {
   ConversationCoachNote,
   ConversationMessage,
   ConversationSession,
-} from '../../common/types/conversation.types';
+} from "../../common/types/conversation.types";
 import {
   AiResponse,
   AiResponseSchema,
-} from '../../common/types/ai-response.schema';
-import { PrismaService } from '../../core/prisma/prisma.service';
-import { TranslationService } from '../translation/translation.service';
-import { SendMessageDto } from './dto/send-message.dto';
-import { StartConversationDto } from './dto/start-conversation.dto';
+} from "../../common/types/ai-response.schema";
+import { PrismaService } from "../../core/prisma/prisma.service";
+import { TranslationService } from "../translation/translation.service";
+import { SendMessageDto } from "./dto/send-message.dto";
+import { StartConversationDto } from "./dto/start-conversation.dto";
 
-const DEFAULT_MODEL = 'deepseek-chat';
-const DEFAULT_BASE_URL = 'https://api.deepseek.com';
+const DEFAULT_MODEL = "deepseek-chat";
+const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
   private readonly sessions = new Map<string, ConversationSession>();
-  private readonly sessionStreams = new Map<string, Subject<ConversationSession>>();
+  private readonly sessionStreams = new Map<
+    string,
+    Subject<ConversationSession>
+  >();
   private readonly avatars = {
-    ai: 'https://api.dicebear.com/6.x/bottts-neutral/svg?seed=coach&background=%23e5edff',
-    user: 'https://api.dicebear.com/6.x/bottts-neutral/svg?seed=learner&background=%23fef3c7',
+    ai: "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=coach&background=%23e5edff",
+    user: "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=learner&background=%23fef3c7",
   };
   private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
 
@@ -44,7 +43,7 @@ export class ConversationService {
 
   async startSession(dto: StartConversationDto): Promise<ConversationSession> {
     const now = new Date().toISOString();
-    const scenarioId = dto.scenarioId ?? 'daily';
+    const scenarioId = dto.scenarioId ?? "daily";
     const nativeLanguage = dto.nativeLanguage ?? LanguageCode.Mandarin;
     const welcomeMessage = this.buildSystemWelcome(
       scenarioId,
@@ -79,7 +78,7 @@ export class ConversationService {
     }
 
     const userMessage = this.buildMessage(
-      'user',
+      "user",
       trimmed,
       session.targetLanguage,
       session.nativeLanguage,
@@ -88,7 +87,11 @@ export class ConversationService {
 
     const aiPayload =
       (await this.requestDsAi(session, trimmed)) ??
-      this.composeAiResponse(trimmed, session.targetLanguage, session.scenarioId);
+      this.composeAiResponse(
+        trimmed,
+        session.targetLanguage,
+        session.scenarioId,
+      );
 
     const translationText = await this.translateForNativeLanguage(
       aiPayload.reply,
@@ -97,7 +100,7 @@ export class ConversationService {
     );
 
     const aiMessage = this.buildMessage(
-      'ai',
+      "ai",
       aiPayload.reply,
       session.targetLanguage,
       session.nativeLanguage,
@@ -143,8 +146,8 @@ export class ConversationService {
           messages: persistedMessages,
           coach: record.score
             ? {
-                correction: '',
-                cultureNote: '',
+                correction: "",
+                cultureNote: "",
                 associativePhrases: [],
                 overallScore: record.score,
               }
@@ -175,9 +178,15 @@ export class ConversationService {
     const welcomeText = prefersEnglish
       ? `👋 Welcome to the “${title}” scenario.\nI’ll coach you in ${targetLabel} and share hints in ${nativeLabel}. Let’s warm up with a friendly greeting.`
       : `👋 欢迎来到「${title}」练习场景。\n我会用${targetLabel}陪你练习，并用${nativeLabel}提供提示。我们先从寒暄热身开始吧。`;
-    return this.buildMessage('ai', welcomeText, targetLanguage, nativeLanguage, {
-      createdAt: timestamp,
-    });
+    return this.buildMessage(
+      "ai",
+      welcomeText,
+      targetLanguage,
+      nativeLanguage,
+      {
+        createdAt: timestamp,
+      },
+    );
   }
 
   private describeScenario(
@@ -185,22 +194,24 @@ export class ConversationService {
     nativeLanguage?: LanguageCode,
   ): string {
     const zhMap: Record<string, string> = {
-      restaurant: '餐厅点单',
-      shopping: '商店交流',
-      directions: '问路指引',
-      business: '商务寒暄',
-      daily: '日常聊天',
+      restaurant: "餐厅点单",
+      shopping: "商店交流",
+      directions: "问路指引",
+      business: "商务寒暄",
+      daily: "日常聊天",
     };
     const enMap: Record<string, string> = {
-      restaurant: 'Dining etiquette',
-      shopping: 'Shopping chat',
-      directions: 'Asking for directions',
-      business: 'Business meetup',
-      daily: 'Daily small talk',
+      restaurant: "Dining etiquette",
+      shopping: "Shopping chat",
+      directions: "Asking for directions",
+      business: "Business meetup",
+      daily: "Daily small talk",
     };
     const prefersEnglish = nativeLanguage === LanguageCode.English;
     const map = prefersEnglish ? enMap : zhMap;
-    return map[scenarioId] ?? (prefersEnglish ? 'Conversation practice' : '沉浸对话');
+    return (
+      map[scenarioId] ?? (prefersEnglish ? "Conversation practice" : "沉浸对话")
+    );
   }
 
   private describeLanguage(
@@ -210,11 +221,11 @@ export class ConversationService {
     const prefersEnglish = nativeLanguage === LanguageCode.English;
     switch (language) {
       case LanguageCode.Cantonese:
-        return prefersEnglish ? 'Cantonese' : '粤语';
+        return prefersEnglish ? "Cantonese" : "粤语";
       case LanguageCode.Mandarin:
-        return prefersEnglish ? 'Mandarin' : '普通话';
+        return prefersEnglish ? "Mandarin" : "普通话";
       case LanguageCode.English:
-        return prefersEnglish ? 'English' : '英语';
+        return prefersEnglish ? "English" : "英语";
       default:
         return language;
     }
@@ -229,12 +240,12 @@ export class ConversationService {
       process.env.DEEPSEEK_API_KEY ||
       process.env.DS_AI_API_KEY;
     if (!apiKey) {
-      this.logger.warn('DeepSeek API key missing; using fallback payload.');
+      this.logger.warn("DeepSeek API key missing; using fallback payload.");
       return null;
     }
 
     const history = session.messages.slice(-6).map((entry) => ({
-      role: entry.sender === 'ai' ? 'assistant' : 'user',
+      role: entry.sender === "ai" ? "assistant" : "user",
       content: entry.text,
     }));
 
@@ -248,18 +259,16 @@ export class ConversationService {
     });
 
     const model =
-      envConfig.deepseek.model ||
-      process.env.DS_AI_MODEL ||
-      DEFAULT_MODEL;
+      envConfig.deepseek.model || process.env.DS_AI_MODEL || DEFAULT_MODEL;
 
     const payload = {
       model,
       temperature: 0.6,
       stream: false,
       messages: [
-        { role: 'system', content: prompt },
+        { role: "system", content: prompt },
         ...history,
-        { role: 'user', content: latestMessage },
+        { role: "user", content: latestMessage },
       ],
     };
 
@@ -269,9 +278,9 @@ export class ConversationService {
 
     try {
       const response = await fetch(this.deepSeekEndpoint, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(payload),
@@ -286,28 +295,26 @@ export class ConversationService {
       }
 
       const raw: unknown = await response.json();
-      const content =
-        (raw as { choices?: Array<{ message?: { content?: string } }> })
-          ?.choices?.[0]?.message?.content;
+      const content = (
+        raw as { choices?: Array<{ message?: { content?: string } }> }
+      )?.choices?.[0]?.message?.content;
 
       if (!content) {
-        this.logger.warn('DeepSeek returned empty content.');
+        this.logger.warn("DeepSeek returned empty content.");
         return null;
       }
 
       const jsonText = content.slice(
-        content.indexOf('{'),
-        content.lastIndexOf('}') + 1,
+        content.indexOf("{"),
+        content.lastIndexOf("}") + 1,
       );
       const parsed = JSON.parse(jsonText) as Record<string, unknown>;
       if (!parsed.scoreReason) {
-        parsed.scoreReason = 'Auto-evaluated by DeepSeek';
+        parsed.scoreReason = "Auto-evaluated by DeepSeek";
       }
       return AiResponseSchema.parse(parsed);
     } catch (error) {
-      this.logger.error(
-        `DeepSeek call failed: ${(error as Error).message}`,
-      );
+      this.logger.error(`DeepSeek call failed: ${(error as Error).message}`);
       return null;
     }
   }
@@ -340,7 +347,7 @@ export class ConversationService {
     language: LanguageCode,
     scenarioId: string,
   ): AiResponse {
-    const polite = message || '（等待输入）';
+    const polite = message || "（等待输入）";
     const score = Math.max(
       60,
       Math.min(98, 92 - Math.round(Math.min(polite.length, 120) / 6)),
@@ -350,18 +357,18 @@ export class ConversationService {
       reply: this.buildReply(polite, language, scenarioId),
       correction:
         polite.length > 28
-          ? '语句稍长，可以适当停顿。'
-          : '表达清晰，保持礼貌语气即可。',
+          ? "语句稍长，可以适当停顿。"
+          : "表达清晰，保持礼貌语气即可。",
       cultureNote:
-        scenarioId === 'restaurant'
-          ? '点餐前赞美餐厅或询问招牌菜，会让对话更自然。'
-          : '搭配表情和手势能让口语更真诚。',
+        scenarioId === "restaurant"
+          ? "点餐前赞美餐厅或询问招牌菜，会让对话更自然。"
+          : "搭配表情和手势能让口语更真诚。",
       associativePhrases: [
-        '可以帮我推荐一下招牌菜吗？',
-        'Could you recommend something locals enjoy?',
+        "可以帮我推荐一下招牌菜吗？",
+        "Could you recommend something locals enjoy?",
       ],
       score,
-      scoreReason: '基于语气与礼貌度的快速估分',
+      scoreReason: "基于语气与礼貌度的快速估分",
     });
   }
 
@@ -380,23 +387,23 @@ export class ConversationService {
   }
 
   private buildMessage(
-    sender: 'user' | 'ai',
+    sender: "user" | "ai",
     text: string,
     language: LanguageCode,
     nativeLanguage?: LanguageCode,
     extra?: Partial<ConversationMessage>,
   ): ConversationMessage {
     const prefersEnglish = nativeLanguage === LanguageCode.English;
-    const aiName = prefersEnglish ? 'LuvTALK Tutor' : 'LuvTALK 导师';
-    const userName = prefersEnglish ? 'You' : '我';
+    const aiName = prefersEnglish ? "LuvTALK Tutor" : "LuvTALK 导师";
+    const userName = prefersEnglish ? "You" : "我";
     return {
       id: randomUUID(),
       sender,
       text,
       language,
       createdAt: extra?.createdAt ?? new Date().toISOString(),
-      senderName: sender === 'ai' ? aiName : userName,
-      avatar: sender === 'ai' ? this.avatars.ai : this.avatars.user,
+      senderName: sender === "ai" ? aiName : userName,
+      avatar: sender === "ai" ? this.avatars.ai : this.avatars.user,
       meta: extra?.meta,
     };
   }
@@ -458,11 +465,11 @@ export class ConversationService {
       envConfig.deepseek.apiUrl ||
       process.env.DS_AI_API_URL ||
       DEFAULT_BASE_URL;
-    const normalized = raw.replace(/\/$/, '');
-    if (normalized.endsWith('/chat/completions')) {
+    const normalized = raw.replace(/\/$/, "");
+    if (normalized.endsWith("/chat/completions")) {
       return normalized;
     }
-    if (normalized.endsWith('/v1')) {
+    if (normalized.endsWith("/v1")) {
       return `${normalized}/chat/completions`;
     }
     return `${normalized}/v1/chat/completions`;
