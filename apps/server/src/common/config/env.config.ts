@@ -10,6 +10,13 @@ export const envConfig = {
     apiUrl: process.env.DS_AI_API_URL ?? "https://api.deepseek.com/v1",
     model: process.env.DS_AI_MODEL ?? "deepseek-chat",
   },
+  openai: {
+    apiKey: (process.env.OPENAI_API_KEY ?? "").trim(),
+    apiUrl: process.env.OPENAI_API_URL ?? "https://api.openai.com/v1",
+    transcribeModel: process.env.OPENAI_TRANSCRIBE_MODEL ?? "gpt-4o-transcribe",
+    tutorModel: process.env.OPENAI_TUTOR_MODEL ?? "gpt-5.1",
+    ttsModel: process.env.OPENAI_TTS_MODEL ?? "gpt-4o-mini-tts",
+  },
 };
 
 export type EnvConfig = typeof envConfig;

@@ -17,6 +17,16 @@
 - 上传链路：接口会先校验会话是否存在，再把文件落盘到 `tmp/voice-uploads/<conversationId>/voice-op-<timestamp>-<uuid>.<ext>`，返回 `{ operationId, status: "received" }` 供后续 GPT-5/DS 分析追踪。
 - 使用说明：客户端以 `multipart/form-data` 发送 `audio` 字段即可。若缺文件/格式不符/超限返回 400，会话不存在返回 404。当前阶段只负责音频落盘，为下个阶段的语音识别与 AI 分析铺路。
 
+### 2025-11-19（续）
+- OpenAI 接入：`env.config` 新增 `openai` 配置段，读取 `OPENAI_API_URL/KEY` 与 `OPENAI_TRANSCRIBE_MODEL`，统一走 GPT‑5/GPT‑5.1 序列模型。
+- 自动转写：`VoiceTutorService` 在落盘后异步调用 `transcribeWithOpenAi`，成功后直接调用 `ConversationService.processMessage`，并在 `meta.audioUrl` 中写入 `/api/conversation/:id/voice/:fileName` 以备后续播放。
+- Voice -> 文本：`ConversationService.processMessage` 新增可选 `options.userMessageMeta`，让语音消息保留音频引用；转写失败会写警告日志但不会中断上传。
+- 测试方式：上传成功后可在服务器日志中看到 `Stored voice upload...` 和 `OpenAI transcription` 的输出来确认 GPT 流程；若 OpenAI 配置缺失会提示“无法执行语音识别”。
+
+### 2025-11-20
+- 转写稳定性：`VoiceTutorService` 在调用 GPT‑5 音频接口时改用原始 `response.text()`，遇到空响应或非 JSON 内容会打印原始文本并跳过解析，避免 `Unexpected end of JSON input` 崩溃；同时移除 `response_format=verbose_json`，兼容 Codex 网关的默认输出。
+- 依赖声明：显式引入 `undici` 的 `FormData` 和 Node 内置 `Blob`，确保在 Node 环境下构建 multipart 请求时不会出现类型/运行时差异。
+
 ## 项目概况
 LuvTALK 是面向粤语/英语学习者的语言练习 PWA，提供实时对话、AI 纠错、收藏和文化提示。前端为 React 19 + Ionic React 8，后端为 NestJS 11 + Prisma，AI 能力对接 DeepSeek。
 

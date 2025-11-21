@@ -22,6 +22,10 @@ import { StartConversationDto } from "./dto/start-conversation.dto";
 const DEFAULT_MODEL = "deepseek-chat";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
+interface ProcessMessageOptions {
+  userMessageMeta?: ConversationMessage["meta"];
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
@@ -70,6 +74,7 @@ export class ConversationService {
   async processMessage(
     conversationId: string,
     dto: SendMessageDto,
+    options?: ProcessMessageOptions,
   ): Promise<ConversationSession> {
     const session = await this.getSession(conversationId);
     const trimmed = dto.message.trim();
@@ -82,6 +87,9 @@ export class ConversationService {
       trimmed,
       session.targetLanguage,
       session.nativeLanguage,
+      {
+        meta: options?.userMessageMeta,
+      },
     );
     session.messages.push(userMessage);
 
