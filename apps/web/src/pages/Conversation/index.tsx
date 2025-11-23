@@ -18,10 +18,12 @@ import {
   bookmarkOutline,
   bookOutline,
   chevronDownOutline,
+  closeOutline,
   micOutline,
   sparklesOutline,
+  volumeHighOutline,
 } from "ionicons/icons";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 import ThemeToggle from "../../components/ThemeToggle";
 import { useAppStore } from "../../store/useAppStore";
@@ -39,6 +41,9 @@ import {
   SCENARIO_LABELS,
   ScenarioId,
 } from "../../shared/constants/scenarios";
+import { useVoiceRecorder } from "../../hooks/useVoiceRecorder";
+import { API_BASE_URL } from "../../services/apiClient";
+import { synthesizeTutorSpeech } from "../../services/conversationService";
 import "./Conversation.css";
 
 const learningLanguageOrder: LanguageCode[] = [
@@ -46,6 +51,11 @@ const learningLanguageOrder: LanguageCode[] = [
   "english",
   "mandarin",
 ];
+
+type TtsEntry = {
+  status: "idle" | "loading" | "ready" | "error";
+  audioUrl?: string;
+};
 
 const ensureScenario = (value?: string): ScenarioId =>
   SCENARIO_IDS.includes(value as ScenarioId) ? (value as ScenarioId) : "daily";
@@ -63,7 +73,6 @@ const ConversationPage: React.FC = () => {
     ensureScenario(scenarioId)
   );
   const [input, setInput] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
   const [languagePopoverEvent, setLanguagePopoverEvent] = useState<
     MouseEvent | undefined
   >(undefined);
@@ -74,6 +83,24 @@ const ConversationPage: React.FC = () => {
     status: "success" | "error";
     message: string;
   } | null>(null);
+  const [ttsEntries, setTtsEntries] = useState<Record<string, TtsEntry>>({});
+  const [voiceToast, setVoiceToast] = useState<{
+    status: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [voiceUploadStatus, setVoiceUploadStatus] = useState<
+    "idle" | "uploading"
+  >("idle");
+  const {
+    isSupported: isRecorderSupported,
+    isRecording,
+    start: startVoiceRecording,
+    stop: stopVoiceRecording,
+    reset: resetVoiceRecorder,
+    memo: voiceMemo,
+    error: recorderError,
+    permissionDenied,
+  } = useVoiceRecorder();
 
   useEffect(() => {
     setActiveScenario(ensureScenario(scenarioId));
@@ -109,8 +136,32 @@ const ConversationPage: React.FC = () => {
   const messagesCount = session?.messages.length ?? 0;
 
   const handleSend = async () => {
+    if (!conversation.session || isAwaitingReply) {
+      return;
+    }
+    if (voiceMemo) {
+      setVoiceUploadStatus("uploading");
+      setIsAwaitingReply(true);
+      try {
+        await conversation.sendVoice(voiceMemo.blob);
+        setVoiceUploadStatus("idle");
+        setVoiceToast({
+          status: "success",
+          message: t("conversationVoiceUploadSuccess"),
+        });
+        resetVoiceRecorder();
+      } catch {
+        setVoiceUploadStatus("idle");
+        setIsAwaitingReply(false);
+        setVoiceToast({
+          status: "error",
+          message: t("conversationVoiceSendError"),
+        });
+      }
+      return;
+    }
     const text = input.trim();
-    if (!text || !conversation.session) {
+    if (!text) {
       return;
     }
     setInput("");
@@ -144,13 +195,31 @@ const ConversationPage: React.FC = () => {
     }
   };
 
-  const handleMicrophone = () => {
-    setIsRecording((prev) => !prev);
-    if (!isRecording) {
-      setTimeout(() => {
-        setIsRecording(false);
-        setInput(t("conversationMicSeedText"));
-      }, 1800);
+  const handleMicrophone = async () => {
+    if (voiceUploadStatus === "uploading") {
+      return;
+    }
+    if (!isRecorderSupported) {
+      setVoiceToast({
+        status: "error",
+        message: t("conversationVoiceNotSupported"),
+      });
+      return;
+    }
+    if (isRecording) {
+      stopVoiceRecording();
+      setVoiceToast({
+        status: "success",
+        message: t("conversationVoiceRecordingStopped"),
+      });
+      return;
+    }
+    const started = await startVoiceRecording();
+    if (started) {
+      setVoiceToast({
+        status: "success",
+        message: t("conversationVoiceRecordingStarted"),
+      });
     }
   };
 
@@ -172,13 +241,33 @@ const ConversationPage: React.FC = () => {
     if (latest?.sender === "ai") {
       setIsAwaitingReply(false);
     }
-  }, [isAwaitingReply, session?.id, session?.messages?.length]);
+  }, [isAwaitingReply, session]);
 
   useEffect(() => {
     if (!session) {
       setIsAwaitingReply(false);
     }
+  }, [session]);
+
+  useEffect(() => {
+    setTtsEntries({});
   }, [session?.id]);
+
+  useEffect(() => {
+    if (permissionDenied) {
+      setVoiceToast({
+        status: "error",
+        message: t("conversationVoicePermissionDenied"),
+      });
+      return;
+    }
+    if (recorderError) {
+      setVoiceToast({
+        status: "error",
+        message: t("conversationVoiceGenericError"),
+      });
+    }
+  }, [permissionDenied, recorderError, t]);
 
   useEffect(() => {
     if (isAwaitingReply && messagesContainerRef.current) {
@@ -227,6 +316,60 @@ const ConversationPage: React.FC = () => {
     setUiLanguage(language);
     setLanguagePopoverEvent(undefined);
   };
+
+  const requestTutorAudio = async (message: ConversationMessage) => {
+    if (!conversation.session) {
+      return;
+    }
+    const current = ttsEntries[message.id];
+    if (current?.status === "loading") {
+      return;
+    }
+    if (current?.status === "ready" && current.audioUrl) {
+      return;
+    }
+    setTtsEntries((prev) => ({
+      ...prev,
+      [message.id]: { status: "loading" },
+    }));
+    try {
+      const payload = await synthesizeTutorSpeech(conversation.session.id, {
+        text: message.text,
+      });
+      setTtsEntries((prev) => ({
+        ...prev,
+        [message.id]: { status: "ready", audioUrl: payload.audioUrl },
+      }));
+    } catch {
+      setTtsEntries((prev) => ({
+        ...prev,
+        [message.id]: { status: "error" },
+      }));
+      setVoiceToast({
+        status: "error",
+        message: t("conversationVoiceTtsError"),
+      });
+    }
+  };
+
+  const resolveAudioUrl = useCallback((path?: string) => {
+    if (!path) {
+      return undefined;
+    }
+    if (/^https?:\/\//i.test(path)) {
+      return path;
+    }
+    if (API_BASE_URL.startsWith("http")) {
+      try {
+        return new URL(path, API_BASE_URL).toString();
+      } catch {
+        return path;
+      }
+    }
+    return path;
+  }, []);
+
+  const showVoiceDraft = Boolean(voiceMemo);
 
   return (
     <IonPage className="conversation-page">
@@ -328,6 +471,22 @@ const ConversationPage: React.FC = () => {
             <div className="conversation-messages" ref={messagesContainerRef}>
               {session?.messages.map((message) => {
                 const hasScore = Boolean(message.meta?.score);
+                const ttsEntry = ttsEntries[message.id];
+                const userAudioUrl = resolveAudioUrl(message.meta?.audioUrl);
+                const tutorAudioUrl =
+                  message.sender === "ai" && ttsEntry?.audioUrl
+                    ? resolveAudioUrl(ttsEntry.audioUrl)
+                    : undefined;
+                const audioSources: string[] = [];
+                if (userAudioUrl) {
+                  audioSources.push(userAudioUrl);
+                }
+                if (
+                  tutorAudioUrl &&
+                  !audioSources.includes(tutorAudioUrl)
+                ) {
+                  audioSources.push(tutorAudioUrl);
+                }
                 const senderLabel =
                   message.sender === "ai"
                     ? message.senderName ?? t("navConversation")
@@ -370,6 +529,14 @@ const ConversationPage: React.FC = () => {
                               {message.meta.translation}
                             </p>
                           )}
+                          {audioSources.map((source, index) => (
+                            <div
+                              className="message-audio"
+                              key={`${message.id}-audio-${index}`}
+                            >
+                              <audio controls src={source} preload="none" />
+                            </div>
+                          ))}
                         </div>
                         {!hasScore && (
                           <IonButton
@@ -392,6 +559,29 @@ const ConversationPage: React.FC = () => {
                               ? ` - ${message.meta?.scoreReason}`
                               : ""}
                           </span>
+                          <IonButton
+                            fill="clear"
+                            size="small"
+                            className="message-tts-button"
+                            onClick={() => requestTutorAudio(message)}
+                            disabled={ttsEntry?.status === "loading"}
+                            title={t("conversationVoiceTtsButton")}
+                          >
+                            {ttsEntry?.status === "loading" ? (
+                              <>
+                                <IonSpinner
+                                  name="crescent"
+                                  className="message-tts-spinner"
+                                />
+                                <span>{t("conversationVoiceTtsFetching")}</span>
+                              </>
+                            ) : (
+                              <>
+                                <IonIcon icon={volumeHighOutline} />
+                                <span>{t("conversationVoiceTtsButton")}</span>
+                              </>
+                            )}
+                          </IonButton>
                           <IonButton
                             fill="clear"
                             size="small"
@@ -441,6 +631,14 @@ const ConversationPage: React.FC = () => {
         className={`conversation-toast ${favoriteToast?.status ?? "success"}`}
         position="top"
       />
+      <IonToast
+        isOpen={Boolean(voiceToast)}
+        message={voiceToast?.message ?? ""}
+        duration={800}
+        onDidDismiss={() => setVoiceToast(null)}
+        className={`conversation-toast ${voiceToast?.status ?? "success"}`}
+        position="top"
+      />
       <div className="conversation-composer glass-panel">
         <div className="composer-inner">
           <button
@@ -454,17 +652,55 @@ const ConversationPage: React.FC = () => {
           <div
             className={`conversation-input-row ${
               isRecording ? "recording" : ""
-            }`}
+            } ${showVoiceDraft ? "has-voice-draft" : ""}`}
           >
-            <textarea
-              ref={composerInputRef}
-              className="conversation-textarea"
-              rows={1}
-              value={input}
-              placeholder={t("conversationInputPlaceholder")}
-              onChange={(event) => setInput(event.target.value)}
-              aria-label={t("conversationInputPlaceholder")}
-            />
+            {voiceMemo ? (
+              <div className="voice-memo-inline">
+                <div className="voice-memo-icon">
+                  <IonIcon icon={micOutline} />
+                </div>
+                <div className="voice-memo-inline-body">
+                  <p>
+                    {t("conversationVoicePreviewHeading", {
+                      seconds: Math.max(
+                        1,
+                        Math.round(voiceMemo.durationMs / 1000)
+                      ),
+                    })}
+                  </p>
+                  <audio controls src={voiceMemo.url} preload="metadata" />
+                  <p className="voice-memo-transcript">
+                    {voiceUploadStatus === "uploading"
+                      ? t("conversationVoiceUploadPending")
+                      : t("conversationVoicePreviewNote")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="voice-memo-dismiss"
+                  onClick={() => {
+                    if (voiceUploadStatus === "uploading") {
+                      return;
+                    }
+                    setVoiceUploadStatus("idle");
+                    resetVoiceRecorder();
+                  }}
+                  aria-label={t("conversationVoiceDiscard")}
+                >
+                  <IonIcon icon={closeOutline} />
+                </button>
+              </div>
+            ) : (
+              <textarea
+                ref={composerInputRef}
+                className="conversation-textarea"
+                rows={1}
+                value={input}
+                placeholder={t("conversationInputPlaceholder")}
+                onChange={(event) => setInput(event.target.value)}
+                aria-label={t("conversationInputPlaceholder")}
+              />
+            )}
           </div>
           <div className="conversation-input-actions">
             <button
@@ -480,7 +716,12 @@ const ConversationPage: React.FC = () => {
               type="button"
               className="composer-icon-button"
               onClick={handleSend}
-              disabled={!session || !input.trim() || isAwaitingReply}
+              disabled={
+                !session ||
+                (!input.trim() && !voiceMemo) ||
+                isAwaitingReply ||
+                voiceUploadStatus === "uploading"
+              }
               aria-label={"Send message"}
             >
               <IonIcon icon={arrowUpOutline} />

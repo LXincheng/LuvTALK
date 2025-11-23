@@ -8,9 +8,10 @@ export async function apiRequest<TResponse>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<TResponse> {
+  const isFormDataBody = options.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormDataBody ? {} : { 'Content-Type': 'application/json' }),
       ...(options.headers ?? {}),
     },
     ...options,
@@ -32,5 +33,7 @@ export const apiClient = {
   get: <T>(path: string) => apiRequest<T>(path),
   post: <T, TBody = unknown>(path: string, body: TBody) =>
     apiRequest<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+  postForm: <T>(path: string, formData: FormData) =>
+    apiRequest<T>(path, { method: 'POST', body: formData }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
 };

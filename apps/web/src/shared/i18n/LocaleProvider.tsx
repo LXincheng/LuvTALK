@@ -49,6 +49,23 @@ const translations = {
     favoriteTypeScenario: "场景灵感",
     labelLanguage: "语言",
     labelScenario: "场景",
+    conversationVoicePreviewHeading: "{seconds} 秒语音片段已就绪",
+    conversationVoicePreviewNote:
+      "点击发送，我们会自动转写语音给你的 AI 教练。",
+    conversationVoiceUploadPending: "正在上传语音... AI 即将回复你。",
+    conversationVoiceDiscard: "删除草稿语音",
+    conversationVoiceNotSupported: "当前浏览器暂不支持语音录制。",
+    conversationVoiceUploadSuccess:
+      "语音消息已发送。AI 教练将在转写完成后回复你。",
+    conversationVoiceSendError: "语音上传失败，请重试。",
+    conversationVoicePermissionDenied:
+      "麦克风权限已被拒绝，请在浏览器设置中允许访问后重试。",
+    conversationVoiceGenericError: "录音出现问题，请重试。",
+    conversationVoiceRecordingStarted: "正在录音... 松开按钮即可完成录制。",
+    conversationVoiceRecordingStopped: "语音已保存，点击发送即可上传。",
+    conversationVoiceTtsButton: "收听",
+    conversationVoiceTtsFetching: "正在生成语音...",
+    conversationVoiceTtsError: "当前无法生成语音，请稍后再试。",
   },
   en: {
     localeNameZh: "Chinese",
@@ -87,6 +104,30 @@ const translations = {
     favoriteTypeScenario: "Scenario idea",
     labelLanguage: "Language",
     labelScenario: "Scenario",
+    conversationVoicePreviewHeading: "{seconds}s voice clip ready",
+    conversationVoicePreviewNote:
+      "Hit send and we'll auto-transcribe it for your tutor.",
+    conversationVoiceUploadPending:
+      "Uploading clip... your tutor will reply shortly.",
+    conversationVoiceDiscard: "Remove voice draft",
+    conversationVoiceNotSupported:
+      "Voice recording isn't supported in this browser.",
+    conversationVoiceUploadSuccess:
+      "Voice message sent. Your tutor will reply as soon as it's transcribed.",
+    conversationVoiceSendError:
+      "We couldn't upload that voice clip. Please try again.",
+    conversationVoicePermissionDenied:
+      "Microphone permission was denied. Allow access in your browser settings and try again.",
+    conversationVoiceGenericError:
+      "Recorder hit an issue. Please retry your voice note.",
+    conversationVoiceRecordingStarted:
+      "Recording... release the mic button to finish.",
+    conversationVoiceRecordingStopped:
+      "Voice clip saved. Hit send to upload it to your tutor.",
+    conversationVoiceTtsButton: "Listen",
+    conversationVoiceTtsFetching: "Generating audio...",
+    conversationVoiceTtsError:
+      "Tutor speech synthesis is unavailable right now.",
   },
 } as const;
 

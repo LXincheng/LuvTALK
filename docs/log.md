@@ -27,6 +27,12 @@
 - 转写稳定性：`VoiceTutorService` 在调用 GPT‑5 音频接口时改用原始 `response.text()`，遇到空响应或非 JSON 内容会打印原始文本并跳过解析，避免 `Unexpected end of JSON input` 崩溃；同时移除 `response_format=verbose_json`，兼容 Codex 网关的默认输出。
 - 依赖声明：显式引入 `undici` 的 `FormData` 和 Node 内置 `Blob`，确保在 Node 环境下构建 multipart 请求时不会出现类型/运行时差异。
 
+### 2025-11-21
+- 语音输入前端：Conversation 页集成 `MediaRecorder` 录音，支持一键开始/停止、语音草稿预览、放弃草稿，上传时会调用 `POST /conversation/:id/voice` 并在 UI 中提示进度/异常，上传成功后自动进入轮询等待 Yunwu STT 回写。
+- 语音播放：消息泡泡会读取 `meta.audioUrl` 渲染 `<audio>` 控件，AI 回复新增 “听发音” 按钮（调用 `POST /conversation/:id/tts`），生成的音频也会自动插入消息体内供重复播放。
+- Prompt 升级：`buildConversationSystemPrompt` 明确声明 “界面语言/目标语言/场景” 以及上下文要求，指导 GPT-4o 在目标语言中维系对话、在 native 语言中解释得分与建议，确保多轮语境一致。
+- UI 调优：录音开始/结束提供 toast 提示，语音草稿直接在输入框区域内 1:1 预览，避免 composer 高度跳变并保持原有布局稳定。
+
 ## 项目概况
 LuvTALK 是面向粤语/英语学习者的语言练习 PWA，提供实时对话、AI 纠错、收藏和文化提示。前端为 React 19 + Ionic React 8，后端为 NestJS 11 + Prisma，AI 能力对接 DeepSeek。
 

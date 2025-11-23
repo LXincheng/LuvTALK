@@ -14,6 +14,7 @@ import {
 import {
   sendConversationMessage,
   startConversation,
+  uploadConversationVoice,
 } from "../services/conversationService";
 import { createConversationStream } from "../services/conversationStream";
 
@@ -28,6 +29,7 @@ interface ConversationSlice {
     nativeLanguage?: LanguageCode;
   }) => Promise<void>;
   send: (message: string) => Promise<void>;
+  sendVoice: (audio: Blob) => Promise<void>;
   reset: () => void;
 }
 
@@ -169,6 +171,24 @@ export const useAppStore = create<AppState>((set, get)  => {
               session: previous,
             },
           }));
+        }
+      },
+      async sendVoice(audioBlob) {
+        const { session } = get().conversation;
+        if (!session) {
+          return;
+        }
+        try {
+          await uploadConversationVoice(session.id, audioBlob);
+        } catch (error) {
+          set((state) => ({
+            conversation: {
+              ...state.conversation,
+              error:
+                error instanceof Error ? error.message : "语音发送失败，请稍后重试",
+            },
+          }));
+          throw error;
         }
       },
       reset: () => {
