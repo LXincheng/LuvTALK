@@ -39,6 +39,7 @@ export class ConversationService {
     user: "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=learner&background=%23fef3c7",
   };
   private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
+  private readonly openAiEndpoint = this.resolveOpenAiEndpoint();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -94,6 +95,7 @@ export class ConversationService {
     session.messages.push(userMessage);
 
     const aiPayload =
+      (await this.requestOpenAi(session, trimmed)) ??
       (await this.requestDsAi(session, trimmed)) ??
       this.composeAiResponse(
         trimmed,
@@ -184,8 +186,8 @@ export class ConversationService {
     const nativeLabel = this.describeLanguage(nativeLanguage, nativeLanguage);
     const prefersEnglish = nativeLanguage === LanguageCode.English;
     const welcomeText = prefersEnglish
-      ? `👋 Welcome to the “${title}” scenario.\nI’ll coach you in ${targetLabel} and share hints in ${nativeLabel}. Let’s warm up with a friendly greeting.`
-      : `👋 欢迎来到「${title}」练习场景。\n我会用${targetLabel}陪你练习，并用${nativeLabel}提供提示。我们先从寒暄热身开始吧。`;
+      ? `👋 Welcome to the ${title} scenario.\nI'll coach you in ${targetLabel} and share tips in ${nativeLabel}. Let's warm up with a friendly greeting.`
+      : `👋 欢迎来到${title}练习场景。\n我会用${targetLabel}陪你练习，并用${nativeLabel}提供提示。先来一句轻松的寒暄吧。`;
     return this.buildMessage(
       "ai",
       welcomeText,
@@ -236,6 +238,112 @@ export class ConversationService {
         return prefersEnglish ? "English" : "英语";
       default:
         return language;
+    }
+  }
+
+  private async requestOpenAi(
+    session: ConversationSession,
+    latestMessage: string,
+  ): Promise<AiResponse | null> {
+    const { apiKey, tutorModel } = envConfig.openai;
+    const endpoint = this.openAiEndpoint;
+    if (!apiKey || !tutorModel || !endpoint) {
+      this.logger.warn("OpenAI tutor config missing; skipping Yunwu GPT-5.1.");
+      return null;
+    }
+
+    const history = session.messages.slice(-6).map((entry) => ({
+      role: entry.sender === "ai" ? "assistant" : "user",
+      content: entry.text,
+    }));
+
+    const prompt = buildConversationSystemPrompt({
+      targetLanguage: session.targetLanguage,
+      nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+      scenarioLabel: this.describeScenario(
+        session.scenarioId,
+        session.nativeLanguage,
+      ),
+    });
+
+    const payload = {
+      model: tutorModel,
+      temperature: 0.65,
+      messages: [
+        { role: "system", content: prompt },
+        ...history,
+        { role: "user", content: latestMessage },
+      ],
+    };
+
+    this.logger.log(
+      `Yunwu tutor request -> ${endpoint} | model=${tutorModel} | messages=${payload.messages.length}`,
+    );
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        this.logger.warn(
+          `OpenAI tutor responded with ${response.status}: ${detail}`,
+        );
+        return null;
+      }
+
+      const raw: unknown = await response.json();
+      const content = (
+        raw as { choices?: Array<{ message?: { content?: string } }> }
+      )?.choices?.[0]?.message?.content;
+
+      if (!content) {
+        this.logger.warn("OpenAI tutor returned empty content.");
+        return null;
+      }
+
+      return this.parseAiResponseContent(
+        content,
+        "Auto-evaluated by GPT-5.1",
+      );
+    } catch (error) {
+      this.logger.error(
+        `OpenAI tutor call failed: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private parseAiResponseContent(
+    content: string,
+    fallbackReason: string,
+  ): AiResponse | null {
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      this.logger.warn("AI response missing JSON payload.");
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(content.slice(start, end + 1)) as Record<
+        string,
+        unknown
+      >;
+      if (!parsed.scoreReason) {
+        parsed.scoreReason = fallbackReason;
+      }
+      return AiResponseSchema.parse(parsed);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to parse AI response JSON: ${(error as Error).message}`,
+      );
+      return null;
     }
   }
 
@@ -312,15 +420,10 @@ export class ConversationService {
         return null;
       }
 
-      const jsonText = content.slice(
-        content.indexOf("{"),
-        content.lastIndexOf("}") + 1,
+      return this.parseAiResponseContent(
+        content,
+        "Auto-evaluated by DeepSeek",
       );
-      const parsed = JSON.parse(jsonText) as Record<string, unknown>;
-      if (!parsed.scoreReason) {
-        parsed.scoreReason = "Auto-evaluated by DeepSeek";
-      }
-      return AiResponseSchema.parse(parsed);
     } catch (error) {
       this.logger.error(`DeepSeek call failed: ${(error as Error).message}`);
       return null;
@@ -365,12 +468,12 @@ export class ConversationService {
       reply: this.buildReply(polite, language, scenarioId),
       correction:
         polite.length > 28
-          ? "语句稍长，可以适当停顿。"
+          ? "句子稍长，可以适当停顿让语气更自然。"
           : "表达清晰，保持礼貌语气即可。",
       cultureNote:
         scenarioId === "restaurant"
-          ? "点餐前赞美餐厅或询问招牌菜，会让对话更自然。"
-          : "搭配表情和手势能让口语更真诚。",
+          ? "点餐前赞美餐厅或询问招牌菜，会让对话更友好。"
+          : "搭配表情或手势会让口语更真诚。",
       associativePhrases: [
         "可以帮我推荐一下招牌菜吗？",
         "Could you recommend something locals enjoy?",
@@ -481,5 +584,19 @@ export class ConversationService {
       return `${normalized}/chat/completions`;
     }
     return `${normalized}/v1/chat/completions`;
+  }
+
+  private resolveOpenAiEndpoint(): string | null {
+    const raw = envConfig.openai.apiUrl?.replace(/\/$/, "");
+    if (!raw) {
+      return null;
+    }
+    if (raw.endsWith("/chat/completions")) {
+      return raw;
+    }
+    if (raw.endsWith("/v1")) {
+      return `${raw}/chat/completions`;
+    }
+    return `${raw}/v1/chat/completions`;
   }
 }

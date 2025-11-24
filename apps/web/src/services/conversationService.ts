@@ -26,9 +26,22 @@ export interface VoiceUploadResponse {
   status: string;
 }
 
+const AUDIO_EXTENSION_MAP: Record<string, string> = {
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/mp4": "m4a",
+  "audio/m4a": "m4a",
+  "audio/webm": "webm",
+  "video/webm": "webm",
+};
+
 export async function uploadConversationVoice(conversationId: string, audio: Blob) {
   const formData = new FormData();
-  formData.append('audio', audio, `voice-${Date.now()}.webm`);
+  const extension =
+    AUDIO_EXTENSION_MAP[audio.type as keyof typeof AUDIO_EXTENSION_MAP] ?? 'webm';
+  formData.append('audio', audio, `voice-${Date.now()}.${extension}`);
   return apiClient.postForm<VoiceUploadResponse>(`/conversation/${conversationId}/voice`, formData);
 }
 

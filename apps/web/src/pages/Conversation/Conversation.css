@@ -1,6 +1,6 @@
 .conversation-page {
   --background: linear-gradient(180deg, #eef2ff 0%, #ffffff 40%);
-  --composer-height: 110px;
+  --composer-height: 120px;
   min-height: 100vh;
 }
 
@@ -126,17 +126,17 @@
   flex-direction: column;
   align-items: center;
   padding: clamp(1rem, 2vw, 1.4rem);
-  padding-bottom: calc(var(--composer-height, 96px) + 1rem);
+  padding-bottom: calc(
+    var(--composer-height, 120px) + env(safe-area-inset-bottom) + 2rem
+  );
   gap: 1rem;
-  height: calc(100vh - 56px);
   width: 100%;
   min-height: 0;
   box-sizing: border-box;
-  overflow: hidden;
 }
 
 ion-content.conversation-content {
-  --offset-bottom: 0px;
+  --offset-bottom: calc(var(--composer-height, 120px) + env(safe-area-inset-bottom));
 }
 
 .conversation-layout {
@@ -147,6 +147,7 @@ ion-content.conversation-content {
   gap: 1.25rem;
   flex: 1;
   min-height: 0;
+  height: 100%;
 }
 
 .scenario-panel {
@@ -205,7 +206,10 @@ ion-content.conversation-content {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
-  padding-right: 0.35rem;
+  padding-right: 0.25rem;
+  padding-bottom: calc(
+    var(--composer-height, 120px) + env(safe-area-inset-bottom) + 2.4rem
+  );
   overflow-y: auto;
   scroll-behavior: smooth;
   flex: 1;
@@ -220,6 +224,14 @@ ion-content.conversation-content {
 
 .message-row.message-user {
   justify-content: flex-end;
+  flex-direction: row-reverse;
+  gap: 0.4rem;
+  align-self: flex-end;
+  margin-right: -0.25rem;
+}
+
+.message-row.message-user .message-avatar {
+  margin-left: 0.25rem;
 }
 
 .message-avatar {
@@ -252,6 +264,7 @@ ion-content.conversation-content {
   background: linear-gradient(135deg, #5a63ff, #9b9efc);
   color: #fff;
   border-color: transparent;
+  text-align: right;
 }
 
 .message-header {
@@ -387,10 +400,9 @@ ion-content.conversation-content {
 .composer-inner {
   width: min(1080px, 100%);
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0.4rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
 }
 
 .composer-icon-button {
@@ -420,10 +432,17 @@ ion-content.conversation-content {
   opacity: 0.45;
 }
 
+.composer-icon-button.is-holding {
+  background: var(--ion-color-primary);
+  color: #fff;
+  border-color: var(--ion-color-primary);
+  box-shadow: 0 10px 20px rgba(90, 99, 255, 0.3);
+}
+
 .conversation-input-row {
   display: flex;
   align-items: center;
-  margin: auto;
+  margin: 0;
   border: 1px solid var(--glass-border);
   border-radius: 1.25rem;
   padding: 0;
@@ -431,6 +450,12 @@ ion-content.conversation-content {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
   transition: border 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.conversation-input-row.has-voice-draft {
+  padding: 0.35rem 0.75rem;
 }
 
 .conversation-input-row.recording {
@@ -492,12 +517,12 @@ ion-content.conversation-content {
 .voice-memo-inline-body p {
   margin: 0;
   font-size: 0.85rem;
-  color: rgba(15, 23, 42, 0.8);
+  color: rgba(15, 23, 42, 0.85);
 }
 
 .voice-memo-transcript {
   font-style: italic;
-  color: rgba(15, 23, 42, 0.9);
+  color: rgba(15, 23, 42, 0.75);
 }
 
 .voice-memo-dismiss {
@@ -511,6 +536,7 @@ ion-content.conversation-content {
 .voice-memo-dismiss:hover {
   color: rgba(15, 23, 42, 0.8);
 }
+
 
 @keyframes speechPulse {
   0% {
@@ -527,7 +553,9 @@ ion-content.conversation-content {
 .conversation-input-actions {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 @media (max-width: 720px) {
@@ -651,6 +679,7 @@ body.ion-palette-dark .voice-memo-icon {
 body.ion-palette-dark .voice-memo-dismiss {
   color: rgba(226, 232, 240, 0.7);
 }
+
 .conversation-textarea {
   flex: 1;
   width: 100%;
@@ -659,12 +688,12 @@ body.ion-palette-dark .voice-memo-dismiss {
   resize: none;
   outline: none;
   font: inherit;
-  font-size: 0.9rem;
-  line-height: 1.4;
-  padding: 0.5rem 0.85rem;
+  font-size: 1.3rem;
+  line-height: 1.35;
+  padding: 0.35rem 0.85rem;
   color: var(--ion-color-dark);
   caret-color: var(--ion-color-primary);
-  min-height: 44px;
+  min-height: 38px;
 }
 
 .conversation-textarea::placeholder {

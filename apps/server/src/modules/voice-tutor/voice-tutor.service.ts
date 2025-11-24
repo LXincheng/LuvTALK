@@ -1,16 +1,21 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
-import FormData from "form-data";
 import { randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { access, mkdir, readFile, writeFile } from "fs/promises";
-import { basename, extname, join } from "path";
+import { access, mkdir, readFile, writeFile, unlink } from "fs/promises";
+import { basename, dirname, extname, join } from "path";
 import { Readable } from "stream";
 import { envConfig } from "../../common/config/env.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { ConversationService } from "../conversation/conversation.service";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
 
 const DEFAULT_STORAGE_ROOT = join(process.cwd(), "tmp", "voice-uploads");
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+if (ffmpegStatic) {
+  ffmpeg.setFfmpegPath(ffmpegStatic);
+}
 
 interface LanguageHint {
   languageCode: string;
@@ -78,12 +83,14 @@ export class VoiceTutorService {
       `Stored voice upload for ${conversationId} -> ${filePath} (${file.mimetype})`,
     );
 
-    const result: VoiceUploadResult = {
+    let result: VoiceUploadResult = {
       operationId,
       filePath,
       fileName,
       mimeType: file.mimetype,
     };
+
+    result = await this.ensureMp3(result);
 
     void this.processVoiceUpload(conversationId, result, languageHint).catch(
       (error) => {
@@ -131,26 +138,105 @@ export class VoiceTutorService {
     try {
       const transcript = await this.transcribeWithOpenAi(upload, languageHint);
       if (!transcript) {
-        this.logger.warn(
-          `Skipping voice response for ${upload.operationId}, transcription unavailable`,
+        await this.respondWithFallbackMessage(
+          conversationId,
+          upload,
+          languageHint,
         );
         return;
       }
-      await this.conversationService.processMessage(
-        conversationId,
-        { message: transcript },
-        {
-          userMessageMeta: {
-            audioUrl: this.buildAudioReference(conversationId, upload.fileName),
-          },
-        },
-      );
+      await this.forwardTranscript(conversationId, upload, transcript);
     } catch (error) {
       this.logger.error(
         `Voice upload processing failed for ${upload.operationId}`,
         error instanceof Error ? error.stack : String(error),
       );
+      try {
+        await this.respondWithFallbackMessage(
+          conversationId,
+          upload,
+          languageHint,
+        );
+      } catch (fallbackError) {
+        this.logger.error(
+          `Fallback handling failed for ${upload.operationId}`,
+          fallbackError instanceof Error
+            ? fallbackError.stack
+            : String(fallbackError),
+        );
+      }
     }
+  }
+
+  private async ensureMp3(
+    upload: VoiceUploadResult,
+  ): Promise<VoiceUploadResult> {
+    if (
+      upload.mimeType === "audio/mpeg" ||
+      upload.fileName.toLowerCase().endsWith(".mp3")
+    ) {
+      return upload;
+    }
+    const directory = dirname(upload.filePath);
+    const mp3Name = `${upload.operationId}.mp3`;
+    const mp3Path = join(directory, mp3Name);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(upload.filePath)
+          .audioBitrate("192k")
+          .format("mp3")
+          .on("error", (error) => reject(error))
+          .on("end", () => resolve())
+          .save(mp3Path);
+      });
+      await unlink(upload.filePath).catch(() => undefined);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to convert ${upload.fileName} to mp3: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return upload;
+    }
+    return {
+      operationId: upload.operationId,
+      filePath: mp3Path,
+      fileName: mp3Name,
+      mimeType: "audio/mpeg",
+    };
+  }
+
+  private async forwardTranscript(
+    conversationId: string,
+    upload: VoiceUploadResult,
+    transcript: string,
+  ): Promise<void> {
+    await this.conversationService.processMessage(
+      conversationId,
+      { message: transcript },
+      {
+        userMessageMeta: {
+          audioUrl: this.buildAudioReference(conversationId, upload.fileName),
+        },
+      },
+    );
+  }
+
+  private async respondWithFallbackMessage(
+    conversationId: string,
+    upload: VoiceUploadResult,
+    languageHint: LanguageHint,
+  ): Promise<void> {
+    const fallbackText = this.buildFallbackUserText(languageHint);
+    await this.conversationService.processMessage(
+      conversationId,
+      { message: fallbackText },
+      {
+        userMessageMeta: {
+          audioUrl: this.buildAudioReference(conversationId, upload.fileName),
+        },
+      },
+    );
   }
 
   private buildAudioReference(
@@ -171,23 +257,23 @@ export class VoiceTutorService {
     }
     try {
       const buffer = await readFile(upload.filePath);
-      const formData = new FormData();
-      formData.append("file", buffer, {
-        filename: upload.fileName,
-        contentType: upload.mimeType || "application/octet-stream",
+      const fileBlob = new Blob([buffer], {
+        type: upload.mimeType || "application/octet-stream",
       });
+      const formData = new FormData();
+      formData.append("file", fileBlob, upload.fileName);
       formData.append("model", transcribeModel);
       formData.append("language", languageHint.languageCode);
       formData.append("prompt", languageHint.transcriptionPrompt);
+      formData.append("response_format", "json");
       const response = await fetch(
         `${apiUrl.replace(/\/$/, "")}/audio/transcriptions`,
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
-            ...formData.getHeaders(),
           },
-          body: formData as unknown as BodyInit,
+          body: formData,
         },
       );
 
@@ -331,5 +417,12 @@ export class VoiceTutorService {
           ttsVoice: "alloy",
         };
     }
+  }
+
+  private buildFallbackUserText(languageHint: LanguageHint): string {
+    if (languageHint.languageCode === "zh") {
+      return "（系统提示：上一条语音暂时无法转写，请导师继续当前情境，对我进行鼓励并提示可以改用文字或重新录音。）";
+    }
+    return "(System note: my latest voice clip could not be transcribed. Please stay in character, reply in the practice language, and encourage me to retry or switch to text.)";
   }
 }

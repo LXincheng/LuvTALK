@@ -17,12 +17,38 @@ interface UseVoiceRecorderResult {
   reset: () => void;
 }
 
+const pickSupportedMimeType = () => {
+  if (
+    typeof MediaRecorder === 'undefined' ||
+    typeof MediaRecorder.isTypeSupported !== 'function'
+  ) {
+    return undefined;
+  }
+  const candidates = [
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+};
+
 export const useVoiceRecorder = (): UseVoiceRecorderResult => {
   const [isRecording, setIsRecording] = useState(false);
   const [memo, setMemo] = useState<VoiceMemo | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [permissionDenied, setPermissionDenied] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderMimeTypeRef = useRef<string>('audio/webm');
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startTimestampRef = useRef<number>(0);
@@ -74,7 +100,11 @@ export const useVoiceRecorder = (): UseVoiceRecorderResult => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const recorder = new MediaRecorder(stream);
+      const mimeType = pickSupportedMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      recorderMimeTypeRef.current = mimeType ?? 'audio/webm';
       recorderRef.current = recorder;
       chunksRef.current = [];
       startTimestampRef.current = Date.now();
@@ -92,7 +122,9 @@ export const useVoiceRecorder = (): UseVoiceRecorderResult => {
           setMemo(undefined);
           return;
         }
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(chunksRef.current, {
+          type: recorderMimeTypeRef.current ?? 'audio/webm',
+        });
         const durationMs = Date.now() - startTimestampRef.current;
         setMemo({
           blob,
