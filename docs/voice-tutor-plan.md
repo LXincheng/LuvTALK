@@ -149,17 +149,6 @@ Response 202:
 - `GET /assets/voice/:key` 通过带签名的短链接或 JWT 鉴权返回二进制音频，或直接暴露对象存储 CDN URL（需设置过期策略）。
 
 ## 6. 配置与安全
-- `.env` 新增/确认：
-| 变量 | 说明 |
-| --- | --- |
-| `OPENAI_API_URL` | `https://codex-api-slb.packycode.com/v1`，所有 GPT‑5/GPT‑5.1 调用统一使用 |
-| `OPENAI_API_KEY` | 服务端专用密钥，不暴露至浏览器 |
-| `OPENAI_TRANSCRIBE_MODEL` | 如 `gpt-5.1-mini-transcribe`（仅使用 GPT‑5 序列） |
-| `OPENAI_TUTOR_MODEL` | 如 `gpt-5.1-mini` 或其他 GPT‑5/GPT‑5.1 模型 |
-| `OPENAI_TTS_MODEL` | （可选）`gpt-5.1-mini-tts` |
-| `VOICE_STORAGE_BUCKET` | 对象存储桶名 |
-- 为上传接口加速率限制（同 IP 每分钟 10 次），并验证 `sessionId` 属于当前登录用户。
-- OpenAI 返回体包含 `usage` 字段，可写入日志用于成本监控。
 
 ## 7. 风险与应对
 - **网络波动导致录音上传失败**：在前端加入自动重试（指数退避 2 次）与 “转为文本输入” 的 fallback CTA。

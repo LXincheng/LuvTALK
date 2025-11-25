@@ -125,7 +125,8 @@ export const useAppStore = create<AppState>((set, get)  => {
             conversation: {
               ...state.conversation,
               loading: false,
-              error: error instanceof Error ? error.message : "无法开启会话",
+              error:
+                error instanceof Error ? error.message : "无法开启会话",
             },
           }));
         }
@@ -167,7 +168,8 @@ export const useAppStore = create<AppState>((set, get)  => {
           set((state) => ({
             conversation: {
               ...state.conversation,
-              error: error instanceof Error ? error.message : "发送消息失败",
+              error:
+                error instanceof Error ? error.message : "发送消息失败",
               session: previous,
             },
           }));
@@ -221,7 +223,8 @@ export const useAppStore = create<AppState>((set, get)  => {
             favorites: {
               ...state.favorites,
               loading: false,
-              error: error instanceof Error ? error.message : "无法加载收藏",
+              error:
+                error instanceof Error ? error.message : "无法加载收藏",
             },
           }));
         }
@@ -250,7 +253,8 @@ export const useAppStore = create<AppState>((set, get)  => {
             favorites: {
               ...state.favorites,
               loading: false,
-              error: error instanceof Error ? error.message : "保存收藏失败",
+              error:
+                error instanceof Error ? error.message : "新增收藏失败",
             },
           }));
           return undefined;

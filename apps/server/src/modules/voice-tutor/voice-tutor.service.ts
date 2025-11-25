@@ -171,10 +171,12 @@ export class VoiceTutorService {
   private async ensureMp3(
     upload: VoiceUploadResult,
   ): Promise<VoiceUploadResult> {
-    if (
-      upload.mimeType === "audio/mpeg" ||
-      upload.fileName.toLowerCase().endsWith(".mp3")
-    ) {
+    const lowerName = upload.fileName.toLowerCase();
+    const needsConversion =
+      upload.mimeType === "audio/webm" ||
+      upload.mimeType === "video/webm" ||
+      lowerName.endsWith(".webm");
+    if (!needsConversion) {
       return upload;
     }
     const directory = dirname(upload.filePath);

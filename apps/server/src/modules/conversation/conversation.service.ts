@@ -22,6 +22,61 @@ import { StartConversationDto } from "./dto/start-conversation.dto";
 const DEFAULT_MODEL = "deepseek-chat";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
+const buildAvatarDataUrl = (svg: string) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+
+const TUTOR_AVATAR = buildAvatarDataUrl(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+    <defs>
+      <linearGradient id="tutorBg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#6366f1"/>
+        <stop offset="100%" stop-color="#8b5cf6"/>
+      </linearGradient>
+      <linearGradient id="tutorSkin" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#fde68a"/>
+        <stop offset="100%" stop-color="#facc15"/>
+      </linearGradient>
+      <linearGradient id="tutorCloak" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#c7d2fe"/>
+        <stop offset="100%" stop-color="#818cf8"/>
+      </linearGradient>
+    </defs>
+    <rect width="96" height="96" rx="28" fill="url(#tutorBg)"/>
+    <circle cx="48" cy="44" r="23" fill="url(#tutorSkin)"/>
+    <path d="M26 40c3-12 40-12 44 0v8c0 7-6 13-13 13H39c-7 0-13-6-13-13z" fill="#1f2358" opacity="0.9"/>
+    <circle cx="38" cy="48" r="3" fill="#111827"/>
+    <circle cx="58" cy="48" r="3" fill="#111827"/>
+    <path d="M37 58c4 4 18 4 22 0" fill="none" stroke="#111827" stroke-width="3" stroke-linecap="round"/>
+    <path d="M18 82h60c-8-16-20-24-30-24s-22 8-30 24z" fill="url(#tutorCloak)"/>
+  </svg>
+`);
+
+const LEARNER_AVATAR = buildAvatarDataUrl(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+    <defs>
+      <linearGradient id="learnerBg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#f97316"/>
+        <stop offset="100%" stop-color="#fb7185"/>
+      </linearGradient>
+      <linearGradient id="learnerSkin" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#fecdd3"/>
+        <stop offset="100%" stop-color="#f472b6"/>
+      </linearGradient>
+      <linearGradient id="learnerCloak" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#fde68a"/>
+        <stop offset="100%" stop-color="#fbbf24"/>
+      </linearGradient>
+    </defs>
+    <rect width="96" height="96" rx="28" fill="url(#learnerBg)"/>
+    <circle cx="48" cy="44" r="22" fill="url(#learnerSkin)"/>
+    <path d="M24 38c5-12 44-12 48 0v7c0 7-6 12-13 12H37c-7 0-13-5-13-12z" fill="#be185d" opacity="0.85"/>
+    <circle cx="36" cy="48" r="3" fill="#4c0519"/>
+    <circle cx="60" cy="48" r="3" fill="#4c0519"/>
+    <path d="M36 58c5 4 19 4 24 0" fill="none" stroke="#831843" stroke-width="3" stroke-linecap="round"/>
+    <path d="M16 82h64c-9-18-21-26-32-26s-23 8-32 26z" fill="url(#learnerCloak)"/>
+  </svg>
+`);
+
 interface ProcessMessageOptions {
   userMessageMeta?: ConversationMessage["meta"];
 }
@@ -35,8 +90,8 @@ export class ConversationService {
     Subject<ConversationSession>
   >();
   private readonly avatars = {
-    ai: "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=coach&background=%23e5edff",
-    user: "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=learner&background=%23fef3c7",
+    ai: TUTOR_AVATAR,
+    user: LEARNER_AVATAR,
   };
   private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
   private readonly openAiEndpoint = this.resolveOpenAiEndpoint();

@@ -18,9 +18,11 @@ import {
   bookOutline,
   chevronDownOutline,
   closeOutline,
+  medalOutline,
   micOutline,
+  pauseOutline,
+  playOutline,
   sparklesOutline,
-  volumeHighOutline,
 } from "ionicons/icons";
 import React, {
   useCallback,
@@ -54,6 +56,114 @@ import {
   VOICE_UI_CONSTANTS,
 } from "../../shared/constants/voice-ui";
 import "./Conversation.css";
+
+const formatDuration = (value: number) => {
+  if (!Number.isFinite(value) || value < 0) {
+    return "0:00";
+  }
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60);
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
+
+interface MessageAudioPlayerProps {
+  src: string;
+}
+
+const MessageAudioPlayer: React.FC<MessageAudioPlayerProps> = ({ src }) => {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const element = audioRef.current;
+    if (element) {
+      element.pause();
+      element.currentTime = 0;
+    }
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setProgress(0);
+    return () => {
+      element?.pause();
+    };
+  }, [src]);
+
+  const syncTimeline = useCallback(() => {
+    const element = audioRef.current;
+    if (!element) {
+      return;
+    }
+    const { currentTime: current, duration: total } = element;
+    setCurrentTime(current);
+    setDuration(Number.isFinite(total) ? total : 0);
+    const ratio =
+      total && Number.isFinite(total) ? Math.min(current / total, 1) : 0;
+    setProgress(ratio * 100);
+  }, []);
+
+  const togglePlayback = useCallback(() => {
+    const element = audioRef.current;
+    if (!element) {
+      return;
+    }
+    if (element.paused) {
+      void element
+        .play()
+        .catch(() => {
+          element.pause();
+          setIsPlaying(false);
+        });
+      return;
+    }
+    element.pause();
+  }, []);
+
+  const handleEnded = useCallback(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setProgress(0);
+  }, []);
+
+  const currentLabel = formatDuration(currentTime);
+  const durationLabel = duration > 0 ? formatDuration(duration) : "--:--";
+
+  return (
+    <div className="message-audio-player">
+      <button
+        type="button"
+        className={`message-audio-button ${isPlaying ? "is-playing" : ""}`}
+        onClick={togglePlayback}
+        aria-label={isPlaying ? "Pause voice clip" : "Play voice clip"}
+      >
+        <IonIcon icon={isPlaying ? pauseOutline : playOutline} />
+      </button>
+      <div className="message-audio-track" role="presentation">
+        <div
+          className="message-audio-progress"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <span className="message-audio-time">
+        {currentLabel} / {durationLabel}
+      </span>
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onTimeUpdate={syncTimeline}
+        onLoadedMetadata={syncTimeline}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={handleEnded}
+        className="message-audio-hidden"
+      />
+    </div>
+  );
+};
 
 const learningLanguageOrder: LanguageCode[] = [
   "cantonese",
@@ -104,6 +214,7 @@ const ConversationPage: React.FC = () => {
     url: string;
     createdAt: string;
   } | null>(null);
+  const [scorePanels, setScorePanels] = useState<Record<string, boolean>>({});
   const {
     isSupported: isRecorderSupported,
     isRecording,
@@ -199,12 +310,25 @@ const ConversationPage: React.FC = () => {
   };
 
   const handleFavorite = async (message: ConversationMessage) => {
+    const metadata: Record<string, string | number> = {
+      language: message.language,
+      scenario: activeScenario,
+    };
+    if (message.meta?.audioUrl) {
+      metadata.audioUrl = message.meta.audioUrl;
+    }
+    if (typeof message.meta?.score === "number") {
+      metadata.score = message.meta.score;
+    }
+    if (message.meta?.scoreReason) {
+      metadata.scoreReason = message.meta.scoreReason;
+    }
     try {
       const created = await favorites.add({
         title: message.sender === "ai" ? "AI Reply" : "Learner Note",
         content: message.text,
         type: message.sender === "ai" ? "cultural" : "phrase",
-        metadata: { language: message.language, scenario: activeScenario },
+        metadata,
       });
       setFavoriteToast({
         status: created ? "success" : "error",
@@ -216,6 +340,13 @@ const ConversationPage: React.FC = () => {
         message: t("favoritesAddError"),
       });
     }
+  };
+
+  const toggleScorePanel = (messageId: string) => {
+    setScorePanels((previous) => ({
+      ...previous,
+      [messageId]: !previous[messageId],
+    }));
   };
 
   const requestTutorAudio = useCallback(
@@ -386,7 +517,7 @@ const ConversationPage: React.FC = () => {
     } else if (!lastAiMessageRef.current) {
       lastAiMessageRef.current = latestAi.id;
     }
-  }, [session?.messages, isAwaitingReply]);
+  }, [sessionId, session?.messages, isAwaitingReply]);
 
   useEffect(() => {
     if (!session) {
@@ -398,6 +529,10 @@ const ConversationPage: React.FC = () => {
   useEffect(() => {
     autoGeneratedTtsRef.current.clear();
     setTtsEntries({});
+  }, [sessionId]);
+
+  useEffect(() => {
+    setScorePanels({});
   }, [sessionId]);
 
   useEffect(() => {
@@ -611,15 +746,20 @@ const ConversationPage: React.FC = () => {
                 if (tutorAudioUrl && !audioSources.includes(tutorAudioUrl)) {
                   audioSources.push(tutorAudioUrl);
                 }
+                const hasAudioAttachment = audioSources.length > 0;
+                const bubbleClassName = `message-bubble${
+                  hasAudioAttachment ? " has-audio" : ""
+                }`;
                 const senderLabel =
                   message.sender === "ai"
                     ? message.senderName ?? t("navConversation")
-                    : message.senderName ?? (uiLanguage === "zh" ? "?" : "You");
+                    : message.senderName ?? (uiLanguage === "zh" ? "我" : "You");
                 const avatarSrc =
                   message.avatar ??
                   (message.sender === "ai"
                     ? pendingAssistantAvatar ?? "/favicon.png"
                     : "/favicon.png");
+                const isScoreExpanded = Boolean(scorePanels[message.id]);
                 return (
                   <article
                     key={message.id}
@@ -630,7 +770,7 @@ const ConversationPage: React.FC = () => {
                       alt={`${senderLabel} avatar`}
                       className="message-avatar"
                     />
-                    <div className="message-bubble">
+                    <div className={bubbleClassName}>
                       <div className="message-header">
                         <strong>{senderLabel}</strong>
                         <IonText color="medium">
@@ -657,7 +797,7 @@ const ConversationPage: React.FC = () => {
                               className="message-audio"
                               key={`${message.id}-audio-${index}`}
                             >
-                              <audio controls src={source} preload="none" />
+                              <MessageAudioPlayer src={source} />
                             </div>
                           ))}
                         </div>
@@ -674,46 +814,42 @@ const ConversationPage: React.FC = () => {
                         )}
                       </div>
                       {hasScore && (
-                        <div className="message-meta">
-                          <span className="message-score">
-                            <IonIcon icon={sparklesOutline} />
-                            {message.meta?.score}
-                            {message.meta?.scoreReason
-                              ? ` - ${message.meta?.scoreReason}`
-                              : ""}
-                          </span>
-                          <IonButton
-                            fill="clear"
-                            size="small"
-                            className="message-tts-button"
-                            onClick={() => requestTutorAudio(message)}
-                            disabled={ttsEntry?.status === "loading"}
-                            title={t("conversationVoiceTtsButton")}
-                          >
-                            {ttsEntry?.status === "loading" ? (
-                              <>
-                                <IonSpinner
-                                  name="crescent"
-                                  className="message-tts-spinner"
-                                />
-                                <span>{t("conversationVoiceTtsFetching")}</span>
-                              </>
-                            ) : (
-                              <>
-                                <IonIcon icon={volumeHighOutline} />
-                                <span>{t("conversationVoiceTtsButton")}</span>
-                              </>
-                            )}
-                          </IonButton>
-                          <IonButton
-                            fill="clear"
-                            size="small"
-                            onClick={() => handleFavorite(message)}
-                            title={t("conversationFavoriteButton")}
-                          >
-                            <IonIcon icon={bookmarkOutline} />
-                          </IonButton>
-                        </div>
+                        <>
+                          <div className="message-meta score-meta">
+                            <button
+                              type="button"
+                              className={`score-pill ${
+                                isScoreExpanded ? "expanded" : ""
+                              }`}
+                              onClick={() => toggleScorePanel(message.id)}
+                            >
+                              <span className="message-score">
+                                <IonIcon icon={medalOutline} />
+                                <span className="message-score-label">
+                                  {t("conversationCoachScore")}
+                                </span>
+                                <strong>{message.meta?.score}</strong>
+                              </span>
+                              <IonIcon
+                                icon={chevronDownOutline}
+                                className="score-pill-icon"
+                              />
+                            </button>
+                            <IonButton
+                              fill="clear"
+                              size="small"
+                              onClick={() => handleFavorite(message)}
+                              title={t("conversationFavoriteButton")}
+                            >
+                              <IonIcon icon={bookmarkOutline} />
+                            </IonButton>
+                          </div>
+                          {isScoreExpanded && message.meta?.scoreReason && (
+                            <div className="score-details">
+                              <p>{message.meta.scoreReason}</p>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </article>
@@ -802,6 +938,18 @@ const ConversationPage: React.FC = () => {
       />
       <div className="conversation-composer glass-panel">
         <div className="composer-inner">
+          <button
+            type="button"
+            className={`composer-icon-button composer-mic-button ${
+              isRecording ? "is-holding" : ""
+            }`}
+            onClick={handleToggleRecording}
+            disabled={voiceUploadStatus === "uploading" || showVoiceDraft}
+            aria-pressed={isRecording}
+            aria-label={t("conversationMicSeedText")}
+          >
+            <IonIcon icon={micOutline} />
+          </button>
           <div
             className={`conversation-input-row ${composerRecordingClass} ${
               showVoiceDraft ? "has-voice-draft" : ""
@@ -855,34 +1003,20 @@ const ConversationPage: React.FC = () => {
               />
             )}
           </div>
-          <div className="conversation-input-actions">
-            <button
-              type="button"
-              className={`composer-icon-button ${
-                isRecording ? "is-holding" : ""
-              }`}
-              onClick={handleToggleRecording}
-              disabled={voiceUploadStatus === "uploading" || showVoiceDraft}
-              aria-pressed={isRecording}
-              aria-label={t("conversationMicSeedText")}
-            >
-              <IonIcon icon={micOutline} />
-            </button>
-            <button
-              type="button"
-              className="composer-icon-button"
-              onClick={handleSend}
-              disabled={
-                !session ||
-                (!input.trim() && !voiceMemo) ||
-                isAwaitingReply ||
-                voiceUploadStatus === "uploading"
-              }
-              aria-label={"Send message"}
-            >
-              <IonIcon icon={arrowUpOutline} />
-            </button>
-          </div>
+          <button
+            type="button"
+            className="composer-icon-button composer-send-button"
+            onClick={handleSend}
+            disabled={
+              !session ||
+              (!input.trim() && !voiceMemo) ||
+              isAwaitingReply ||
+              voiceUploadStatus === "uploading"
+            }
+            aria-label="Send message"
+          >
+            <IonIcon icon={arrowUpOutline} />
+          </button>
         </div>
       </div>
     </IonPage>

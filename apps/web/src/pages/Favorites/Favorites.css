@@ -140,6 +140,24 @@
   flex: 1;
 }
 
+.favorite-audio {
+  margin-top: 0.4rem;
+}
+
+.favorite-audio audio {
+  width: 100%;
+}
+
+.favorite-score {
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.85rem;
+  background: rgba(15, 23, 42, 0.05);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: rgba(15, 23, 42, 0.85);
+}
+
 .favorite-meta {
   display: flex;
   align-items: flex-start;
@@ -181,6 +199,11 @@ body.ion-palette-dark .favorite-card small {
   color: #e2e8f0;
 }
 
+body.ion-palette-dark .favorite-score {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+}
+
 body.ion-palette-dark .favorite-card header ion-chip {
   --background: rgba(124, 134, 255, 0.25);
   --color: #f8fafc;
@@ -190,4 +213,8 @@ body.ion-palette-dark .favorite-card {
   background: rgba(24, 32, 56, 0.75);
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+
+body.ion-palette-dark .favorite-meta ion-button {
+  color: rgba(255, 255, 255, 0.85);
 }

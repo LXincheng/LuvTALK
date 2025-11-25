@@ -51,57 +51,85 @@ const FavoritesPage = () => {
     favorites.load();
   }, []);
 
-  const renderCard = (item: FavoriteItem) => (
-    <article
-      key={item.id}
-      className="favorite-card glass-panel glass-panel-flat"
-    >
-      <header>
-        <div className="favorite-author">
-          <img src={item.avatar} alt="avatar" />
-          <div>
-            <strong>{item.authorName ?? "AI Tutor"}</strong>
-            <span style={{ padding: "0.2rem" }}>
-              {formatDate(item.createdAt)}
-            </span>
+  const renderCard = (item: FavoriteItem) => {
+    const audioUrl =
+      typeof item.metadata?.audioUrl === "string"
+        ? (item.metadata.audioUrl as string)
+        : undefined;
+    const scoreValue =
+      typeof item.metadata?.score === "number"
+        ? (item.metadata.score as number)
+        : undefined;
+    const scoreReason =
+      typeof item.metadata?.scoreReason === "string"
+        ? (item.metadata.scoreReason as string)
+        : undefined;
+
+    return (
+      <article
+        key={item.id}
+        className="favorite-card glass-panel glass-panel-flat"
+      >
+        <header>
+          <div className="favorite-author">
+            <img src={item.avatar ?? "/favicon.png"} alt="avatar" />
+            <div>
+              <strong>{item.authorName ?? "AI Tutor"}</strong>
+              <span style={{ padding: "0.2rem" }}>
+                {formatDate(item.createdAt)}
+              </span>
+            </div>
           </div>
-        </div>
-        <IonChip style={{ fontSize: "0.7rem" }}>
-          {t(typeLabelKeys[item.type])}
-        </IonChip>
-      </header>
-      <p>{item.content}</p>
-      <div className="favorite-meta">
-        {item.metadata && (
-          <small>
-            {item.metadata.language
-              ? `${t("labelLanguage")}: ${item.metadata.language}`
-              : ""}
-            {item.metadata.language && item.metadata.scenario ? " / " : ""}
-            {item.metadata.scenario
-              ? `${t("labelScenario")}: ${item.metadata.scenario}`
-              : ""}
-          </small>
+          <IonChip style={{ fontSize: "0.7rem" }}>
+            {t(typeLabelKeys[item.type])}
+          </IonChip>
+        </header>
+        <p>{item.content}</p>
+        {audioUrl && (
+          <div className="favorite-audio">
+            <audio controls src={audioUrl} preload="none" />
+          </div>
         )}
-        <IonButton
-          fill="clear"
-          size="small"
-          onClick={async () => {
-            const removed = await favorites.remove(item.id);
-            setToast({
-              status: removed ? "success" : "error",
-              message: removed
-                ? t("favoritesRemoveSuccess")
-                : t("favoritesRemoveError"),
-            });
-          }}
-          title={t("favoritesRemoveButton")}
-        >
-          <IonIcon icon={trashOutline} slot="icon-only" />
-        </IonButton>
-      </div>
-    </article>
-  );
+        {typeof scoreValue === "number" && (
+          <div className="favorite-score">
+            <strong>
+              {t("conversationCoachScore")}: {scoreValue}
+            </strong>
+            {scoreReason && <p>{scoreReason}</p>}
+          </div>
+        )}
+        <div className="favorite-meta">
+          {item.metadata && (
+            <small>
+              {item.metadata.language
+                ? `${t("labelLanguage")}: ${item.metadata.language}`
+                : ""}
+              {item.metadata.language && item.metadata.scenario ? " / " : ""}
+              {item.metadata.scenario
+                ? `${t("labelScenario")}: ${item.metadata.scenario}`
+                : ""}
+            </small>
+          )}
+          <IonButton
+            fill="clear"
+            size="small"
+            onClick={async () => {
+              const removed = await favorites.remove(item.id);
+              setToast({
+                status: removed ? "success" : "error",
+                message: removed
+                  ? t("favoritesRemoveSuccess")
+                  : t("favoritesRemoveError"),
+              });
+            }}
+            title={t("favoritesRemoveButton")}
+          >
+            <IonIcon icon={trashOutline} slot="icon-only" />
+          </IonButton>
+        </div>
+      </article>
+    );
+  };
 
   return (
     <IonPage className="favorites-page">
