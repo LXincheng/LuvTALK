@@ -31,10 +31,10 @@ esponse_format=verbose_json，以兼容 Yunwu 默认响应。
 ### 2025-11-21
 - 语音输入前端：Conversation 页集成 MediaRecorder，支持一键开启/停止、语音草稿预览和放弃；上传时调用 POST /conversation/:id/voice 并展示进度/异常，成功后自动等待 Yunwu STT 写回。
 - 语音播放：消息泡泡读取 meta.audioUrl 渲染 <audio> 控件，AI 回复新增“听发音”按钮（调用 POST /conversation/:id/tts），生成音频也会插入消息体供复播。
-- Prompt 升级：uildConversationSystemPrompt 显式声明界面语言/目标语言/场景及上下文约束，引导 GPT-4o 维持目标语言对话并用母语解释评分。
+- Prompt 升级：auildConversationSystemPrompt 显式声明界面语言/目标语言/场景及上下文约束，引导 GPT-4o 维持目标语言对话并用母语解释评分。
 - UI 调优：录音开始/结束提供 toast 提示，语音草稿 1:1 嵌入输入框，避免 composer 高度跳变，保持布局稳定。
 - STT 降级：服务器默认使用 Yunwu gpt-4o-mini-transcribe；若转写失败会携带 meta.audioUrl 调用 ConversationService.processMessage，由 DeepSeek 返回文字并提示用户重试，前端始终显示导师等待泡泡。
-- 录音格式：MediaRecorder 优先选择 udio/mpeg、udio/mp4，浏览器不支持时退回 udio/webm，确保 Yunwu STT 能接收 mp3/m4a 等常见格式。
+- 录音格式：MediaRecorder 优先选择 audio/mpeg、audio/mp4，浏览器不支持时退回 audio/webm，确保 Yunwu STT 能接收 mp3/m4a 等常见格式。
 - 微信式体验：麦克风采用按住讲话 + 半透明蒙版提示，松开结束录音；发送时预先显示导师加载泡泡，语音提示常量抽离到 shared/constants/voice-ui.ts，中文文案保持 UTF-8。
 
 ### 2025-11-21（语音链路强化）
@@ -44,51 +44,13 @@ esponse_format=verbose_json，以兼容 Yunwu 默认响应。
 - UI 更新：Conversation 列表恢复滚动，composer 输入区填满宽度、语音草稿与文本输入同高；录音相关 toast/错误提示全部使用 UTF-8 中文。
 - 测试提示：语音消息发送后立即显示导师占位泡泡；webm 上传会在服务器侧自动转码，可在网络面板看到 mp3 请求；文字消息优先触发 GPT-5.1，如 Yunwu 不可用可在日志中确认 DeepSeek 回退。
 
-## 项目概况
-LuvTALK 面向粤语/英语学习者，提供实时对话、AI 纠错、收藏和文化提示。前端为 React 19 + Ionic React 8，后端为 NestJS 11 + Prisma，AI 能力对接 DeepSeek。
-
-## 核心技术栈
-- **Monorepo**：Turborepo + pnpm
-- **前端**：React 19、Ionic React 8、Vite、Zustand、ite-plugin-pwa
-- **后端**：NestJS 11、Prisma、PostgreSQL
-- **AI**：DeepSeek API（OpenAI 兼容），输出使用 AiResponseSchema 校验
-
-## 统一约束
-- TypeScript 全量启用严格模式；前后端共享类型需保持 .ts/.tsx。
-- Lint/Format：pnpm lint + 项目内 ESLint/Prettier。
-- API 输入需 DTO + class-validator 校验；AI 响应必须通过 Zod 校验后返回。
-- 数据模型唯一来源 pps/server/prisma/schema.prisma，迁移用 prisma migrate。
-
-## 前端约定
-- 页面组件包裹 <IonPage>，路由使用 <IonReactRouter> + <IonRouterOutlet>。
-- 样式放于同名 .css，主题变量集中在 	heme/variables.css。
-- 目录结构：components/、pages/Conversation|Favorites、services/、shared/、store/、	heme/、	ypes/。
-- API 调用集中在 services/*Service.ts，状态存放在 store/useAppStore.ts。
-
-## 后端约定
-- Controller 负责路由和 DTO，Service 处理业务逻辑，PrismaService 负责数据库。
-- conversation.service.ts 通过 DeepSeek + fallback 组合输出，Prompt 统一在 prompt.config.ts。
-- AI 输出结构化对象，不直接返回字符串。
-
-## 数据库 / Prisma
-- Schema：pps/server/prisma/schema.prisma，包含 Conversation、Favorite、TranslationRecord 等模型和 FavoriteType 枚举。
-- 常用命令：
-  - pnpm --filter server prisma:migrate dev
-  - pnpm --filter server prisma:generate
-
-## 常用脚本
-- 根目录：pnpm dev / build / lint
-- 前端：pnpm --filter web dev|build|preview
-- 后端：pnpm --filter server dev|build|start:prod|test
-
----
-如需补充新规范或遇到兼容问题，请在本文件下追加日志说明（UTF-8）。
-### 2025-11-22
-- ???Zustand ??/?????????? UTF-8?toast ?????????
-- ?????Conversation ??????????????? + ??? + ????????? pill ??????/????????????????????
-- Avatar?????? tutor/user SVG ??????????????????????/????????
-- UI??????????????????????????????????
-- UI????????????????????????????????????????
-- UI??????????????????56px???????????????
-- UI???????????? + ???????????????
-- UI??? composer ?????? + ?????????????????
+### 2025-11-26
+- 轻量缓存基座：新增 AppCacheModule，接入 Nest CacheModule（内存存储）并封装 SessionCacheService（60s TTL）与 VoiceOperationCacheService（5 分钟 TTL），ConversationService 读取/落库时增加缓存读写，减少高并发下的重复查库。
+- 语音状态跟踪：VoiceTutorService 在 `received -> transcribing -> responding -> completed/failed` 全流程写入 VoiceOperationCacheService，记录 audioUrl/transcript/error，支持转写失败后的 fallback 状态，避免多实例下操作丢失。
+- 语音状态查询：VoiceTutorController 新增 `GET /conversation/:conversationId/voice-status/:operationId`，前端可轮询单次语音的实时状态；原 `/conversation/:conversationId/voice/:fileName` 流程不受影响。
+- 前端语音 UI：Conversation 页面调用 `fetchVoiceOperationStatus` 轮询语音状态，在录音草稿与“等待导师”气泡中实时显示 received/transcribing/responding/failed 等阶段提示，并在失败时提示用户改用文本或重试。
+### 2025-11-26（续）
+- 认证模块脚手架：新增 AuthModule/AuthService/AuthController，接入 NestJS JwtModule，仅在 /auth/google 路由下处理 Google OAuth code → id_token → 本地 JWT 的转换，尚未落库用户数据，现有会话与收藏模块保持不变。
+- Google OAuth 集成：根据官方 token 端点规范调用 https://oauth2.googleapis.com/token 交换 authorization_code 为 id_token，并解析其中的 sub/email/name/picture 构造用户 Profile；若 GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET 未配置，则优雅返回 ServiceUnavailable，不影响其他接口。
+- PWA Service Worker：基于 vite-plugin-pwa 的 generateSW 能力新增 runtimeCaching，针对 `/api/conversation/history` 与 `/api/conversation/:id/voice/*` 路由使用 Stale-While-Revalidate/CacheFirst，允许离线时读取最近的历史列表和语音文件，同时保持 devOptions.enabled=false，开发环境仍不注册 SW。
+- IndexedDB 缓存：引入 `idb` 并实现 `shared/storage/indexedDb.ts`，维护 `pendingVoices`（保存 operationId、Blob、状态、转写文本）及 `recentConversations`（最近 5 条会话概要）。ConversationPage 发送语音后会在 IDB 中持久化草稿，刷新页面时可重建 pending 语音 UI，并在语音状态变化时同步更新/清理缓存；Zustand 会在收到 SSE 更新后写入 recentConversations，为后续离线模式做准备。

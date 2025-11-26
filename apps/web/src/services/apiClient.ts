@@ -4,6 +4,12 @@ interface ApiRequestOptions extends RequestInit {
   skipJson?: boolean;
 }
 
+let authToken: string | undefined = undefined;
+
+export const setApiAuthToken = (token?: string) => {
+  authToken = token || undefined;
+};
+
 export async function apiRequest<TResponse>(
   path: string,
   options: ApiRequestOptions = {},
@@ -12,6 +18,7 @@ export async function apiRequest<TResponse>(
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       ...(isFormDataBody ? {} : { 'Content-Type': 'application/json' }),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(options.headers ?? {}),
     },
     ...options,

@@ -26,6 +26,23 @@ export interface VoiceUploadResponse {
   status: string;
 }
 
+export type VoiceOperationStatus =
+  | "received"
+  | "transcribing"
+  | "responding"
+  | "completed"
+  | "failed";
+
+export interface VoiceOperationSnapshot {
+  operationId: string;
+  conversationId: string;
+  status: VoiceOperationStatus;
+  audioUrl?: string;
+  transcript?: string;
+  error?: string;
+  updatedAt: string;
+}
+
 const AUDIO_EXTENSION_MAP: Record<string, string> = {
   "audio/mpeg": "mp3",
   "audio/mp3": "mp3",
@@ -43,6 +60,15 @@ export async function uploadConversationVoice(conversationId: string, audio: Blo
     AUDIO_EXTENSION_MAP[audio.type as keyof typeof AUDIO_EXTENSION_MAP] ?? 'webm';
   formData.append('audio', audio, `voice-${Date.now()}.${extension}`);
   return apiClient.postForm<VoiceUploadResponse>(`/conversation/${conversationId}/voice`, formData);
+}
+
+export async function fetchVoiceOperationStatus(
+  conversationId: string,
+  operationId: string,
+) {
+  return apiClient.get<VoiceOperationSnapshot>(
+    `/conversation/${conversationId}/voice-status/${operationId}`,
+  );
 }
 
 export interface TtsResponse {

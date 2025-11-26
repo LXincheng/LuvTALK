@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Res,
@@ -60,6 +61,21 @@ export class VoiceTutorController {
       operationId: result.operationId,
       status: "received",
     };
+  }
+
+  @Get(":conversationId/voice-status/:operationId")
+  async getVoiceOperationStatus(
+    @Param("conversationId") conversationId: string,
+    @Param("operationId") operationId: string,
+  ) {
+    const snapshot = await this.voiceTutor.getVoiceOperationStatus(
+      conversationId,
+      operationId,
+    );
+    if (!snapshot) {
+      throw new NotFoundException("Pending voice operation not found");
+    }
+    return snapshot;
   }
 
   @Post(":conversationId/tts")

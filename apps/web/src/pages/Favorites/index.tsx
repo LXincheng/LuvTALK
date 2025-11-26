@@ -14,6 +14,7 @@ import {
 import { bookOutline, homeOutline, trashOutline } from "ionicons/icons";
 import { useEffect, useState } from "react";
 import ThemeToggle from "../../components/ThemeToggle";
+import { useAuthStore } from "../../store/useAuthStore";
 import { FavoriteItem, FavoriteType } from "../../types/api";
 import { useAppStore } from "../../store/useAppStore";
 import { useLocale } from "../../shared/i18n/LocaleProvider";
@@ -41,6 +42,10 @@ const typeLabelKeys: Record<
 
 const FavoritesPage = () => {
   const favorites = useAppStore((state) => state.favorites);
+  const authStatus = useAuthStore((state) => state.status);
+  const login = useAuthStore((state) => state.login);
+  const isAuthenticated = authStatus === "authenticated";
+  const isAuthLoading = authStatus === "loading" || authStatus === "unknown";
   const [toast, setToast] = useState<{
     status: "success" | "error";
     message: string;
@@ -48,8 +53,10 @@ const FavoritesPage = () => {
   const { t } = useLocale();
 
   useEffect(() => {
-    favorites.load();
-  }, []);
+    if (isAuthenticated) {
+      favorites.load();
+    }
+  }, [isAuthenticated]);
 
   const renderCard = (item: FavoriteItem) => {
     const audioUrl =
@@ -164,13 +171,28 @@ const FavoritesPage = () => {
           <div className="favorites-hero-line">
             <span>{t("favoritesHeroLabel")}</span>
             <strong>
-              {favorites.items.length.toString().padStart(2, "0")}
+              {(isAuthenticated ? favorites.items.length : 0)
+                .toString()
+                .padStart(2, "0")}
             </strong>
           </div>
           <p>{t("favoritesHeroDescription")}</p>
         </section>
 
-        {favorites.loading ? (
+        {!isAuthenticated ? (
+          <div className="favorites-empty-state login-gate">
+            <IonIcon icon={bookOutline} />
+            <h2>{t("authLoginRequired")}</h2>
+            <p>{t("favoritesHeroDescription")}</p>
+            <IonButton
+              onClick={login}
+              disabled={isAuthLoading}
+              className="login-gate-button"
+            >
+              {t("authLoginButton")}
+            </IonButton>
+          </div>
+        ) : favorites.loading ? (
           <div className="favorites-loading">
             <IonSpinner name="crescent" />
             <p>{t("favoritesLoading")}</p>

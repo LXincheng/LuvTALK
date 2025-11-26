@@ -65,6 +65,24 @@ const translations = {
     conversationVoiceTtsButton: "播放发音",
     conversationVoiceTtsFetching: "生成语音中...",
     conversationVoiceTtsError: "暂时无法播放发音，请稍后重试。",
+    conversationVoiceStatusReceived: "语音已发送，准备开始转写……",
+    conversationVoiceStatusTranscribing: "正在转写语音，请稍等。",
+    conversationVoiceStatusResponding: "AI 导师正在分析语音并草拟回复。",
+    conversationVoiceStatusCompleted: "语音分析完成，导师即将回复。",
+    conversationVoiceStatusFailed: "语音处理失败，请改用文本或重新录制。",
+    conversationVoiceProcessingFailed:
+      "语音处理失败，已提醒导师使用文本继续，请重试或改用文字输入。",
+    authLoginButton: "使用 Google 登录",
+    authLogoutButton: "退出登录",
+    authHistoryButton: "查看历史",
+    authHistoryTitle: "历史会话",
+    authHistoryEmpty: "暂时没有历史会话。",
+    authHistoryError: "无法加载历史会话。",
+    authHistoryNoMessage: "暂无内容",
+    authLoginSuccess: "登录成功，欢迎回来！",
+    authLogoutSuccess: "已退出登录。",
+    authLoginError: "登录失败，请稍后再试。",
+    authLoginRequired: "请先登录以查看历史记录。",
   },
   en: {
     localeNameZh: "Chinese",
@@ -127,6 +145,29 @@ const translations = {
     conversationVoiceTtsFetching: "Generating audio...",
     conversationVoiceTtsError:
       "Tutor speech synthesis is unavailable right now.",
+    conversationVoiceStatusReceived:
+      "Voice note received. Preparing transcription…",
+    conversationVoiceStatusTranscribing:
+      "Transcribing your clip. This usually takes a moment.",
+    conversationVoiceStatusResponding:
+      "Your tutor is analyzing the transcript and drafting a reply.",
+    conversationVoiceStatusCompleted:
+      "Voice analysis complete. Expect a tutor response shortly.",
+    conversationVoiceStatusFailed:
+      "We couldn't process that clip. Please resend or switch to text.",
+    conversationVoiceProcessingFailed:
+      "Voice processing failed. The tutor switched back to text. Try again or type your reply.",
+    authLoginButton: "Sign in with Google",
+    authLogoutButton: "Sign out",
+    authHistoryButton: "History",
+    authHistoryTitle: "Conversation History",
+    authHistoryEmpty: "No conversations yet. Start chatting with your tutor!",
+    authHistoryError: "Couldn't load history. Please try again.",
+    authHistoryNoMessage: "No content recorded",
+    authLoginSuccess: "Signed in successfully!",
+    authLogoutSuccess: "You have signed out.",
+    authLoginError: "Sign-in failed. Please retry.",
+    authLoginRequired: "Please sign in to view history.",
   },
 } as const;
 

@@ -17,6 +17,7 @@ import {
   uploadConversationVoice,
 } from "../services/conversationService";
 import { createConversationStream } from "../services/conversationStream";
+import { saveRecentConversationSnapshot } from "../shared/storage/indexedDb";
 
 interface ConversationSlice {
   session?: ConversationSession;
@@ -29,7 +30,7 @@ interface ConversationSlice {
     nativeLanguage?: LanguageCode;
   }) => Promise<void>;
   send: (message: string) => Promise<void>;
-  sendVoice: (audio: Blob) => Promise<void>;
+  sendVoice: (audio: Blob) => Promise<string | undefined>;
   reset: () => void;
 }
 
@@ -65,6 +66,7 @@ export const useAppStore = create<AppState>((set, get)  => {
           session: latest,
         },
       }));
+      void saveRecentConversationSnapshot(latest);
     });
     if (source) {
       closeStream();
@@ -119,6 +121,7 @@ export const useAppStore = create<AppState>((set, get)  => {
               scenarioId,
             },
           }));
+          void saveRecentConversationSnapshot(session);
           openStream(session.id);
         } catch (error) {
           set((state) => ({
@@ -178,10 +181,11 @@ export const useAppStore = create<AppState>((set, get)  => {
       async sendVoice(audioBlob) {
         const { session } = get().conversation;
         if (!session) {
-          return;
+          return undefined;
         }
         try {
-          await uploadConversationVoice(session.id, audioBlob);
+          const result = await uploadConversationVoice(session.id, audioBlob);
+          return result?.operationId;
         } catch (error) {
           set((state) => ({
             conversation: {

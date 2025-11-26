@@ -1,4 +1,4 @@
-# LuvTALK 语音 Tutor 接入与 OpenAI 语音分析方案
+﻿# LuvTALK 语音 Tutor 接入与 OpenAI 语音分析方案
 
 ## 1. 背景与现状
 - Web 前端 `apps/web/src/pages/Conversation/index.tsx` 已具备完整的文本会话体验，`handleMicrophone` 目前仅切换 `isRecording` 并注入占位文案，尚未真正采集音频或上传。
@@ -180,3 +180,72 @@ Response 202:
   3. SSE 推送中附带 `meta.analysisEngine`，使前端可在 UI 中渲染降级标识。
 - **影响评估**：DS 回复已在现网场景验证，降级不会破坏既有体验；唯一差异是无法提供 GPT‑5 独占的语音纠错维度，可在消息 meta 中提示“当前为文本级反馈”。
 - **测试建议**：新增集成测试模拟 GPT‑5 API 超时，断言服务端进入 DS 流程并成功返回消息；前端 Cypress 用 fixture 断开网络后检查 UI 提示。
+
+## 11. 缓存与离线策略（简化版）
+### 11.1 设计原则
+- 先从最小可行的缓存方案验证稳定性：仅使用 NestJS 进程内缓存和浏览器端缓存，不引入 Redis、消息队列等额外依赖。
+- 缓存负责加速 读多写少的数据（会话摘要、语音 operationId 状态），最终一致性仍依赖 Prisma → PostgreSQL。
+- 考虑到 Web 端是 PWA，需要配合 Service Worker 保障离线可读、弱网可恢复。
+
+### 11.2 服务端轻量缓存
+- 使用 NestJS 官方 CacheModule.register()（参考 https://docs.nestjs.com/techniques/caching ）创建单机内存缓存：
+  1. sessionCache[conversationId]：缓存最近一次 ConversationSession（messages/score/updatedAt），TTL 60 秒。
+  2. voiceOps[operationId]：缓存语音上传后的 processing 状态、临时音频路径，TTL 5 分钟。
+- VoiceTutorService 在写库前先写缓存 → 异步拉取 OpenAI 结果 → 更新缓存 → 调用 ConversationService.persistSession。若服务重启缓存失效，依旧可以从数据库恢复。
+- 后续若需要 Redis，只需在 CacheModule 中切换 store。当前阶段保持单层缓存，避免额外运维成本。
+
+### 11.3 PWA Service Worker 与前端缓存
+- 依据 Google 官方 Service Worker / Workbox 指南（https://developer.chrome.com/docs/workbox/service-worker-overview/）生成 service-worker.ts：
+  - precacheAndRoute：缓存壳应用、语音 UI、i18n 文案。
+  - 
+registerRoute：对 GET /conversation/history、/conversation/:id/history、/assets/voice/* 使用 stale-while-revalidate，命中 Cache Storage 立即渲染，后台刷新。
+- 在 useAppStore 的 IndexedDB 持久化（参考 MDN：https://developer.mozilla.org/docs/Web/API/IndexedDB_API/Using_IndexedDB）中新增：
+  - pendingVoices: { operationId, status, localBlobKey }，离线时展示转写中。
+  - 
+recentConversations: 最近 5 条会话摘要，供离线模式渲染列表。
+- Service Worker 监听 fetch/SSE：离线时向 UI 广播切换离线模式，并从 IndexedDB 渲染最后一次会话内容。
+
+### 11.4 数据持久化与同步
+- 保持 Prisma 事务写库，所有消息、评分、音频 URL 仍写入 Conversation / 未来的 VoiceArtifact 表；遵循官方事务文档 https://www.prisma.io/docs/orm/prisma-client/transactions 确保语音与文本消息一次性提交。
+- persistSession 返回 session.version，前端收到后与本地缓存版本对比，不一致时自动调用 GET /conversation/:id/history 对齐。
+- 缓存 miss 或服务器重启时直接回落到数据库，缓存永远不是权威数据源。
+
+### 11.5 验收与回滚
+- 单元测试：Mock cacheManager 验证 miss/hit；缓存不可用时自动读取数据库。
+- 集成测试：supertest 上传音频 → 轮询 /conversation/:id，确认缓存命中与数据库内容一致。
+- 若缓存异常，可通过 .env CACHE_DISABLED=true（或关闭 CacheInterceptor）直接回退到纯数据库模式，保证现有功能稳定。
+
+## 12. Google OAuth 登录与会话历史
+### 12.1 实现评估
+- 难度中等：依托 Google Identity Services Web Server Flow（https://developers.google.com/identity/protocols/oauth2/web-server）与 NestJS Passport（https://docs.nestjs.com/security/authentication），流程成熟且官方文档齐全。
+- 工作量集中在：a) AuthModule + Google Strategy；b) Conversation 增加 userId 并提供历史接口；c) Web 端登录/退出与历史记录 UI；d) 离线模式提示。
+
+### 12.2 服务端流程
+1. AuthModule 集成 passport-google-oauth20，在回调中校验 profile，写入/更新用户并生成平台 accessToken/refreshToken。
+2. POST /auth/google 接收 authorization_code，请求 Google token endpoint，使用 google-auth-library 验签 id_token 后颁发内部 token。
+3. Conversation 数据：
+   - Conversation 新增 userId（可空），历史数据默认 
+ull，保留匿名体验。
+   - GET /conversation/history：返回当前用户全部会话的 id/scenario/score/updatedAt，支持分页和条件过滤。
+   - GET /conversation/:id/history：返回完整消息数组，满足查看历史所有聊天记录。
+4. 历史接口使用 JwtAuthGuard，实时对话仍允许匿名创建，避免破坏现有链路。
+
+### 12.3 Web 端体验
+- 登录入口：在导航或会话页放置 使用 Google 登录 按钮，调用 GIS JS SDK google.accounts.oauth2.initCodeClient 获取 code 并调用 /auth/google。
+- 凭证存储：useAppStore 保存 token 并写入 localStorage，apiClient 通过拦截器自动附带 Authorization 头。
+- 历史会话：
+  1. 登录后调用 /conversation/history 渲染列表（按 updatedAt 排序，展示评分/场景/模型）。
+  2. 点击某条记录时，先渲染本地缓存，再请求 /conversation/:id/history 补齐全部消息；支持继续会话按钮重新连接 SSE。
+  3. 离线模式由 Service Worker 返回 
+ecentConversations 缓存，并提示离线仅可查看本地记录。
+- 退出登录：清除 token 与云端缓存，仅展示 IndexedDB 中的匿名会话。
+
+### 12.4 历史 API 与数据同步
+- 若用户首次登录，可选择调用 POST /conversation/import 上传本地离线记录，服务端在后台合并。
+- GET /conversation/:id/summary（可选）仅返回标题、最新一句话、评分，供历史列表复用。
+- Prisma migration 需为 Conversation.userId、Favorite.userId、未来的 VoiceArtifact.userId 创建索引，便于历史列表分页（WHERE userId = ? ORDER BY updatedAt DESC LIMIT 50 OFFSET n）。
+
+### 12.5 测试与验证
+- 后端：Mock Google token 响应，验证授权、历史列表分页、权限控制；Supertest 覆盖 POST /auth/google → GET /conversation/history → GET /conversation/:id/history。
+- 前端：Cypress stub google.accounts.oauth2，验证登录态切换、历史列表、点击进入完整聊天记录；断网时检查 Service Worker 是否返回缓存。
+- 监控：新增 OAuth 调用耗时、历史接口错误率；若异常可迅速关闭登录入口，系统回退到匿名模式。

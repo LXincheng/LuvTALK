@@ -15,6 +15,7 @@ import {
   AiResponseSchema,
 } from "../../common/types/ai-response.schema";
 import { PrismaService } from "../../core/prisma/prisma.service";
+import { SessionCacheService } from "../../common/cache/session-cache.service";
 import { TranslationService } from "../translation/translation.service";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { StartConversationDto } from "./dto/start-conversation.dto";
@@ -89,6 +90,7 @@ export class ConversationService {
     string,
     Subject<ConversationSession>
   >();
+  private schemaMissingUserColumn = false;
   private readonly avatars = {
     ai: TUTOR_AVATAR,
     user: LEARNER_AVATAR,
@@ -99,9 +101,13 @@ export class ConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly translation: TranslationService,
+    private readonly sessionCache: SessionCacheService,
   ) {}
 
-  async startSession(dto: StartConversationDto): Promise<ConversationSession> {
+  async startSession(
+    dto: StartConversationDto,
+    userId?: string,
+  ): Promise<ConversationSession> {
     const now = new Date().toISOString();
     const scenarioId = dto.scenarioId ?? "daily";
     const nativeLanguage = dto.nativeLanguage ?? LanguageCode.Mandarin;
@@ -117,6 +123,7 @@ export class ConversationService {
       scenarioId,
       targetLanguage: dto.targetLanguage,
       nativeLanguage,
+      userId,
       createdAt: now,
       updatedAt: now,
       messages: [welcomeMessage],
@@ -131,8 +138,15 @@ export class ConversationService {
     conversationId: string,
     dto: SendMessageDto,
     options?: ProcessMessageOptions,
+    userId?: string,
   ): Promise<ConversationSession> {
     const session = await this.getSession(conversationId);
+    if (session.userId && userId && session.userId !== userId) {
+      throw new NotFoundException("Conversation not found");
+    }
+    if (!session.userId && userId) {
+      session.userId = userId;
+    }
     const trimmed = dto.message.trim();
     if (!trimmed) {
       return session;
@@ -192,10 +206,36 @@ export class ConversationService {
       return cached;
     }
 
+    const cachedSnapshot = await this.sessionCache.getSession(conversationId);
+    if (cachedSnapshot) {
+      this.sessions.set(cachedSnapshot.id, cachedSnapshot);
+      return cachedSnapshot;
+    }
+
     if (this.prisma.canUseDatabase()) {
-      const record = await this.prisma.conversation.findUnique({
-        where: { id: conversationId },
-      });
+      let record: {
+        id: string;
+        scenarioId: string;
+        targetLanguage: string;
+        nativeLanguage: string | null;
+        messages: Prisma.JsonValue;
+        score: number | null;
+        createdAt: Date;
+        updatedAt: Date;
+        userId?: string | null;
+      } | null = null;
+      try {
+        record = await this.prisma.conversation.findUnique({
+          where: { id: conversationId },
+        });
+      } catch (error) {
+        if (this.isMissingUserColumnError(error)) {
+          this.logMissingUserColumnWarning();
+          record = null;
+        } else {
+          throw error;
+        }
+      }
       if (record) {
         const persistedMessages = Array.isArray(record.messages)
           ? (record.messages as unknown as ConversationMessage[])
@@ -206,6 +246,7 @@ export class ConversationService {
           targetLanguage: record.targetLanguage as LanguageCode,
           nativeLanguage:
             (record.nativeLanguage as LanguageCode) ?? LanguageCode.Mandarin,
+          userId: record.userId ?? undefined,
           createdAt: record.createdAt.toISOString(),
           updatedAt: record.updatedAt.toISOString(),
           messages: persistedMessages,
@@ -219,6 +260,7 @@ export class ConversationService {
             : undefined,
         };
         this.sessions.set(rehydrated.id, rehydrated);
+        await this.sessionCache.setSession(rehydrated);
         return rehydrated;
       }
     }
@@ -363,10 +405,7 @@ export class ConversationService {
         return null;
       }
 
-      return this.parseAiResponseContent(
-        content,
-        "Auto-evaluated by GPT-5.1",
-      );
+      return this.parseAiResponseContent(content, "Auto-evaluated by GPT-5.1");
     } catch (error) {
       this.logger.error(
         `OpenAI tutor call failed: ${(error as Error).message}`,
@@ -475,10 +514,7 @@ export class ConversationService {
         return null;
       }
 
-      return this.parseAiResponseContent(
-        content,
-        "Auto-evaluated by DeepSeek",
-      );
+      return this.parseAiResponseContent(content, "Auto-evaluated by DeepSeek");
     } catch (error) {
       this.logger.error(`DeepSeek call failed: ${(error as Error).message}`);
       return null;
@@ -585,27 +621,84 @@ export class ConversationService {
 
   private async persistSession(session: ConversationSession): Promise<void> {
     this.sessions.set(session.id, session);
+    await this.sessionCache.setSession(session);
 
     if (this.prisma.canUseDatabase()) {
-      await this.prisma.conversation.upsert({
-        where: { id: session.id },
-        update: {
-          scenarioId: session.scenarioId,
-          targetLanguage: session.targetLanguage,
-          nativeLanguage: session.nativeLanguage,
-          messages: session.messages as unknown as Prisma.JsonArray,
-          score: session.coach?.overallScore,
-        },
-        create: {
-          id: session.id,
-          scenarioId: session.scenarioId,
-          targetLanguage: session.targetLanguage,
-          nativeLanguage: session.nativeLanguage,
-          messages: session.messages as unknown as Prisma.JsonArray,
-          score: session.coach?.overallScore,
+      try {
+        await this.prisma.conversation.upsert(
+          this.buildConversationUpsertArgs(session, true),
+        );
+      } catch (error) {
+        if (this.isMissingUserColumnError(error)) {
+          this.schemaMissingUserColumn = true;
+          this.logMissingUserColumnWarning();
+          return;
+        }
+        throw error;
+      }
+    }
+  }
+
+  async listUserHistory(userId: string, limit = 20) {
+    if (!this.prisma.canUseDatabase()) {
+      return [];
+    }
+    let records: Array<{
+      id: string;
+      scenarioId: string;
+      targetLanguage: string;
+      nativeLanguage: string | null;
+      updatedAt: Date;
+      score: number | null;
+      messages: Prisma.JsonValue;
+    }> = [];
+    try {
+      records = await this.prisma.conversation.findMany({
+        where: { userId },
+        orderBy: { updatedAt: "desc" },
+        take: limit,
+        select: {
+          id: true,
+          scenarioId: true,
+          targetLanguage: true,
+          nativeLanguage: true,
+          updatedAt: true,
+          score: true,
+          messages: true,
         },
       });
+    } catch (error) {
+      if (this.isMissingUserColumnError(error)) {
+        this.logMissingUserColumnWarning();
+        return [];
+      }
+      throw error;
     }
+    return records.map((record) => {
+      const messages = Array.isArray(record.messages)
+        ? (record.messages as unknown as ConversationMessage[])
+        : [];
+      return {
+        id: record.id,
+        scenarioId: record.scenarioId,
+        targetLanguage: record.targetLanguage as LanguageCode,
+        nativeLanguage: record.nativeLanguage as LanguageCode | null,
+        updatedAt: record.updatedAt.toISOString(),
+        score: record.score ?? undefined,
+        lastMessage: messages.at(-1)?.text ?? "",
+      };
+    });
+  }
+
+  async getConversationHistory(
+    conversationId: string,
+    userId: string,
+  ): Promise<ConversationSession> {
+    const session = await this.getSession(conversationId);
+    if (session.userId !== userId) {
+      throw new NotFoundException("Conversation not found");
+    }
+    return session;
   }
 
   private getOrCreateStream(
@@ -624,6 +717,47 @@ export class ConversationService {
     if (stream) {
       stream.next(session);
     }
+  }
+
+  private buildConversationUpsertArgs(
+    session: ConversationSession,
+    includeUserId: boolean,
+  ) {
+    const shared = {
+      scenarioId: session.scenarioId,
+      targetLanguage: session.targetLanguage,
+      nativeLanguage: session.nativeLanguage,
+      messages: session.messages as unknown as Prisma.JsonArray,
+      score: session.coach?.overallScore,
+    };
+    const update = includeUserId
+      ? { ...shared, userId: session.userId }
+      : shared;
+    const create = includeUserId
+      ? { ...shared, id: session.id, userId: session.userId }
+      : { ...shared, id: session.id };
+    return {
+      where: { id: session.id },
+      update,
+      create,
+    };
+  }
+
+  private isMissingUserColumnError(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2022"
+    );
+  }
+
+  private logMissingUserColumnWarning(): void {
+    if (this.schemaMissingUserColumn) {
+      return;
+    }
+    this.schemaMissingUserColumn = true;
+    this.logger.warn(
+      "Database schema is missing Conversation.userId/Favorite.userId columns. Run `pnpm --filter server prisma:migrate` to apply the latest Prisma migration.",
+    );
   }
 
   private resolveDeepSeekEndpoint(): string {

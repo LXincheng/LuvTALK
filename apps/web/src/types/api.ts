@@ -28,6 +28,7 @@ export interface ConversationSession {
   scenarioId: string;
   targetLanguage: LanguageCode;
   nativeLanguage?: LanguageCode;
+  userId?: string;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];

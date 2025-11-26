@@ -6,6 +6,8 @@ import FavoritesPage from "./pages/Favorites";
 import { ThemeProvider } from "./hooks/useTheme";
 import { LocaleProvider } from "./shared/i18n/LocaleProvider";
 import { fadePageTransition } from "./shared/transitions/fade";
+import { useEffect } from "react";
+import { useAuthStore } from "./store/useAuthStore";
 /* Core CSS required for Ionic components to work properly */
 import "@ionic/react/css/core.css";
 
@@ -38,6 +40,10 @@ import "./theme/variables.css";
 setupIonicReact();
 
 const App: React.FC = () => {
+  const initializeAuth = useAuthStore((state) => state.initialize);
+  useEffect(() => {
+    void initializeAuth();
+  }, [initializeAuth]);
   return (
     <LocaleProvider>
       <ThemeProvider>

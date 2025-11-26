@@ -11,6 +11,11 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "typeRoots": [
+      "./src/types",
+      "./node_modules/@types",
+      "./node_modules"
+    ],
     "incremental": true,
     "skipLibCheck": true,
     "types": ["node", "undici-types"],

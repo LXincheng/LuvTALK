@@ -4,35 +4,69 @@ import {
   Get,
   Param,
   Post,
+  Req,
   Sse,
   MessageEvent,
+  UseGuards,
 } from "@nestjs/common";
+import { Request } from "express";
 import { Observable } from "rxjs";
 import { map } from "rxjs/operators";
 import { ConversationService } from "./conversation.service";
 import { StartConversationDto } from "./dto/start-conversation.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
+import { AuthService } from "../auth/auth.service";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 
 @Controller("conversation")
 export class ConversationController {
-  constructor(private readonly conversationService: ConversationService) {}
+  constructor(
+    private readonly conversationService: ConversationService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Post("session")
-  startSession(@Body() dto: StartConversationDto) {
-    return this.conversationService.startSession(dto);
+  async startSession(@Body() dto: StartConversationDto, @Req() req: Request) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.startSession(dto, profile?.id);
   }
 
   @Post(":conversationId/message")
-  sendMessage(
+  async sendMessage(
     @Param("conversationId") conversationId: string,
     @Body() dto: SendMessageDto,
+    @Req() req: Request,
   ) {
-    return this.conversationService.processMessage(conversationId, dto);
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.processMessage(
+      conversationId,
+      dto,
+      undefined,
+      profile?.id,
+    );
   }
 
   @Get(":conversationId")
   getSession(@Param("conversationId") conversationId: string) {
     return this.conversationService.getSession(conversationId);
+  }
+
+  @Get("history")
+  @UseGuards(JwtAuthGuard)
+  async listHistory(@Req() req: Request) {
+    return this.conversationService.listUserHistory(req.user!.id);
+  }
+
+  @Get(":conversationId/history")
+  @UseGuards(JwtAuthGuard)
+  async getHistory(
+    @Param("conversationId") conversationId: string,
+    @Req() req: Request,
+  ) {
+    return this.conversationService.getConversationHistory(
+      conversationId,
+      req.user!.id,
+    );
   }
 
   @Sse(":conversationId/events")

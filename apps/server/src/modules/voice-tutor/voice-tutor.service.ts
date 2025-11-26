@@ -5,6 +5,10 @@ import { access, mkdir, readFile, writeFile, unlink } from "fs/promises";
 import { basename, dirname, extname, join } from "path";
 import { Readable } from "stream";
 import { envConfig } from "../../common/config/env.config";
+import {
+  VoiceOperationCacheService,
+  VoiceOperationSnapshot,
+} from "../../common/cache/voice-operation-cache.service";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { ConversationService } from "../conversation/conversation.service";
 import ffmpeg from "fluent-ffmpeg";
@@ -41,7 +45,10 @@ export class VoiceTutorService {
   private readonly logger = new Logger(VoiceTutorService.name);
   private readonly storageRoot = DEFAULT_STORAGE_ROOT;
 
-  constructor(private readonly conversationService: ConversationService) {
+  constructor(
+    private readonly conversationService: ConversationService,
+    private readonly voiceOperationCache: VoiceOperationCacheService,
+  ) {
     this.validateOpenAiSetup();
   }
 
@@ -91,6 +98,9 @@ export class VoiceTutorService {
     };
 
     result = await this.ensureMp3(result);
+    await this.updateOperationStatus(conversationId, result, {
+      status: "received",
+    });
 
     void this.processVoiceUpload(conversationId, result, languageHint).catch(
       (error) => {
@@ -135,27 +145,48 @@ export class VoiceTutorService {
     upload: VoiceUploadResult,
     languageHint: LanguageHint,
   ): Promise<void> {
+    await this.updateOperationStatus(conversationId, upload, {
+      status: "transcribing",
+    });
     try {
       const transcript = await this.transcribeWithOpenAi(upload, languageHint);
       if (!transcript) {
+        await this.updateOperationStatus(conversationId, upload, {
+          status: "failed",
+          error: "TRANSCRIPTION_FAILED",
+        });
         await this.respondWithFallbackMessage(
           conversationId,
           upload,
           languageHint,
+          "TRANSCRIPTION_FAILED",
         );
         return;
       }
+      await this.updateOperationStatus(conversationId, upload, {
+        status: "responding",
+        transcript,
+      });
       await this.forwardTranscript(conversationId, upload, transcript);
+      await this.updateOperationStatus(conversationId, upload, {
+        status: "completed",
+        transcript,
+      });
     } catch (error) {
       this.logger.error(
         `Voice upload processing failed for ${upload.operationId}`,
         error instanceof Error ? error.stack : String(error),
       );
+      await this.updateOperationStatus(conversationId, upload, {
+        status: "failed",
+        error: "PROCESSING_ERROR",
+      });
       try {
         await this.respondWithFallbackMessage(
           conversationId,
           upload,
           languageHint,
+          "PROCESSING_ERROR",
         );
       } catch (fallbackError) {
         this.logger.error(
@@ -228,6 +259,7 @@ export class VoiceTutorService {
     conversationId: string,
     upload: VoiceUploadResult,
     languageHint: LanguageHint,
+    errorCode?: string,
   ): Promise<void> {
     const fallbackText = this.buildFallbackUserText(languageHint);
     await this.conversationService.processMessage(
@@ -239,6 +271,10 @@ export class VoiceTutorService {
         },
       },
     );
+    await this.updateOperationStatus(conversationId, upload, {
+      status: "completed",
+      error: errorCode,
+    });
   }
 
   private buildAudioReference(
@@ -246,6 +282,32 @@ export class VoiceTutorService {
     fileName: string,
   ): string {
     return `/api/conversation/${conversationId}/voice/${fileName}`;
+  }
+
+  async getVoiceOperationStatus(
+    conversationId: string,
+    operationId: string,
+  ): Promise<VoiceOperationSnapshot | undefined> {
+    const snapshot = await this.voiceOperationCache.getSnapshot(operationId);
+    if (!snapshot || snapshot.conversationId !== conversationId) {
+      return undefined;
+    }
+    return snapshot;
+  }
+
+  private async updateOperationStatus(
+    conversationId: string,
+    upload: VoiceUploadResult,
+    patch: Partial<VoiceOperationSnapshot>,
+  ): Promise<void> {
+    await this.voiceOperationCache.mergeSnapshot(
+      conversationId,
+      upload.operationId,
+      {
+        audioUrl: this.buildAudioReference(conversationId, upload.fileName),
+        ...patch,
+      },
+    );
   }
 
   private async transcribeWithOpenAi(

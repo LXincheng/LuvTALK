@@ -16,6 +16,32 @@ export default defineConfig({
       devOptions: {
         enabled: false,
       },
+      workbox: {
+        runtimeCaching: [
+          {
+            urlPattern: /\/api\/conversation\/(?:[^/]+\/)?history/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'conversation-history',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60,
+              },
+            },
+          },
+          {
+            urlPattern: /\/api\/conversation\/[^/]+\/voice\/.+/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'voice-assets',
+              expiration: {
+                maxEntries: 5,
+                maxAgeSeconds: 60 * 60,
+              },
+            },
+          },
+        ],
+      },
       manifest: {
         name: 'LuvTALK',
         short_name: 'LuvTALK',
