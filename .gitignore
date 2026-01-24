@@ -23,3 +23,6 @@ coverage/
 # IDE
 .idea/
 .vscode/
+
+#figma原型
+figma-proto

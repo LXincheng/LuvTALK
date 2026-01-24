@@ -4,11 +4,13 @@ interface ApiRequestOptions extends RequestInit {
   skipJson?: boolean;
 }
 
-let authToken: string | undefined = undefined;
-
-export const setApiAuthToken = (token?: string) => {
-  authToken = token || undefined;
-};
+async function readResponseText(response: Response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
 
 export async function apiRequest<TResponse>(
   path: string,
@@ -18,15 +20,14 @@ export async function apiRequest<TResponse>(
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       ...(isFormDataBody ? {} : { 'Content-Type': 'application/json' }),
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(options.headers ?? {}),
     },
     ...options,
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `API request failed (${response.status})`);
+    const message = await readResponseText(response);
+    throw new Error(message || `请求失败（${response.status}）`);
   }
 
   if (options.skipJson) {

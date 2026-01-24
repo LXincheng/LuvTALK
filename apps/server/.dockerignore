@@ -1,0 +1,14 @@
+node_modules
+dist
+tmp
+coverage
+test
+.env
+.env.*
+.turbo
+.git
+.gitignore
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*

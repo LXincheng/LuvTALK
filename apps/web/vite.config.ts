@@ -1,76 +1,20 @@
-/// <reference types="vitest" />
-
-import legacy from '@vitejs/plugin-legacy'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-import { VitePWA } from 'vite-plugin-pwa'
-import { defineConfig } from 'vite'
 
-// https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [
-    react(),
-    legacy(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.png'],
-      devOptions: {
-        enabled: false,
-      },
-      workbox: {
-        runtimeCaching: [
-          {
-            urlPattern: /\/api\/conversation\/(?:[^/]+\/)?history/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'conversation-history',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60,
-              },
-            },
-          },
-          {
-            urlPattern: /\/api\/conversation\/[^/]+\/voice\/.+/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'voice-assets',
-              expiration: {
-                maxEntries: 5,
-                maxAgeSeconds: 60 * 60,
-              },
-            },
-          },
-        ],
-      },
-      manifest: {
-        name: 'LuvTALK',
-        short_name: 'LuvTALK',
-        description: 'AI-powered Cantonese & English speaking coach',
-        theme_color: '#0f172a',
-        background_color: '#ffffff',
-        display: 'standalone',
-        start_url: '/home',
-        icons: [
-          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
-        ],
-      },
-    }),
-  ],
-  optimizeDeps: {
-    exclude: ['@ionic/pwa-elements/loader'],
-  },
-  server: {
-    proxy: {
-      '/api': {
-        target: process.env.VITE_PROXY_API ?? 'http://localhost:3000',
-        changeOrigin: true,
+// https://vite.dev/config/
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const apiTarget = env.VITE_PROXY_API ?? 'http://127.0.0.1:3000'
+
+  return {
+    plugins: [react()],
+    server: {
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
-  },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-    setupFiles: './src/setupTests.ts',
   }
 })

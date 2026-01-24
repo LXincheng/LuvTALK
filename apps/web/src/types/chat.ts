@@ -1,0 +1,18 @@
+export type MessageType = 'user' | 'ai';
+
+export interface Annotation {
+  word: string;
+  explanation: string;
+  examples?: string[];
+}
+
+export interface Message {
+  id: string;
+  type: MessageType;
+  content: string;
+  translation?: string;
+  pronunciationScore?: number;
+  audioUrl?: string;
+  annotations?: Annotation[];
+  timestamp: Date;
+}

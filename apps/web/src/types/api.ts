@@ -1,8 +1,10 @@
-import { LanguageCode } from './language';
+export type LanguageCode = 'cantonese' | 'mandarin' | 'english';
+
+export type MessageSender = 'user' | 'ai';
 
 export interface ConversationMessage {
   id: string;
-  sender: 'user' | 'ai';
+  sender: MessageSender;
   text: string;
   language: LanguageCode;
   createdAt: string;
@@ -39,12 +41,34 @@ export type FavoriteType = 'phrase' | 'cultural' | 'vocabulary' | 'scenario';
 
 export interface FavoriteItem {
   id: string;
+  type: FavoriteType;
   title: string;
   content: string;
-  type: FavoriteType;
-  metadata?: Record<string, string | number>;
+  metadata?: Record<string, unknown>;
   createdAt: string;
   pinned?: boolean;
-  avatar?: string;
   authorName?: string;
+  avatar?: string;
+}
+
+export interface VoiceUploadResponse {
+  operationId: string;
+  status: 'received';
+}
+
+export type VoiceOperationStatus =
+  | 'received'
+  | 'transcribing'
+  | 'responding'
+  | 'completed'
+  | 'failed';
+
+export interface VoiceOperationSnapshot {
+  operationId: string;
+  conversationId: string;
+  status: VoiceOperationStatus;
+  audioUrl?: string;
+  transcript?: string;
+  error?: string;
+  updatedAt: string;
 }

@@ -1,6 +1,10 @@
-import { ConversationSession } from '../types/api';
-import { LanguageCode } from '../types/language';
 import { apiClient } from './apiClient';
+import type {
+  ConversationSession,
+  LanguageCode,
+  VoiceOperationSnapshot,
+  VoiceUploadResponse,
+} from '../types/api';
 
 export interface StartConversationPayload {
   scenarioId?: string;
@@ -8,84 +12,53 @@ export interface StartConversationPayload {
   nativeLanguage?: LanguageCode;
 }
 
-export async function startConversation(payload: StartConversationPayload) {
-  return apiClient.post<ConversationSession, StartConversationPayload>('/conversation/session', payload);
-}
-
-export async function sendConversationMessage(conversationId: string, message: string) {
-  return apiClient.post<ConversationSession, { message: string }>(
-    `/conversation/${conversationId}/message`,
-    {
-      message,
-    },
+export function startConversation(payload: StartConversationPayload) {
+  return apiClient.post<ConversationSession, StartConversationPayload>(
+    '/conversation/session',
+    payload,
   );
 }
 
-export interface VoiceUploadResponse {
-  operationId: string;
-  status: string;
+export function sendConversationMessage(conversationId: string, message: string) {
+  return apiClient.post<ConversationSession, { message: string }>(
+    `/conversation/${conversationId}/message`,
+    { message },
+  );
 }
 
-export type VoiceOperationStatus =
-  | "received"
-  | "transcribing"
-  | "responding"
-  | "completed"
-  | "failed";
-
-export interface VoiceOperationSnapshot {
-  operationId: string;
-  conversationId: string;
-  status: VoiceOperationStatus;
-  audioUrl?: string;
-  transcript?: string;
-  error?: string;
-  updatedAt: string;
-}
-
-const AUDIO_EXTENSION_MAP: Record<string, string> = {
-  "audio/mpeg": "mp3",
-  "audio/mp3": "mp3",
-  "audio/wav": "wav",
-  "audio/x-wav": "wav",
-  "audio/mp4": "m4a",
-  "audio/m4a": "m4a",
-  "audio/webm": "webm",
-  "video/webm": "webm",
-};
-
-export async function uploadConversationVoice(conversationId: string, audio: Blob) {
+export function uploadConversationVoice(conversationId: string, audio: Blob) {
+  const mimeType = audio.type.split(';')[0].toLowerCase();
+  const fileName = (() => {
+    if (mimeType.includes('webm')) {
+      return 'voice-message.webm';
+    }
+    if (mimeType.includes('mpeg')) {
+      return 'voice-message.mp3';
+    }
+    if (mimeType.includes('wav')) {
+      return 'voice-message.wav';
+    }
+    if (mimeType.includes('mp4')) {
+      return 'voice-message.mp4';
+    }
+    if (mimeType.includes('m4a')) {
+      return 'voice-message.m4a';
+    }
+    return 'voice-message.bin';
+  })();
   const formData = new FormData();
-  const extension =
-    AUDIO_EXTENSION_MAP[audio.type as keyof typeof AUDIO_EXTENSION_MAP] ?? 'webm';
-  formData.append('audio', audio, `voice-${Date.now()}.${extension}`);
-  return apiClient.postForm<VoiceUploadResponse>(`/conversation/${conversationId}/voice`, formData);
+  formData.append('audio', audio, fileName);
+  return apiClient.postForm<VoiceUploadResponse>(
+    `/conversation/${conversationId}/voice`,
+    formData,
+  );
 }
 
-export async function fetchVoiceOperationStatus(
+export function fetchVoiceOperationStatus(
   conversationId: string,
   operationId: string,
 ) {
   return apiClient.get<VoiceOperationSnapshot>(
     `/conversation/${conversationId}/voice-status/${operationId}`,
   );
-}
-
-export interface TtsResponse {
-  audioUrl: string;
-  fileName: string;
-}
-
-export async function synthesizeTutorSpeech(
-  conversationId: string,
-  payload: { text: string; voice?: string },
-) {
-  return apiClient.post<TtsResponse, { text: string; voice?: string }>(
-    `/conversation/${conversationId}/tts`,
-    payload,
-  );
-}
-
-export async function fetchConversation(conversationId: string) {
-  return apiClient.get<ConversationSession>(`/conversation/${conversationId}`);
 }
