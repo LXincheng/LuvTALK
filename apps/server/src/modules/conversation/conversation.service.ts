@@ -13,6 +13,7 @@ import {
 import {
   AiResponse,
   AiResponseSchema,
+  KeyTerm,
 } from "../../common/types/ai-response.schema";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { SessionCacheService } from "../../common/cache/session-cache.service";
@@ -178,6 +179,11 @@ export class ConversationService {
       session.nativeLanguage ?? LanguageCode.Mandarin,
     );
 
+    const normalizedKeyTerms = this.normalizeKeyTerms(
+      aiPayload.reply,
+      aiPayload.keyTerms,
+    );
+
     const aiMessage = this.buildMessage(
       "ai",
       aiPayload.reply,
@@ -188,6 +194,7 @@ export class ConversationService {
           score: aiPayload.score,
           scoreReason: aiPayload.scoreReason,
           translation: translationText,
+          keyTerms: normalizedKeyTerms,
         },
       },
     );
@@ -270,6 +277,10 @@ export class ConversationService {
 
   streamSession(conversationId: string): Observable<ConversationSession> {
     return this.getOrCreateStream(conversationId).asObservable();
+  }
+
+  listCachedSessions(): ConversationSession[] {
+    return Array.from(this.sessions.values());
   }
 
   private buildSystemWelcome(
@@ -432,6 +443,28 @@ export class ConversationService {
       if (!parsed.scoreReason) {
         parsed.scoreReason = fallbackReason;
       }
+      if (parsed.key_terms && !parsed.keyTerms) {
+        parsed.keyTerms = parsed.key_terms;
+      }
+      if (Array.isArray(parsed.keyTerms)) {
+        parsed.keyTerms = parsed.keyTerms.map((entry) => {
+          const record = entry as Record<string, unknown>;
+          const examples = Array.isArray(record.examples)
+            ? record.examples.filter(
+                (example): example is string => typeof example === "string",
+              )
+            : [];
+          return {
+            term: typeof record.term === "string" ? record.term : "",
+            definition:
+              typeof record.definition === "string" ? record.definition : "",
+            type: typeof record.type === "string" ? record.type : undefined,
+            examples,
+          };
+        });
+      } else {
+        parsed.keyTerms = [];
+      }
       return AiResponseSchema.parse(parsed);
     } catch (error) {
       this.logger.warn(
@@ -571,6 +604,7 @@ export class ConversationService {
       ],
       score,
       scoreReason: "基于语气与礼貌度的快速估分",
+      keyTerms: [],
     });
   }
 
@@ -586,6 +620,62 @@ export class ConversationService {
       return `我聽到你講：「${message}」。等我用地道講法繼續对话。`;
     }
     return `我听到你说：“${message}”。我来示范一个自然的续写方式。`;
+  }
+
+  private normalizeKeyTerms(reply: string, keyTerms: KeyTerm[]): KeyTerm[] {
+    if (!keyTerms?.length) {
+      return [];
+    }
+    const normalizedReply = reply.toLowerCase();
+    const seen = new Set<string>();
+    return keyTerms
+      .map((term) => {
+        const normalizedTerm = term.term.trim();
+        const normalizedDefinition = term.definition.trim();
+        if (!normalizedTerm || !normalizedDefinition) {
+          return null;
+        }
+        const normalizedExamples = (term.examples ?? [])
+          .map((example) => example.trim())
+          .filter((example) => example.length > 0);
+        const normalizedType = term.type?.trim();
+        return {
+          term: normalizedTerm,
+          definition: normalizedDefinition,
+          examples: normalizedExamples,
+          ...(normalizedType ? { type: normalizedType } : {}),
+        };
+      })
+      .filter((term): term is KeyTerm => term !== null)
+      .filter((term) =>
+        this.isTermInReply(reply, normalizedReply, term.term),
+      )
+      .filter((term) => {
+        const key = term.term.toLowerCase();
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 5);
+  }
+
+  private isTermInReply(
+    reply: string,
+    normalizedReply: string,
+    term: string,
+  ): boolean {
+    if (this.isCjk(term)) {
+      return reply.includes(term);
+    }
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    return regex.test(normalizedReply);
+  }
+
+  private isCjk(text: string): boolean {
+    return /[\u4e00-\u9fff]/.test(text);
   }
 
   private buildMessage(

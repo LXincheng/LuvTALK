@@ -62,3 +62,14 @@ export function fetchVoiceOperationStatus(
     `/conversation/${conversationId}/voice-status/${operationId}`,
   );
 }
+
+export function synthesizeConversationSpeech(
+  conversationId: string,
+  text: string,
+  voice?: string,
+) {
+  return apiClient.post<{ audioUrl: string; fileName: string }, { text: string; voice?: string }>(
+    `/conversation/${conversationId}/tts`,
+    { text, voice },
+  );
+}

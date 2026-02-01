@@ -8,6 +8,7 @@ interface VocabularyPopoverProps {
   word: string;
   explanation: string;
   examples?: string[];
+  type?: string;
   onSave?: (payload: Annotation) => void;
 }
 
@@ -15,6 +16,7 @@ export default function VocabularyPopover({
   word,
   explanation,
   examples,
+  type,
   onSave,
 }: VocabularyPopoverProps) {
   const { t } = useLocale();
@@ -24,7 +26,7 @@ export default function VocabularyPopover({
   const handleSave = () => {
     setIsSaved((prev) => !prev);
     if (!isSaved) {
-      onSave?.({ word, explanation, examples });
+      onSave?.({ word, explanation, examples, type });
     }
   };
 

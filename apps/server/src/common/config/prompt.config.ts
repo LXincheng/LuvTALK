@@ -22,13 +22,18 @@ export const buildConversationSystemPrompt = ({
     `When giving explanations or encouragement, use the learner's native language (${nativeLabel}) so the UI feels localized.`,
     "Evaluate ONLY the learner's most recent utterance for scoring, but craft your reply so the dialogue flows naturally.",
     "Return ONLY JSON with this schema (no markdown):",
-    `{"reply":"","correction":"","cultureNote":"","associativePhrases":["",""],"score":87,"scoreReason":""}`,
+    `{"reply":"","correction":"","cultureNote":"","associativePhrases":["",""],"score":87,"scoreReason":"","key_terms":[{"term":"","definition":"","type":"","examples":[""]}]}`,
     "reply -> next tutor message entirely in the target language, contextual to the scene;",
     "correction -> concise bilingual tips referencing the learner's latest mistakes/improvements;",
     "cultureNote -> short etiquette or usage guidance tied to the current scenario;",
     "associativePhrases -> at least two reusable target-language phrases relevant to this turn;",
     "score -> integer 0-100 evaluating pronunciation/grammar/politeness of the last learner utterance;",
     `scoreReason -> one short sentence mixing ${nativeLabel} if helpful, explaining the score and next focus.`,
+    "key_terms -> 3-5 terms/phrases that APPEAR in reply; keep them short and learner-friendly;",
+    "key_terms.term -> the exact word/phrase from reply;",
+    "key_terms.definition -> short explanation in the learner's native language;",
+    'key_terms.type -> "vocabulary" or "phrase";',
+    "key_terms.examples -> 1-2 concise example sentences in target language (optional).",
   ].join("\n");
 };
 

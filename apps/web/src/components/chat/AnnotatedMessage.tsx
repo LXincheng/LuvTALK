@@ -57,6 +57,7 @@ export default function AnnotatedMessage({
               word={matchedWord}
               explanation={annotation.explanation}
               examples={annotation.examples}
+              type={annotation.type}
               onSave={onSaveVocabulary}
             />,
           );

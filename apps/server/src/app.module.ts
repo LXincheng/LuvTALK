@@ -9,6 +9,7 @@ import { HealthModule } from "./modules/health/health.module";
 import { TranslationModule } from "./modules/translation/translation.module";
 import { VoiceTutorModule } from "./modules/voice-tutor/voice-tutor.module";
 import { AppCacheModule } from "./common/cache/cache.module";
+import { ReviewModule } from "./modules/review/review.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AppCacheModule } from "./common/cache/cache.module";
     CultureModule,
     TranslationModule,
     FavoritesModule,
+    ReviewModule,
     HealthModule,
     VoiceTutorModule,
   ],

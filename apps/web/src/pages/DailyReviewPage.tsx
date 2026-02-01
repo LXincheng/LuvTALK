@@ -1,80 +1,130 @@
-import { useState } from 'react';
-import { Check, X, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, X, RotateCcw, Volume2 } from 'lucide-react';
 import { useLocale } from '../providers/LocaleContext';
+import { fetchDailyReview, submitReviewFeedback } from '../services/reviewService';
+import {
+  startConversation,
+  synthesizeConversationSpeech,
+} from '../services/conversationService';
+import type { DailyReviewPayload, LanguageCode, ReviewCard } from '../types/api';
 
-interface ReviewCard {
-  id: string;
-  word: string;
-  translation: string;
-  example: string;
-  exampleTranslation: string;
-}
+const getStoredTargetLanguage = (): LanguageCode => {
+  if (typeof window === 'undefined') {
+    return 'cantonese';
+  }
+  const stored = window.localStorage.getItem('targetLanguage') as
+    | LanguageCode
+    | null;
+  if (stored === 'cantonese' || stored === 'mandarin' || stored === 'english') {
+    return stored;
+  }
+  return 'cantonese';
+};
 
-const reviewCards: ReviewCard[] = [
-  {
-    id: '1',
-    word: '唔该',
-    translation: 'Please / Thanks',
-    example: '唔该帮我解释下。',
-    exampleTranslation: 'Please help explain this.',
-  },
-  {
-    id: '2',
-    word: '谢谢',
-    translation: 'Thank you',
-    example: '谢谢你的帮助。',
-    exampleTranslation: 'Thank you for your help.',
-  },
-  {
-    id: '3',
-    word: 'Hello',
-    translation: '你好',
-    example: 'Hello, nice to meet you.',
-    exampleTranslation: '你好，很高兴认识你。',
-  },
-  {
-    id: '4',
-    word: '请问',
-    translation: 'Excuse me / May I ask',
-    example: '请问这个怎么说？',
-    exampleTranslation: 'May I ask how to say this?',
-  },
-  {
-    id: '5',
-    word: 'Nice to meet you',
-    translation: '很高兴认识你',
-    example: 'Nice to meet you. I am learning Cantonese.',
-    exampleTranslation: '很高兴认识你。我在学习粤语。',
-  },
-];
+const getCardLabel = (card: ReviewCard) =>
+  card.definition ?? card.exampleTranslation ?? '';
+
+const getCardExample = (card: ReviewCard) =>
+  card.example ?? card.definition ?? '';
 
 export default function DailyReviewPage() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
+  const [cards, setCards] = useState<ReviewCard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showTranslation, setShowTranslation] = useState(false);
   const [reviewedCount, setReviewedCount] = useState(0);
   const [needPracticeCount, setNeedPracticeCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [ttsConversationId, setTtsConversationId] = useState<string | null>(
+    null,
+  );
 
-  const currentCard = reviewCards[currentIndex];
-  const isComplete = currentIndex >= reviewCards.length;
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoading(true);
+    setErrorMessage(null);
+    fetchDailyReview()
+      .then((payload: DailyReviewPayload) => {
+        if (!isMounted) {
+          return;
+        }
+        setCards(payload.cards);
+        const fallbackConversationId =
+          payload.cards.find((card) => card.conversationId)?.conversationId ??
+          null;
+        setTtsConversationId(fallbackConversationId);
+      })
+      .catch(() => {
+        if (!isMounted) {
+          return;
+        }
+        setErrorMessage(t('reviewLoadError'));
+      })
+      .finally(() => {
+        if (!isMounted) {
+          return;
+        }
+        setIsLoading(false);
+      });
 
-  const handleKnow = () => {
-    setReviewedCount((prev) => prev + 1);
-    nextCard();
-  };
+    return () => {
+      isMounted = false;
+    };
+  }, [t]);
 
-  const handlePractice = () => {
-    setNeedPracticeCount((prev) => prev + 1);
-    nextCard();
+  const currentCard = cards[currentIndex];
+  const isComplete = currentIndex >= cards.length;
+  const progressValue = useMemo(() => {
+    if (cards.length === 0) {
+      return 0;
+    }
+    return Math.min(100, (currentIndex / cards.length) * 100);
+  }, [cards.length, currentIndex]);
+
+  const resetAudio = () => {
+    setAudioUrl(null);
+    setIsSpeaking(false);
   };
 
   const nextCard = () => {
     setShowTranslation(false);
-    if (currentIndex < reviewCards.length - 1) {
+    resetAudio();
+    if (currentIndex < cards.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
-      setCurrentIndex(reviewCards.length);
+      setCurrentIndex(cards.length);
     }
+  };
+
+  const sendFeedback = async (action: 'known' | 'practice') => {
+    if (!currentCard) {
+      return;
+    }
+    try {
+      await submitReviewFeedback({
+        cardId: currentCard.id,
+        action,
+        sourceType: currentCard.sourceType,
+        conversationId: currentCard.conversationId ?? ttsConversationId ?? undefined,
+      });
+    } catch {
+      setErrorMessage(t('reviewFeedbackError'));
+    }
+  };
+
+  const handleKnow = async () => {
+    setReviewedCount((prev) => prev + 1);
+    await sendFeedback('known');
+    nextCard();
+  };
+
+  const handlePractice = async () => {
+    setNeedPracticeCount((prev) => prev + 1);
+    await sendFeedback('practice');
+    nextCard();
   };
 
   const restart = () => {
@@ -82,7 +132,77 @@ export default function DailyReviewPage() {
     setReviewedCount(0);
     setNeedPracticeCount(0);
     setShowTranslation(false);
+    resetAudio();
   };
+
+  const ensureTtsConversationId = async () => {
+    if (ttsConversationId) {
+      return ttsConversationId;
+    }
+    try {
+      const session = await startConversation({
+        targetLanguage: getStoredTargetLanguage(),
+        nativeLanguage: locale === 'zh' ? 'mandarin' : 'english',
+      });
+      setTtsConversationId(session.id);
+      return session.id;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleSpeak = async () => {
+    if (!currentCard || isSpeaking) {
+      return;
+    }
+    setIsSpeaking(true);
+    setErrorMessage(null);
+    const conversationId =
+      currentCard.conversationId ?? (await ensureTtsConversationId());
+    if (!conversationId) {
+      setIsSpeaking(false);
+      setErrorMessage(t('reviewTtsUnavailable'));
+      return;
+    }
+    try {
+      const payload = await synthesizeConversationSpeech(
+        conversationId,
+        currentCard.term,
+      );
+      setAudioUrl(payload.audioUrl);
+      const audio = new Audio(payload.audioUrl);
+      await audio.play();
+    } catch {
+      setErrorMessage(t('reviewTtsError'));
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
+        <div className="glass-card rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-8 max-w-md w-full text-center text-slate-600 dark:text-slate-400">
+          {t('reviewLoading')}
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoading && cards.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
+        <div className="glass-card rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-8 max-w-md w-full text-center space-y-4">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
+            {t('reviewEmptyTitle')}
+          </h2>
+          <p className="text-slate-600 dark:text-slate-400">
+            {t('reviewEmptyHint')}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isComplete) {
     return (
@@ -131,10 +251,15 @@ export default function DailyReviewPage() {
 
   return (
     <div className="h-full flex flex-col items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
-      <div className="w-full max-w-lg mb-6">
+      <div className="w-full max-w-lg mb-6 space-y-3">
+        {errorMessage && (
+          <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+            {errorMessage}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm text-slate-600 dark:text-slate-400">
-            {t('reviewCardLabel')} {currentIndex + 1} / {reviewCards.length}
+            {t('reviewCardLabel')} {currentIndex + 1} / {cards.length}
           </span>
           <span className="text-sm text-slate-600 dark:text-slate-400">
             {reviewedCount} {t('reviewKnown')} · {needPracticeCount}{' '}
@@ -144,20 +269,28 @@ export default function DailyReviewPage() {
         <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
           <div
             className="bg-indigo-600 dark:bg-indigo-500 h-2 rounded-full transition-all duration-300"
-            style={{ width: `${(currentIndex / reviewCards.length) * 100}%` }}
+            style={{ width: `${progressValue}%` }}
           />
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 max-w-lg w-full min-h-[400px] flex flex-col">
+      <div className="glass-card rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 max-w-lg w-full min-h-[420px] flex flex-col">
         <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-          <div className="text-center">
-            <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium mb-2">
+          <div className="text-center space-y-3">
+            <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium">
               {t('reviewWordLabel')}
             </p>
-            <h2 className="text-4xl font-semibold text-slate-900 dark:text-white mb-4">
-              {currentCard.word}
+            <h2 className="text-4xl font-semibold text-slate-900 dark:text-white">
+              {currentCard.term}
             </h2>
+            <button
+              onClick={handleSpeak}
+              disabled={isSpeaking}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-60"
+            >
+              <Volume2 className="w-4 h-4" />
+              {t('reviewSpeak')}
+            </button>
           </div>
 
           <button
@@ -174,7 +307,7 @@ export default function DailyReviewPage() {
                   {t('reviewTranslation')}
                 </p>
                 <p className="text-lg text-slate-900 dark:text-white">
-                  {currentCard.translation}
+                  {getCardLabel(currentCard)}
                 </p>
               </div>
               <div className="bg-indigo-50 dark:bg-indigo-950/30 rounded-xl p-4 border border-indigo-100 dark:border-indigo-900">
@@ -182,12 +315,17 @@ export default function DailyReviewPage() {
                   {t('reviewExample')}
                 </p>
                 <p className="text-slate-900 dark:text-white mb-1">
-                  {currentCard.example}
+                  {getCardExample(currentCard)}
                 </p>
-                <p className="text-sm text-slate-600 dark:text-slate-400 italic">
-                  {currentCard.exampleTranslation}
-                </p>
+                {currentCard.exampleTranslation && (
+                  <p className="text-sm text-slate-600 dark:text-slate-400 italic">
+                    {currentCard.exampleTranslation}
+                  </p>
+                )}
               </div>
+              {audioUrl && (
+                <audio controls src={audioUrl} className="w-full" />
+              )}
             </div>
           )}
         </div>

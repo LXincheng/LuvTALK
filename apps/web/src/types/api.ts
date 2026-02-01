@@ -2,6 +2,13 @@ export type LanguageCode = 'cantonese' | 'mandarin' | 'english';
 
 export type MessageSender = 'user' | 'ai';
 
+export interface KeyTerm {
+  term: string;
+  definition: string;
+  type?: string;
+  examples?: string[];
+}
+
 export interface ConversationMessage {
   id: string;
   sender: MessageSender;
@@ -15,6 +22,7 @@ export interface ConversationMessage {
     scoreReason?: string;
     translation?: string;
     audioUrl?: string;
+    keyTerms?: KeyTerm[];
   };
 }
 
@@ -49,6 +57,7 @@ export interface FavoriteItem {
   pinned?: boolean;
   authorName?: string;
   avatar?: string;
+  conversationId?: string;
 }
 
 export interface VoiceUploadResponse {
@@ -71,4 +80,23 @@ export interface VoiceOperationSnapshot {
   transcript?: string;
   error?: string;
   updatedAt: string;
+}
+
+export type ReviewSourceType = 'favorite' | 'low_score';
+
+export interface ReviewCard {
+  id: string;
+  term: string;
+  definition?: string;
+  example?: string;
+  exampleTranslation?: string;
+  sourceType: ReviewSourceType;
+  favoriteType?: FavoriteType;
+  conversationId?: string;
+  score?: number;
+}
+
+export interface DailyReviewPayload {
+  date: string;
+  cards: ReviewCard[];
 }

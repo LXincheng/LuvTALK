@@ -26,4 +26,8 @@ export class CreateFavoriteDto {
   @IsOptional()
   @IsBoolean()
   pinned?: boolean;
+
+  @IsOptional()
+  @IsString()
+  conversationId?: string;
 }

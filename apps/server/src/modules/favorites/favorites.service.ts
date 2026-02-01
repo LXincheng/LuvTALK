@@ -58,6 +58,7 @@ export class FavoritesService {
           ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
           : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
       createdAt: new Date().toISOString(),
+      conversationId: dto.conversationId,
     };
 
     this.favorites.set(favorite.id, favorite);
@@ -70,6 +71,7 @@ export class FavoritesService {
           title: favorite.title,
           content: favorite.content,
           metadata: favorite.metadata as Prisma.InputJsonValue,
+          conversationId: favorite.conversationId,
         },
       });
     }

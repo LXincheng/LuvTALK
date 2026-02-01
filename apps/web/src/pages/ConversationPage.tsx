@@ -12,122 +12,11 @@ import {
 import { createFavorite } from '../services/favoritesService';
 import { useLocale } from '../providers/LocaleContext';
 import type { Annotation, Message } from '../types/chat';
-import type { ConversationSession, LanguageCode } from '../types/api';
-import type { Locale } from '../providers/LocaleContext';
-
-interface AnnotationDefinition {
-  word: string;
-  explanation: Record<Locale, string>;
-  examples?: Record<Locale, string[]>;
-}
-
-const annotationLibrary: Record<LanguageCode, AnnotationDefinition[]> = {
-  cantonese: [
-    {
-      word: '你好',
-      explanation: {
-        zh: '常见粤语问候语，用于打招呼。',
-        en: 'A common Cantonese greeting meaning “hello”.',
-      },
-      examples: {
-        zh: ['你好呀！今日过得点？', '你好，欢迎来到 LuvTALK。'],
-        en: ['你好呀！(Hello, how are you?)', '你好，欢迎来到 LuvTALK。'],
-      },
-    },
-    {
-      word: '唔该',
-      explanation: {
-        zh: '粤语中表示“请、麻烦你”的礼貌表达。',
-        en: 'A polite Cantonese expression meaning “please” or “thanks”.',
-      },
-      examples: {
-        zh: ['唔该帮我解释下。', '唔该晒！'],
-        en: ['唔该帮我解释下。', '唔该晒！(Thanks a lot!)'],
-      },
-    },
-    {
-      word: '多谢',
-      explanation: {
-        zh: '粤语中常用的“谢谢”。',
-        en: 'A Cantonese way to say “thank you”.',
-      },
-      examples: {
-        zh: ['多谢你嘅帮助。', '多谢晒！'],
-        en: ['多谢你嘅帮助。', '多谢晒！(Thanks a lot!)'],
-      },
-    },
-  ],
-  mandarin: [
-    {
-      word: '你好',
-      explanation: {
-        zh: '普通话里最常见的问候语。',
-        en: 'A standard Mandarin greeting meaning “hello”.',
-      },
-      examples: {
-        zh: ['你好，很高兴认识你。', '你好呀，今天怎么样？'],
-        en: ['你好，很高兴认识你。', '你好呀，今天怎么样？'],
-      },
-    },
-    {
-      word: '谢谢',
-      explanation: {
-        zh: '普通话中表示感谢的礼貌说法。',
-        en: 'A common Mandarin expression for “thank you”.',
-      },
-      examples: {
-        zh: ['谢谢你的帮助。', '谢谢你今天的陪伴。'],
-        en: ['谢谢你的帮助。', '谢谢你今天的陪伴。'],
-      },
-    },
-    {
-      word: '麻烦',
-      explanation: {
-        zh: '表示请求或打扰时的礼貌用语。',
-        en: 'A polite way to ask for help or make a request.',
-      },
-      examples: {
-        zh: ['麻烦再解释一次。', '麻烦帮我检查一下。'],
-        en: ['麻烦再解释一次。', '麻烦帮我检查一下。'],
-      },
-    },
-  ],
-  english: [
-    {
-      word: 'Hello',
-      explanation: {
-        zh: '常见英文问候语，表示“你好”。',
-        en: 'A common English greeting.',
-      },
-      examples: {
-        zh: ['Hello! Nice to meet you.', 'Hello, how are you today?'],
-        en: ['Hello! Nice to meet you.', 'Hello, how are you today?'],
-      },
-    },
-    {
-      word: 'Great',
-      explanation: {
-        zh: '用于表达认可或赞赏，意为“太棒了”。',
-        en: 'Used to show approval, meaning “excellent”.',
-      },
-      examples: {
-        zh: ['Great job on that sentence!', 'Great, let’s continue.'],
-        en: ['Great job on that sentence!', 'Great, let’s continue.'],
-      },
-    },
-    {
-      word: 'Could you',
-      explanation: {
-        zh: '礼貌提问句式，表示“你能否…”。',
-        en: 'A polite way to request something.',
-      },
-      examples: {
-        zh: ['Could you say that again?', 'Could you help me with this?'],
-        en: ['Could you say that again?', 'Could you help me with this?'],
-      },
-    },
-  ],
-};
+import type {
+  ConversationSession,
+  FavoriteType,
+  LanguageCode,
+} from '../types/api';
 
 const getInitialTargetLanguage = (): LanguageCode => {
   if (typeof window === 'undefined') {
@@ -142,32 +31,23 @@ const getInitialTargetLanguage = (): LanguageCode => {
   return 'cantonese';
 };
 
-const buildAnnotations = (
-  content: string,
-  language: LanguageCode,
-  locale: Locale,
-): Annotation[] => {
-  const definitions = annotationLibrary[language] ?? [];
-  const lowerContent = content.toLowerCase();
-
-  return definitions
-    .filter((definition) => {
-      const word = definition.word;
-      return language === 'english'
-        ? lowerContent.includes(word.toLowerCase())
-        : content.includes(word);
-    })
-    .map((definition) => ({
-      word: definition.word,
-      explanation: definition.explanation[locale],
-      examples: definition.examples?.[locale],
-    }));
+const mapAnnotationTypeToFavoriteType = (
+  value?: string,
+): FavoriteType => {
+  const normalized = value?.toLowerCase();
+  if (normalized === 'phrase' || normalized === 'expression') {
+    return 'phrase';
+  }
+  if (normalized === 'cultural') {
+    return 'cultural';
+  }
+  if (normalized === 'scenario') {
+    return 'scenario';
+  }
+  return 'vocabulary';
 };
 
-const mapSessionToMessages = (
-  session: ConversationSession,
-  locale: Locale,
-): Message[] => {
+const mapSessionToMessages = (session: ConversationSession): Message[] => {
   const mapped: Message[] = session.messages.map((message) => ({
     id: message.id,
     type: message.sender,
@@ -177,7 +57,12 @@ const mapSessionToMessages = (
     audioUrl: message.meta?.audioUrl,
     annotations:
       message.sender === 'ai'
-        ? buildAnnotations(message.text, session.targetLanguage, locale)
+        ? message.meta?.keyTerms?.map((term) => ({
+            word: term.term,
+            explanation: term.definition,
+            examples: term.examples,
+            type: term.type,
+          }))
         : undefined,
   }));
 
@@ -282,8 +167,8 @@ export default function ConversationPage() {
     if (!session) {
       return;
     }
-    setMessages(mapSessionToMessages(session, locale));
-  }, [locale, session]);
+    setMessages(mapSessionToMessages(session));
+  }, [session]);
 
   useEffect(() => {
     if (!session?.id) {
@@ -342,11 +227,15 @@ export default function ConversationPage() {
   };
 
   const handleSaveVocabulary = async (payload: Annotation) => {
+    if (!session) {
+      return;
+    }
     try {
       await createFavorite({
         title: payload.word,
         content: payload.explanation,
-        type: 'vocabulary',
+        type: mapAnnotationTypeToFavoriteType(payload.type),
+        conversationId: session.id,
         metadata: payload.examples ? { examples: payload.examples } : undefined,
       });
     } catch {

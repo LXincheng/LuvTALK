@@ -92,9 +92,12 @@
 - 收藏页修复：补齐收藏卡片分类标签与复制/删除提示的中英文文案，日期按界面语言格式化显示。
 - 构建适配：tsconfig 补充 React 类型引用，消息映射显式类型，注解组件使用 ReactNode，移除 `outline-ring/50` 以兼容 Tailwind v3 构建。
 
-**TODO（暂缓接入/待补配置）**
-| 事项 | 文件位置 | 需要修改的内容 |
-| --- | --- | --- |
-| Supabase 前端登录 | `apps/web/.env`（需新建） | 填写 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY` 并恢复 Supabase 登录流程 |
-| Railway 后端环境 | `.env`（本地）/ Railway 环境变量 | 设置 `DATABASE_URL`、`DS_AI_*`、`OPENAI_*` 等后端运行必需变量 |
-| Vercel API 代理地址 | `apps/web/vercel.json` | 把 `https://YOUR_RAILWAY_DOMAIN/api/$1` 替换为真实 Railway 后端域名 |
+### 2026-02-01
+
+- 后端：AiResponseSchema 新增 keyTerms；Prompt 强化 key_terms 输出；ConversationService 归一化并落库 `meta.keyTerms`，仅保留 reply 中出现的术语。
+- 后端：修复 keyTerms 归一化的 TypeScript 类型谓词错误，改用 null 过滤并保持 type 可选字段一致性。
+- 后端：新增 ReviewModule（`/review/daily` + `/review/feedback`），聚合收藏 + 低分表达（score < 60）；反馈暂记录到内存日志，便于 Phase 3.2 迁移。
+- 后端：收藏创建支持携带 `conversationId`，Review 卡片可复用 `/conversation/:id/tts`。
+- 前端：ConversationPage 由后端 `keyTerms` 驱动高亮注解；VocabularyPopover 透传类型并保存到收藏。
+- 前端：DailyReviewPage 接入 `/review/daily`、`/review/feedback`，增加一键发音（TTS）按钮与错误状态；新增 reviewService 与多语言文案。
+- 文档：新增 `docs/phase3-review-vocab.md` 记录每日复习联动、词汇卡片与高亮逻辑方案。

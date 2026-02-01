@@ -6,6 +6,7 @@ export interface CreateFavoritePayload {
   content: string;
   type: FavoriteType;
   metadata?: Record<string, unknown>;
+  conversationId?: string;
 }
 
 export function fetchFavorites() {

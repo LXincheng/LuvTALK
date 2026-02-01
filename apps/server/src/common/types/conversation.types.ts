@@ -1,5 +1,6 @@
 import { FavoriteTypeEnum } from "../enums/favorite-type.enum";
 import { LanguageCode } from "../enums/language-code.enum";
+import type { KeyTerm } from "./ai-response.schema";
 
 export type MessageSender = "user" | "ai";
 
@@ -16,6 +17,7 @@ export interface ConversationMessage {
     scoreReason?: string;
     translation?: string;
     audioUrl?: string;
+    keyTerms?: KeyTerm[];
   };
 }
 
@@ -48,6 +50,7 @@ export interface FavoriteItem {
   pinned?: boolean;
   authorName?: string;
   avatar?: string;
+  conversationId?: string;
 }
 
 export interface TranslationRecord {

@@ -4,6 +4,7 @@ export interface Annotation {
   word: string;
   explanation: string;
   examples?: string[];
+  type?: string;
 }
 
 export interface Message {
