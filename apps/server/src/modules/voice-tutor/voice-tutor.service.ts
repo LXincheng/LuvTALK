@@ -464,21 +464,21 @@ export class VoiceTutorService {
         return {
           languageCode: "zh",
           transcriptionPrompt: "说话人使用普通话（Mandarin Chinese）。",
-          ttsVoice: "alloy",
+          ttsVoice: "shimmer",
         };
       case LanguageCode.Cantonese:
         return {
           languageCode: "zh",
           transcriptionPrompt:
             "说话人使用粤语（Cantonese Chinese），请按粤语发音转写。",
-          ttsVoice: "fable",
+          ttsVoice: "shimmer",
         };
       case LanguageCode.English:
       default:
         return {
           languageCode: "en",
           transcriptionPrompt: "Speaker is using English.",
-          ttsVoice: "alloy",
+          ttsVoice: "shimmer",
         };
     }
   }

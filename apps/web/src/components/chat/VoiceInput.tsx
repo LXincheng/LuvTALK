@@ -28,21 +28,19 @@ export default function VoiceInput({
   const disableToggle = isDisabled || (isSending && !isRecording);
 
   return (
-    <>
-      {isRecording && (
-        <div className="px-4 py-3 glass-card border-t border-indigo-100 dark:border-indigo-900">
-          <div className="flex items-center gap-3">
+    <div className="glass-card border-t border-slate-200 dark:border-slate-700 px-4 py-4">
+      <div className="max-w-4xl mx-auto space-y-3">
+        {isRecording && (
+          <div className="flex items-center gap-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 px-3 py-2 border border-indigo-100/70 dark:border-indigo-900/40">
             <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
             <span className="text-sm text-indigo-900 dark:text-indigo-300 font-medium">
               {recordingLabel}
             </span>
             <WaveformAnimation />
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="glass-card border-t border-slate-200 dark:border-slate-700 px-4 py-4">
-        <div className="flex items-end gap-3 max-w-4xl mx-auto">
+        <div className="flex items-end gap-3">
           <input
             type="text"
             value={value}
@@ -72,7 +70,7 @@ export default function VoiceInput({
           </button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

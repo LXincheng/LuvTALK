@@ -15,5 +15,8 @@ export interface Message {
   pronunciationScore?: number;
   audioUrl?: string;
   annotations?: Annotation[];
+  isLoading?: boolean;
+  isOptimistic?: boolean;
+  statusText?: string;
   timestamp: Date;
 }

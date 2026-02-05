@@ -54,7 +54,7 @@ export default function VocabularyPopover({
               transition={{ duration: 0.2 }}
               className="absolute left-0 top-full mt-2 z-50 w-80 max-w-[90vw]"
             >
-              <div className="glass-card rounded-2xl p-4 shadow-2xl border border-white/20 dark:border-white/10">
+              <div className="glass-card rounded-2xl p-4 shadow-2xl border border-white/20 dark:border-white/10 bg-white/95 dark:bg-slate-900/95">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-indigo-500/20 dark:bg-indigo-400/20 flex items-center justify-center">

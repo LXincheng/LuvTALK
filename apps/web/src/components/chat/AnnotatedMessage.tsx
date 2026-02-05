@@ -19,7 +19,11 @@ export default function AnnotatedMessage({
   onSaveVocabulary,
 }: AnnotatedMessageProps) {
   if (annotations.length === 0) {
-    return <p className="text-slate-800 dark:text-slate-200">{content}</p>;
+    return (
+      <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-words">
+        {content}
+      </p>
+    );
   }
 
   const renderContent = () => {
@@ -79,5 +83,9 @@ export default function AnnotatedMessage({
     return parts;
   };
 
-  return <p className="text-slate-800 dark:text-slate-200">{renderContent()}</p>;
+  return (
+    <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-words">
+      {renderContent()}
+    </p>
+  );
 }

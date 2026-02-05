@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Maximize2, X } from 'lucide-react';
 import MessageBubble from '../components/chat/MessageBubble';
@@ -7,6 +7,7 @@ import { API_BASE_URL } from '../services/apiClient';
 import {
   sendConversationMessage,
   startConversation,
+  synthesizeConversationSpeech,
   uploadConversationVoice,
 } from '../services/conversationService';
 import { createFavorite } from '../services/favoritesService';
@@ -14,6 +15,7 @@ import { useLocale } from '../providers/LocaleContext';
 import type { Annotation, Message } from '../types/chat';
 import type {
   ConversationSession,
+  ConversationMessage,
   FavoriteType,
   LanguageCode,
 } from '../types/api';
@@ -47,14 +49,17 @@ const mapAnnotationTypeToFavoriteType = (
   return 'vocabulary';
 };
 
-const mapSessionToMessages = (session: ConversationSession): Message[] => {
+const mapSessionToMessages = (
+  session: ConversationSession,
+  ttsAudioMap: Record<string, string>,
+): Message[] => {
   const mapped: Message[] = session.messages.map((message) => ({
     id: message.id,
     type: message.sender,
     content: message.text,
     translation: message.meta?.translation,
     timestamp: new Date(message.createdAt),
-    audioUrl: message.meta?.audioUrl,
+    audioUrl: message.meta?.audioUrl ?? ttsAudioMap[message.id],
     annotations:
       message.sender === 'ai'
         ? message.meta?.keyTerms?.map((term) => ({
@@ -85,16 +90,43 @@ const mapSessionToMessages = (session: ConversationSession): Message[] => {
   return mapped;
 };
 
+const buildTempId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `temp-${Date.now()}-${Math.round(Math.random() * 10000)}`;
+};
+
+const buildOptimisticUserMessage = (
+  content: string,
+  audioUrl?: string,
+): Message => ({
+  id: buildTempId(),
+  type: 'user',
+  content,
+  audioUrl,
+  timestamp: new Date(),
+  isOptimistic: true,
+});
+
+const buildTutorLoadingMessage = (): Message => ({
+  id: buildTempId(),
+  type: 'ai',
+  content: '',
+  timestamp: new Date(),
+  isLoading: true,
+  isOptimistic: true,
+});
+
 export default function ConversationPage() {
   const { t, locale } = useLocale();
   const [session, setSession] = useState<ConversationSession | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
   const [isImmersiveMode, setIsImmersiveMode] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>(
     getInitialTargetLanguage,
@@ -106,6 +138,11 @@ export default function ConversationPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const lastSessionMessageCountRef = useRef<number>(0);
+  const ttsRequestsRef = useRef<Set<string>>(new Set());
+  const [ttsAudioMap, setTtsAudioMap] = useState<Record<string, string>>({});
+  const voiceDraftUrlRef = useRef<string | null>(null);
+  const ttsAudioMapRef = useRef<Record<string, string>>({});
 
   const targetLanguageLabels = useMemo(
     () => ({
@@ -127,14 +164,26 @@ export default function ConversationPage() {
   }, [targetLanguage]);
 
   useEffect(() => {
+    ttsAudioMapRef.current = ttsAudioMap;
+  }, [ttsAudioMap]);
+
+  const sessionMessages = useMemo(
+    () => (session ? mapSessionToMessages(session, ttsAudioMap) : []),
+    [session, ttsAudioMap],
+  );
+  const mergedMessages = useMemo(
+    () => [...sessionMessages, ...optimisticMessages],
+    [sessionMessages, optimisticMessages],
+  );
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [mergedMessages]);
 
   useEffect(() => {
     let isMounted = true;
     setIsInitializing(true);
     setErrorMessage(null);
-    setVoiceStatus(null);
     startConversation({
       targetLanguage,
       nativeLanguage,
@@ -167,7 +216,16 @@ export default function ConversationPage() {
     if (!session) {
       return;
     }
-    setMessages(mapSessionToMessages(session));
+    const nextCount = session.messages.length;
+    const prevCount = lastSessionMessageCountRef.current;
+    if (nextCount > prevCount) {
+      setOptimisticMessages([]);
+      if (voiceDraftUrlRef.current) {
+        URL.revokeObjectURL(voiceDraftUrlRef.current);
+        voiceDraftUrlRef.current = null;
+      }
+    }
+    lastSessionMessageCountRef.current = nextCount;
   }, [session]);
 
   useEffect(() => {
@@ -195,13 +253,107 @@ export default function ConversationPage() {
   }, [session?.id, t]);
 
   useEffect(() => {
+    if (!session?.id) {
+      return;
+    }
+    setTtsAudioMap({});
+    ttsRequestsRef.current.clear();
+    if (voiceDraftUrlRef.current) {
+      URL.revokeObjectURL(voiceDraftUrlRef.current);
+      voiceDraftUrlRef.current = null;
+    }
+  }, [session?.id]);
+
+  const queueTtsForMessage = useCallback((message: ConversationMessage) => {
+    if (!session) {
+      return;
+    }
+    if (message.sender !== 'ai') {
+      return;
+    }
+    if (message.meta?.audioUrl || ttsAudioMapRef.current[message.id]) {
+      return;
+    }
+    if (ttsRequestsRef.current.has(message.id)) {
+      return;
+    }
+    ttsRequestsRef.current.add(message.id);
+    synthesizeConversationSpeech(session.id, message.text)
+      .then((payload) => {
+        setTtsAudioMap((prev) => ({
+          ...prev,
+          [message.id]: payload.audioUrl,
+        }));
+      })
+      .catch(() => {
+        if (!errorMessage) {
+          setErrorMessage(t('tutorTtsError'));
+        }
+      })
+      .finally(() => {
+        ttsRequestsRef.current.delete(message.id);
+      });
+  }, [errorMessage, session, t]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    const pending = session.messages.filter(
+      (message) =>
+        message.sender === 'ai' &&
+        !message.meta?.audioUrl &&
+        !ttsAudioMapRef.current[message.id],
+    );
+    if (!pending.length) {
+      return;
+    }
+    const latest = pending[pending.length - 1];
+    queueTtsForMessage(latest);
+    const rest = pending.slice(0, -1);
+    if (!rest.length) {
+      return;
+    }
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      window.requestIdleCallback(() => {
+        rest.forEach(queueTtsForMessage);
+      });
+    } else {
+      setTimeout(() => {
+        rest.forEach(queueTtsForMessage);
+      }, 0);
+    }
+  }, [errorMessage, queueTtsForMessage, session, t]);
+
+  useEffect(() => {
     return () => {
       if (mediaRecorderRef.current?.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      if (voiceDraftUrlRef.current) {
+        URL.revokeObjectURL(voiceDraftUrlRef.current);
+      }
     };
   }, []);
+
+  const updateOptimisticVoiceStatus = (statusText: string | null) => {
+    setOptimisticMessages((prev) => {
+      const reversedIndex = [...prev]
+        .reverse()
+        .findIndex((message) => message.type === 'user' && message.audioUrl);
+      if (reversedIndex < 0) {
+        return prev;
+      }
+      const targetIndex = prev.length - 1 - reversedIndex;
+      const next = [...prev];
+      next[targetIndex] = {
+        ...next[targetIndex],
+        statusText: statusText ?? undefined,
+      };
+      return next;
+    });
+  };
 
   const handleSend = async () => {
     if (!inputValue.trim() || !session || isSending) {
@@ -211,6 +363,10 @@ export default function ConversationPage() {
     setInputValue('');
     setIsSending(true);
     setErrorMessage(null);
+    setOptimisticMessages([
+      buildOptimisticUserMessage(messageText),
+      buildTutorLoadingMessage(),
+    ]);
 
     try {
       const nextSession = await sendConversationMessage(
@@ -218,9 +374,11 @@ export default function ConversationPage() {
         messageText,
       );
       setSession(nextSession);
+      setOptimisticMessages([]);
     } catch {
       setErrorMessage(t('sendError'));
       setInputValue(messageText);
+      setOptimisticMessages([]);
     } finally {
       setIsSending(false);
     }
@@ -247,15 +405,18 @@ export default function ConversationPage() {
     if (!session) {
       return;
     }
-    setVoiceStatus(t('voiceSending'));
     setErrorMessage(null);
+    updateOptimisticVoiceStatus(t('voiceSending'));
     try {
       await uploadConversationVoice(session.id, audio);
     } catch {
-      setVoiceStatus(t('voiceSendError'));
+      updateOptimisticVoiceStatus(t('voiceSendError'));
+      setOptimisticMessages((prev) =>
+        prev.filter((message) => !(message.type === 'ai' && message.isLoading)),
+      );
       return;
     }
-    setVoiceStatus(t('voiceWaiting'));
+    updateOptimisticVoiceStatus(t('voiceWaiting'));
   };
 
   const startRecording = async () => {
@@ -267,7 +428,6 @@ export default function ConversationPage() {
       return;
     }
     setErrorMessage(null);
-    setVoiceStatus(t('recording'));
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -298,11 +458,23 @@ export default function ConversationPage() {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         if (!chunks.length) {
-          setVoiceStatus(t('voiceNoCapture'));
+          setErrorMessage(t('voiceNoCapture'));
           return;
         }
         const mimeType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(chunks, { type: mimeType });
+        const previewUrl = URL.createObjectURL(blob);
+        if (voiceDraftUrlRef.current) {
+          URL.revokeObjectURL(voiceDraftUrlRef.current);
+        }
+        voiceDraftUrlRef.current = previewUrl;
+        setOptimisticMessages([
+          {
+            ...buildOptimisticUserMessage(t('voiceMessageLabel'), previewUrl),
+            statusText: t('voiceSending'),
+          },
+          buildTutorLoadingMessage(),
+        ]);
         void handleVoiceUpload(blob);
       };
 
@@ -310,7 +482,6 @@ export default function ConversationPage() {
       setIsRecording(true);
     } catch {
       setErrorMessage(t('voicePermissionDenied'));
-      setVoiceStatus(null);
     }
   };
 
@@ -342,13 +513,8 @@ export default function ConversationPage() {
           {errorMessage}
         </div>
       )}
-      {voiceStatus && (
-        <div className="rounded-xl border border-indigo-100 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 px-4 py-3 text-sm text-indigo-700 dark:text-indigo-300">
-          {voiceStatus}
-        </div>
-      )}
       <AnimatePresence>
-        {messages.map((message) => (
+        {mergedMessages.map((message) => (
           <motion.div
             key={message.id}
             initial={{ opacity: 0, y: 16 }}
