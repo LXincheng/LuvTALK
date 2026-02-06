@@ -145,3 +145,32 @@
 - 登录页游客登录跳转调整为 /chat；侧边栏底部头像改为跳转 /profile。
 - 清理：ProfilePage 移除未使用引用，.gitignore 忽略 apps/server/tmp。
 - 新增 docs/supabase-setup.md（完整配置指南）和 docs/achievement-level-design.md（成就/等级表结构与种子 SQL）。
+
+### 2026-02-06（聊天持久化与历史记录）
+
+- 核心修复：ConversationPage 不再每次挂载创建新会话，改为调用 `POST /conversation/resume` 优先恢复已有活跃会话，仅在无活跃会话时创建新的。
+- Prisma schema：Conversation 模型新增 `title`（自动生成标题）和 `status`（active/archived）字段，非破坏性迁移。
+- 后端：ConversationService 新增 `resumeOrCreateSession()`（按 userId+语言查找活跃会话或按 conversationId 恢复）、`archiveConversation()`（归档会话）、`persistSessionPublic()`（供 VoiceTutorService 回写 TTS URL）。
+- 后端：`startSession()` 创建新会话前自动归档同用户同语言的旧活跃会话；`processMessage()` 首条用户消息自动生成标题；`listUserHistory()` 返回 title/status/messageCount。
+- 后端：ConversationController 新增 `POST /resume` 和 `POST /:id/archive` 端点；`GET /history` 移除强制鉴权，游客返回空数组。
+- 后端：VoiceTutorService TTS 合成成功后自动将 audioUrl 写回对应 AI 消息的 meta.audioUrl 并重新持久化，恢复会话时无需重新生成 TTS。
+- 前端：conversationService 新增 `resumeConversation()`、`fetchConversationHistory()`、`fetchConversationById()`、`archiveConversation()` API 函数。
+- 前端：ConversationPage 初始化逻辑重写，从 localStorage 读取 activeConversationId 传给 resume 接口；成功后写回 localStorage。
+- 前端：新增 ChatHistoryDrawer 组件（左侧滑出抽屉，glass-sidebar 风格，显示会话列表/标题/时间/消息数，支持选择历史会话和新建对话）。
+- 前端：新增 ChatModeSwitcher 组件（分段控制器：语音/文字/沉浸三模式，沉浸模式禁用并显示"即将推出"）。
+- 前端：VoiceInput 新增 hideVoice prop，文字模式下隐藏麦克风按钮。
+- 前端：TTS 合成 effect 增加 chatMode 守卫，文字模式下跳过所有 TTS 请求。
+- 前端：聊天头部改造——新增历史记录按钮、显示会话标题、模式切换器替代原沉浸模式按钮。
+- 国际化：LocaleContext 新增 chatHistory/newChat/noHistory/noHistoryHint/chatModeVoice/chatModeText/chatModeImmersive/chatModeImmersiveDisabled 翻译键。
+- 类型：ConversationSession 新增 title/status 字段；新增 ConversationHistorySummary 接口。
+- 文档：新增 docs/chat-persistence-prd.md 记录持久化功能 PRD。
+
+### 2026-02-06（聊天持久化 Bug 修复）
+
+- 后端：修复 `GET /conversation/history` 路由被 `GET /:conversationId` 参数路由抢先匹配的问题，将 history 路由移到参数路由之前，历史记录接口恢复正常。
+- 后端：`resumeOrCreateSession()` 新增 targetLanguage 校验——当 localStorage 中的 conversationId 对应的会话语言与请求语言不匹配时，跳过恢复并创建新会话，修复切换学习语言后 AI 仍用旧语言回复的问题。
+- 后端：VoiceTutorService ffmpeg 路径解析增加系统 ffmpeg 回退检测（`where ffmpeg` / `which ffmpeg`），ffmpeg 不可用时跳过 webm→mp3 转换并直接发送 webm 给 Whisper API（Whisper 原生支持 webm），消除 ENOENT 报错。
+- 前端：ChatModeSwitcher 改为 `inline-flex` + `flex-1` 等宽按钮布局，移动端居中显示，解决标签过宽问题。
+- 后端：彻底移除 fluent-ffmpeg / ffmpeg-static 依赖，`ensureMp3()` 直接透传原始文件给 Whisper API（原生支持 webm/wav/mp3/m4a 等格式），根治 spawn EFTYPE 崩溃。
+- 后端：历史记录接口从 `GET` 改为 `POST /conversation/history`，新增 `listByIds()` 方法——游客用户通过 body `{ ids: [...] }` 传入 localStorage 中保存的会话 ID 列表查询历史，认证用户仍按 userId 查询。
+- 前端：新增 `getStoredConversationIds()` / `trackConversationId()` 工具函数，在 localStorage 维护 `conversationIds` 列表（去重、最多 50 条）；`loadHistory()` 将 ID 列表传给后端，游客用户也能看到历史记录。

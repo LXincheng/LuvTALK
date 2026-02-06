@@ -5,6 +5,7 @@ interface VoiceInputProps {
   isRecording: boolean;
   isSending?: boolean;
   isDisabled?: boolean;
+  hideVoice?: boolean;
   placeholder?: string;
   recordingLabel?: string;
   onChange: (value: string) => void;
@@ -17,6 +18,7 @@ export default function VoiceInput({
   isRecording,
   isSending = false,
   isDisabled = false,
+  hideVoice = false,
   placeholder = 'Type a message or use the microphone...',
   recordingLabel = 'Recording...',
   onChange,
@@ -50,17 +52,19 @@ export default function VoiceInput({
             placeholder={placeholder}
             className="flex-1 px-4 py-3 glass-input border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
           />
-          <button
-            onClick={onToggleRecording}
-            disabled={disableToggle}
-            className={`p-3 rounded-xl transition-all ${
-              isRecording
-                ? 'bg-red-500 hover:bg-red-600 text-white'
-                : 'glass-button text-white hover:opacity-90'
-            }`}
-          >
-            <Mic className="w-6 h-6" />
-          </button>
+          {!hideVoice && (
+            <button
+              onClick={onToggleRecording}
+              disabled={disableToggle}
+              className={`p-3 rounded-xl transition-all ${
+                isRecording
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'glass-button text-white hover:opacity-90'
+              }`}
+            >
+              <Mic className="w-6 h-6" />
+            </button>
+          )}
           <button
             onClick={onSend}
             disabled={disableSend}

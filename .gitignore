@@ -27,3 +27,5 @@ apps/server/tmp/
 
 #figma原型
 figma-proto
+.claude/settings.local.json
+.claude/settings.json

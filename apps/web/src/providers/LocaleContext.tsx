@@ -179,6 +179,16 @@ const translations = {
     levelExpert: '专家',
     levelMaster: '大师',
     levelLegend: '传奇',
+    // Chat persistence & history
+    chatHistory: '对话历史',
+    newChat: '新对话',
+    noHistory: '暂无对话记录',
+    noHistoryHint: '开始你的第一次对话吧',
+    // Chat mode
+    chatModeVoice: '语音',
+    chatModeText: '文字',
+    chatModeImmersive: '沉浸',
+    chatModeImmersiveDisabled: '即将推出',
   },
   en: {
     appName: 'LuvTALK',
@@ -349,6 +359,16 @@ const translations = {
     levelExpert: 'Expert',
     levelMaster: 'Master',
     levelLegend: 'Legend',
+    // Chat persistence & history
+    chatHistory: 'Chat History',
+    newChat: 'New Chat',
+    noHistory: 'No conversations yet',
+    noHistoryHint: 'Start your first conversation',
+    // Chat mode
+    chatModeVoice: 'Voice',
+    chatModeText: 'Text',
+    chatModeImmersive: 'Immersive',
+    chatModeImmersiveDisabled: 'Coming soon',
   },
 } as const;
 

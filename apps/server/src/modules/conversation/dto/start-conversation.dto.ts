@@ -12,4 +12,8 @@ export class StartConversationDto {
   @IsOptional()
   @IsEnum(LanguageCode)
   nativeLanguage?: LanguageCode;
+
+  @IsOptional()
+  @IsString()
+  conversationId?: string;
 }

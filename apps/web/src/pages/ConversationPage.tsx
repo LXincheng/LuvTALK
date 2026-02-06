@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Maximize2, X } from 'lucide-react';
+import { History, X } from 'lucide-react';
 import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
+import ChatHistoryDrawer from '../components/chat/ChatHistoryDrawer';
+import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
+import type { ChatMode } from '../components/chat/ChatModeSwitcher';
 import { API_BASE_URL } from '../services/apiClient';
 import {
+  fetchConversationById,
+  fetchConversationHistory,
+  resumeConversation,
   sendConversationMessage,
   startConversation,
   synthesizeConversationSpeech,
@@ -15,6 +21,7 @@ import { useLocale } from '../providers/LocaleContext';
 import { PREFERRED_RECORDING_MIMES } from '../constants/ui';
 import type { Annotation, Message } from '../types/chat';
 import type {
+  ConversationHistorySummary,
   ConversationSession,
   ConversationMessage,
   FavoriteType,
@@ -32,6 +39,31 @@ const getInitialTargetLanguage = (): LanguageCode => {
     return stored;
   }
   return 'cantonese';
+};
+
+/** Read the list of known conversation IDs from localStorage. */
+const getStoredConversationIds = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem('conversationIds');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Add a conversation ID to the persisted list (deduped, most-recent first). */
+const trackConversationId = (id: string) => {
+  if (typeof window === 'undefined') return;
+  const ids = getStoredConversationIds().filter((v) => v !== id);
+  ids.unshift(id);
+  // Keep at most 50 entries
+  window.localStorage.setItem(
+    'conversationIds',
+    JSON.stringify(ids.slice(0, 50)),
+  );
 };
 
 const mapAnnotationTypeToFavoriteType = (
@@ -129,6 +161,15 @@ export default function ConversationPage() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isImmersiveMode, setIsImmersiveMode] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>(() => {
+    if (typeof window === 'undefined') return 'voice';
+    return (localStorage.getItem('chatMode') as ChatMode) || 'voice';
+  });
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<
+    ConversationHistorySummary[]
+  >([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>(
     getInitialTargetLanguage,
   );
@@ -165,6 +206,12 @@ export default function ConversationPage() {
   }, [targetLanguage]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('chatMode', chatMode);
+    }
+  }, [chatMode]);
+
+  useEffect(() => {
     ttsAudioMapRef.current = ttsAudioMap;
   }, [ttsAudioMap]);
 
@@ -185,15 +232,26 @@ export default function ConversationPage() {
     let isMounted = true;
     setIsInitializing(true);
     setErrorMessage(null);
-    startConversation({
+
+    const savedConversationId =
+      typeof window !== 'undefined'
+        ? window.localStorage.getItem('activeConversationId')
+        : null;
+
+    resumeConversation({
       targetLanguage,
       nativeLanguage,
+      conversationId: savedConversationId ?? undefined,
     })
       .then((nextSession) => {
         if (!isMounted) {
           return;
         }
         setSession(nextSession);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('activeConversationId', nextSession.id);
+          trackConversationId(nextSession.id);
+        }
       })
       .catch(() => {
         if (!isMounted) {
@@ -297,7 +355,7 @@ export default function ConversationPage() {
   }, [errorMessage, session, t]);
 
   useEffect(() => {
-    if (!session) {
+    if (!session || chatMode === 'text') {
       return;
     }
     const pending = session.messages.filter(
@@ -324,7 +382,7 @@ export default function ConversationPage() {
         rest.forEach(queueTtsForMessage);
       }, 0);
     }
-  }, [errorMessage, queueTtsForMessage, session, t]);
+  }, [chatMode, errorMessage, queueTtsForMessage, session, t]);
 
   useEffect(() => {
     return () => {
@@ -354,6 +412,63 @@ export default function ConversationPage() {
       };
       return next;
     });
+  };
+
+  const loadHistory = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const ids = getStoredConversationIds();
+      const history = await fetchConversationHistory(ids);
+      setConversationHistory(history);
+    } catch {
+      // History is non-critical, silently fail
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const handleSelectConversation = async (conversationId: string) => {
+    setIsInitializing(true);
+    setHistoryDrawerOpen(false);
+    setErrorMessage(null);
+    try {
+      const nextSession = await fetchConversationById(conversationId);
+      setSession(nextSession);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('activeConversationId', nextSession.id);
+        trackConversationId(nextSession.id);
+      }
+    } catch {
+      setErrorMessage(t('sessionInitError'));
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  const handleNewChat = async () => {
+    setHistoryDrawerOpen(false);
+    setIsInitializing(true);
+    setErrorMessage(null);
+    try {
+      const newSession = await startConversation({
+        targetLanguage,
+        nativeLanguage,
+      });
+      setSession(newSession);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('activeConversationId', newSession.id);
+        trackConversationId(newSession.id);
+      }
+      void loadHistory();
+    } catch {
+      setErrorMessage(t('sessionInitError'));
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  const handleModeChange = (nextMode: ChatMode) => {
+    setChatMode(nextMode);
   };
 
   const handleSend = async () => {
@@ -535,6 +650,7 @@ export default function ConversationPage() {
       isRecording={isRecording}
       isSending={isSending}
       isDisabled={isInitializing || !session}
+      hideVoice={chatMode === 'text'}
       placeholder={t('placeholder')}
       recordingLabel={t('recording')}
       onChange={setInputValue}
@@ -564,42 +680,101 @@ export default function ConversationPage() {
 
   return (
     <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
-      <div className="glass-card border-b border-slate-200 dark:border-slate-700 px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <h2 className="font-semibold text-slate-900 dark:text-white">
-            {t('chatTitle')}
-          </h2>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span>{t('learningLanguage')}</span>
-            <div className="flex flex-wrap items-center gap-2">
-              {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
-                (language) => {
-                  const isActive = targetLanguage === language;
-                  return (
-                    <button
-                      key={language}
-                      onClick={() => setTargetLanguage(language)}
-                      className={`px-3 py-1 rounded-lg transition-all ${
-                        isActive
-                          ? 'glass-button text-white'
-                          : 'glass-card text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {targetLanguageLabels[language]}
-                    </button>
-                  );
-                },
-              )}
+      <ChatHistoryDrawer
+        isOpen={historyDrawerOpen}
+        onClose={() => setHistoryDrawerOpen(false)}
+        conversations={conversationHistory}
+        activeConversationId={session?.id}
+        onSelectConversation={handleSelectConversation}
+        onNewChat={handleNewChat}
+        isLoading={isLoadingHistory}
+      />
+
+      <div className="border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-3 py-2 md:px-4 md:py-3">
+        {/* Mobile: two compact rows */}
+        <div className="flex flex-col gap-2 md:hidden">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setHistoryDrawerOpen(true);
+                void loadHistory();
+              }}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              title={t('chatHistory')}
+            >
+              <History className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+            </button>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate min-w-0 flex-1">
+              {session?.title || t('chatTitle')}
+            </h2>
+            <div className="shrink-0">
+              <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
             </div>
           </div>
+          <div className="flex items-center gap-1.5 pl-1">
+            {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
+              (language) => {
+                const isActive = targetLanguage === language;
+                return (
+                  <button
+                    key={language}
+                    onClick={() => setTargetLanguage(language)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      isActive
+                        ? 'glass-button text-white'
+                        : 'text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {targetLanguageLabels[language]}
+                  </button>
+                );
+              },
+            )}
+          </div>
         </div>
-        <button
-          onClick={() => setIsImmersiveMode(true)}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white transition-all shadow-sm hover:shadow-md"
-        >
-          <Maximize2 className="w-4 h-4" />
-          <span className="text-sm">{t('immersiveMode')}</span>
-        </button>
+
+        {/* Desktop: two-column layout */}
+        <div className="hidden md:flex md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                setHistoryDrawerOpen(true);
+                void loadHistory();
+              }}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              title={t('chatHistory')}
+            >
+              <History className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+            </button>
+            <div>
+              <h2 className="font-semibold text-slate-900 dark:text-white">
+                {session?.title || t('chatTitle')}
+              </h2>
+              <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>{t('learningLanguage')}</span>
+                {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
+                  (language) => {
+                    const isActive = targetLanguage === language;
+                    return (
+                      <button
+                        key={language}
+                        onClick={() => setTargetLanguage(language)}
+                        className={`px-2.5 py-0.5 rounded-lg transition-all ${
+                          isActive
+                            ? 'glass-button text-white'
+                            : 'text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {targetLanguageLabels[language]}
+                      </button>
+                    );
+                  },
+                )}
+              </div>
+            </div>
+          </div>
+          <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
+        </div>
       </div>
 
       {messageList}

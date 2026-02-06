@@ -112,6 +112,25 @@ export class ConversationService {
     const now = new Date().toISOString();
     const scenarioId = dto.scenarioId ?? "daily";
     const nativeLanguage = dto.nativeLanguage ?? LanguageCode.Mandarin;
+
+    // Archive previous active conversation for this user + language
+    if (userId && this.prisma.canUseDatabase()) {
+      try {
+        await this.prisma.conversation.updateMany({
+          where: {
+            userId,
+            targetLanguage: dto.targetLanguage,
+            status: "active",
+          },
+          data: { status: "archived" },
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Failed to archive old conversations: ${(error as Error).message}`,
+        );
+      }
+    }
+
     const welcomeMessage = this.buildSystemWelcome(
       scenarioId,
       dto.targetLanguage,
@@ -125,6 +144,8 @@ export class ConversationService {
       targetLanguage: dto.targetLanguage,
       nativeLanguage,
       userId,
+      title: this.describeScenario(scenarioId, nativeLanguage),
+      status: "active",
       createdAt: now,
       updatedAt: now,
       messages: [welcomeMessage],
@@ -133,6 +154,77 @@ export class ConversationService {
     await this.persistSession(session);
     this.broadcastSession(session);
     return session;
+  }
+
+  async resumeOrCreateSession(
+    dto: StartConversationDto,
+    userId?: string,
+  ): Promise<ConversationSession> {
+    // 1. Try to resume by userId + language (authenticated users)
+    if (userId && this.prisma.canUseDatabase()) {
+      try {
+        const existing = await this.prisma.conversation.findFirst({
+          where: {
+            userId,
+            targetLanguage: dto.targetLanguage,
+            status: "active",
+          },
+          orderBy: { updatedAt: "desc" },
+        });
+        if (existing) {
+          return this.getSession(existing.id);
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to query active conversation: ${(error as Error).message}`,
+        );
+      }
+    }
+
+    // 2. Try to resume by conversationId (guest users via localStorage)
+    if (dto.conversationId) {
+      try {
+        const session = await this.getSession(dto.conversationId);
+        // Only resume if the target language matches the request
+        if (session.targetLanguage !== dto.targetLanguage) {
+          this.logger.log(
+            `Language mismatch (session=${session.targetLanguage}, requested=${dto.targetLanguage}), creating new session.`,
+          );
+        } else {
+          // Bind to user if not already bound
+          if (!session.userId && userId) {
+            session.userId = userId;
+            await this.persistSession(session);
+          }
+          return session;
+        }
+      } catch {
+        // Conversation not found, fall through to create new
+        this.logger.log(
+          `Conversation ${dto.conversationId} not found, creating new session.`,
+        );
+      }
+    }
+
+    // 3. Create new session
+    return this.startSession(dto, userId);
+  }
+
+  async archiveConversation(
+    conversationId: string,
+    userId?: string,
+  ): Promise<void> {
+    const session = await this.getSession(conversationId);
+    if (session.userId && userId && session.userId !== userId) {
+      throw new NotFoundException("Conversation not found");
+    }
+    session.status = "archived";
+    await this.persistSession(session);
+  }
+
+  /** Public wrapper for persisting session (used by VoiceTutorService for TTS URL writeback) */
+  async persistSessionPublic(session: ConversationSession): Promise<void> {
+    await this.persistSession(session);
   }
 
   async processMessage(
@@ -163,6 +255,14 @@ export class ConversationService {
       },
     );
     session.messages.push(userMessage);
+
+    // Auto-generate title from first user message
+    if (
+      !session.title &&
+      session.messages.filter((m) => m.sender === "user").length === 1
+    ) {
+      session.title = trimmed.slice(0, 60);
+    }
 
     const aiPayload =
       (await this.requestOpenAi(session, trimmed)) ??
@@ -227,6 +327,8 @@ export class ConversationService {
         nativeLanguage: string | null;
         messages: Prisma.JsonValue;
         score: number | null;
+        title?: string | null;
+        status?: string | null;
         createdAt: Date;
         updatedAt: Date;
         userId?: string | null;
@@ -254,6 +356,8 @@ export class ConversationService {
           nativeLanguage:
             (record.nativeLanguage as LanguageCode) ?? LanguageCode.Mandarin,
           userId: record.userId ?? undefined,
+          title: record.title ?? undefined,
+          status: record.status ?? "active",
           createdAt: record.createdAt.toISOString(),
           updatedAt: record.updatedAt.toISOString(),
           messages: persistedMessages,
@@ -735,6 +839,51 @@ export class ConversationService {
     }
   }
 
+  async listByIds(ids: string[], limit = 20) {
+    if (!ids.length || !this.prisma.canUseDatabase()) {
+      return [];
+    }
+    const safeIds = ids.slice(0, limit);
+    let records: Array<{
+      id: string;
+      scenarioId: string;
+      targetLanguage: string;
+      nativeLanguage: string | null;
+      updatedAt: Date;
+      score: number | null;
+      title: string | null;
+      status: string | null;
+      messages: Prisma.JsonValue;
+    }> = [];
+    try {
+      records = await this.prisma.conversation.findMany({
+        where: { id: { in: safeIds } },
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true,
+          scenarioId: true,
+          targetLanguage: true,
+          nativeLanguage: true,
+          updatedAt: true,
+          score: true,
+          title: true,
+          status: true,
+          messages: true,
+        },
+      });
+    } catch (error) {
+      if (this.isDatabaseConnectionError(error)) {
+        this.prisma.markDatabaseUnavailable(
+          "Database connection lost (P1001/P1002).",
+        );
+        return [];
+      }
+      this.logger.warn(`listByIds failed: ${(error as Error).message}`);
+      return [];
+    }
+    return records.map((record) => this.toHistorySummary(record));
+  }
+
   async listUserHistory(userId: string, limit = 20) {
     if (!this.prisma.canUseDatabase()) {
       return [];
@@ -746,6 +895,8 @@ export class ConversationService {
       nativeLanguage: string | null;
       updatedAt: Date;
       score: number | null;
+      title: string | null;
+      status: string | null;
       messages: Prisma.JsonValue;
     }> = [];
     try {
@@ -760,30 +911,53 @@ export class ConversationService {
           nativeLanguage: true,
           updatedAt: true,
           score: true,
+          title: true,
+          status: true,
           messages: true,
         },
       });
     } catch (error) {
+      if (this.isDatabaseConnectionError(error)) {
+        this.prisma.markDatabaseUnavailable(
+          "Database connection lost (P1001/P1002).",
+        );
+        return [];
+      }
       if (this.isMissingUserColumnError(error)) {
         this.logMissingUserColumnWarning();
         return [];
       }
       throw error;
     }
-    return records.map((record) => {
-      const messages = Array.isArray(record.messages)
-        ? (record.messages as unknown as ConversationMessage[])
-        : [];
-      return {
-        id: record.id,
-        scenarioId: record.scenarioId,
-        targetLanguage: record.targetLanguage as LanguageCode,
-        nativeLanguage: record.nativeLanguage as LanguageCode | null,
-        updatedAt: record.updatedAt.toISOString(),
-        score: record.score ?? undefined,
-        lastMessage: messages.at(-1)?.text ?? "",
-      };
-    });
+    return records.map((record) => this.toHistorySummary(record));
+  }
+
+  private toHistorySummary(record: {
+    id: string;
+    scenarioId: string;
+    targetLanguage: string;
+    nativeLanguage: string | null;
+    updatedAt: Date;
+    score: number | null;
+    title: string | null;
+    status: string | null;
+    messages: Prisma.JsonValue;
+  }) {
+    const messages = Array.isArray(record.messages)
+      ? (record.messages as unknown as ConversationMessage[])
+      : [];
+    return {
+      id: record.id,
+      scenarioId: record.scenarioId,
+      targetLanguage: record.targetLanguage as LanguageCode,
+      nativeLanguage: record.nativeLanguage as LanguageCode | null,
+      updatedAt: record.updatedAt.toISOString(),
+      score: record.score ?? undefined,
+      title: record.title ?? undefined,
+      status: record.status ?? "active",
+      lastMessage: messages.at(-1)?.text ?? "",
+      messageCount: messages.length,
+    };
   }
 
   async getConversationHistory(
@@ -825,6 +999,8 @@ export class ConversationService {
       nativeLanguage: session.nativeLanguage,
       messages: session.messages as unknown as Prisma.JsonArray,
       score: session.coach?.overallScore,
+      title: session.title,
+      status: session.status ?? "active",
     };
     const update = includeUserId
       ? { ...shared, userId: session.userId }

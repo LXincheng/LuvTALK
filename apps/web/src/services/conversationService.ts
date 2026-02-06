@@ -1,5 +1,6 @@
 import { apiClient } from './apiClient';
 import type {
+  ConversationHistorySummary,
   ConversationSession,
   LanguageCode,
   VoiceOperationSnapshot,
@@ -12,10 +13,41 @@ export interface StartConversationPayload {
   nativeLanguage?: LanguageCode;
 }
 
+export interface ResumeConversationPayload extends StartConversationPayload {
+  conversationId?: string;
+}
+
 export function startConversation(payload: StartConversationPayload) {
   return apiClient.post<ConversationSession, StartConversationPayload>(
     '/conversation/session',
     payload,
+  );
+}
+
+export function resumeConversation(payload: ResumeConversationPayload) {
+  return apiClient.post<ConversationSession, ResumeConversationPayload>(
+    '/conversation/resume',
+    payload,
+  );
+}
+
+export function fetchConversationHistory(ids?: string[]) {
+  return apiClient.post<ConversationHistorySummary[], { ids?: string[] }>(
+    '/conversation/history',
+    { ids },
+  );
+}
+
+export function fetchConversationById(conversationId: string) {
+  return apiClient.get<ConversationSession>(
+    `/conversation/${conversationId}`,
+  );
+}
+
+export function archiveConversation(conversationId: string) {
+  return apiClient.post<{ status: string }, Record<string, never>>(
+    `/conversation/${conversationId}/archive`,
+    {},
   );
 }
 

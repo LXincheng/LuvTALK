@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { access, mkdir, readFile, writeFile, unlink } from "fs/promises";
-import { basename, dirname, extname, join } from "path";
+import { access, mkdir, readFile, writeFile } from "fs/promises";
+import { basename, extname, join } from "path";
 import { Readable } from "stream";
 import { envConfig } from "../../common/config/env.config";
 import {
@@ -11,15 +11,9 @@ import {
 } from "../../common/cache/voice-operation-cache.service";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { ConversationService } from "../conversation/conversation.service";
-import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
 
 const DEFAULT_STORAGE_ROOT = join(process.cwd(), "tmp", "voice-uploads");
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-
-if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic);
-}
 
 interface LanguageHint {
   languageCode: string;
@@ -199,44 +193,14 @@ export class VoiceTutorService {
     }
   }
 
+  /**
+   * Whisper API natively supports webm, wav, mp3, m4a, mp4, mpeg, mpga, oga, ogg —
+   * no server-side conversion needed.
+   */
   private async ensureMp3(
     upload: VoiceUploadResult,
   ): Promise<VoiceUploadResult> {
-    const lowerName = upload.fileName.toLowerCase();
-    const needsConversion =
-      upload.mimeType === "audio/webm" ||
-      upload.mimeType === "video/webm" ||
-      lowerName.endsWith(".webm");
-    if (!needsConversion) {
-      return upload;
-    }
-    const directory = dirname(upload.filePath);
-    const mp3Name = `${upload.operationId}.mp3`;
-    const mp3Path = join(directory, mp3Name);
-    try {
-      await new Promise<void>((resolve, reject) => {
-        ffmpeg(upload.filePath)
-          .audioBitrate("192k")
-          .format("mp3")
-          .on("error", (error) => reject(error))
-          .on("end", () => resolve())
-          .save(mp3Path);
-      });
-      await unlink(upload.filePath).catch(() => undefined);
-    } catch (error) {
-      this.logger.warn(
-        `Failed to convert ${upload.fileName} to mp3: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return upload;
-    }
-    return {
-      operationId: upload.operationId,
-      filePath: mp3Path,
-      fileName: mp3Name,
-      mimeType: "audio/mpeg",
-    };
+    return upload;
   }
 
   private async forwardTranscript(
@@ -412,10 +376,30 @@ export class VoiceTutorService {
       this.logger.debug(
         `Stored synthesized speech for ${conversationId} -> ${fileName}`,
       );
-      return {
-        fileName,
-        audioUrl: this.buildAudioReference(conversationId, fileName),
-      };
+      const audioUrl = this.buildAudioReference(conversationId, fileName);
+
+      // Write back TTS audioUrl to the matching AI message meta for persistence
+      try {
+        const currentSession =
+          await this.conversationService.getSession(conversationId);
+        const targetMessage = [...currentSession.messages]
+          .reverse()
+          .find((m) => m.sender === "ai" && m.text === text);
+        if (targetMessage && !targetMessage.meta?.audioUrl) {
+          targetMessage.meta = { ...targetMessage.meta, audioUrl };
+          await this.conversationService.persistSessionPublic(currentSession);
+        }
+      } catch (writebackError) {
+        this.logger.warn(
+          `TTS audioUrl writeback failed: ${
+            writebackError instanceof Error
+              ? writebackError.message
+              : String(writebackError)
+          }`,
+        );
+      }
+
+      return { fileName, audioUrl };
     } catch (error) {
       this.logger.error(
         `Yunwu speech synthesis exception for conversation ${conversationId}`,

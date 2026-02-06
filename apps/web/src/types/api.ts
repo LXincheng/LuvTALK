@@ -39,10 +39,25 @@ export interface ConversationSession {
   targetLanguage: LanguageCode;
   nativeLanguage?: LanguageCode;
   userId?: string;
+  title?: string;
+  status?: string;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];
   coach?: ConversationCoachNote;
+}
+
+export interface ConversationHistorySummary {
+  id: string;
+  scenarioId: string;
+  targetLanguage: LanguageCode;
+  nativeLanguage: LanguageCode | null;
+  updatedAt: string;
+  score?: number;
+  title?: string;
+  status?: string;
+  lastMessage: string;
+  messageCount?: number;
 }
 
 export type FavoriteType = 'phrase' | 'cultural' | 'vocabulary' | 'scenario';

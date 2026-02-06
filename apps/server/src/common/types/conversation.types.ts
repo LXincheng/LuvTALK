@@ -34,6 +34,8 @@ export interface ConversationSession {
   targetLanguage: LanguageCode;
   nativeLanguage?: LanguageCode;
   userId?: string;
+  title?: string;
+  status?: string;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];

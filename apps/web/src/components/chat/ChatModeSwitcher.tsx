@@ -1,0 +1,61 @@
+import { Mic, Type, Radio } from 'lucide-react';
+import { useLocale } from '../../providers/LocaleContext';
+
+export type ChatMode = 'voice' | 'text' | 'immersive';
+
+interface ChatModeSwitcherProps {
+  mode: ChatMode;
+  onChange: (mode: ChatMode) => void;
+}
+
+export default function ChatModeSwitcher({
+  mode,
+  onChange,
+}: ChatModeSwitcherProps) {
+  const { t } = useLocale();
+
+  const modes: Array<{
+    id: ChatMode;
+    label: string;
+    icon: typeof Mic;
+    disabled: boolean;
+    tooltip?: string;
+  }> = [
+    { id: 'voice', label: t('chatModeVoice'), icon: Mic, disabled: false },
+    { id: 'text', label: t('chatModeText'), icon: Type, disabled: false },
+    {
+      id: 'immersive',
+      label: t('chatModeImmersive'),
+      icon: Radio,
+      disabled: true,
+      tooltip: t('chatModeImmersiveDisabled'),
+    },
+  ];
+
+  return (
+    <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60">
+      {modes.map((m) => {
+        const Icon = m.icon;
+        const isActive = mode === m.id;
+        return (
+          <button
+            key={m.id}
+            onClick={() => !m.disabled && onChange(m.id)}
+            disabled={m.disabled}
+            title={m.tooltip ?? m.label}
+            className={`flex items-center justify-center gap-1.5 rounded-md transition-all ${
+              isActive
+                ? 'glass-button text-white'
+                : m.disabled
+                  ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            } px-2.5 py-2 md:px-3 md:py-1.5`}
+          >
+            <Icon className="w-4 h-4 shrink-0" />
+            <span className="hidden md:inline text-xs font-medium">{m.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
