@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { motion } from 'motion/react';
 import AnnotatedMessage from './AnnotatedMessage';
+import AudioPlayer from './AudioPlayer';
 import { useLocale } from '../../providers/LocaleContext';
 import type { Message, Annotation } from '../../types/chat';
 
@@ -61,13 +62,7 @@ export default function MessageBubble({
 
   const audioBlock = message.audioUrl ? (
     <div className="px-2">
-      <div className="rounded-xl border border-slate-200/70 dark:border-slate-700/70 bg-white/70 dark:bg-slate-900/50 px-3 py-2">
-        <audio
-          controls
-          src={message.audioUrl}
-          className="w-full h-10 rounded-full bg-slate-100/60 dark:bg-slate-800/60"
-        />
-      </div>
+      <AudioPlayer src={message.audioUrl} compact />
     </div>
   ) : null;
 

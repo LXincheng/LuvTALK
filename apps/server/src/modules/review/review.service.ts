@@ -1,13 +1,16 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { FavoriteTypeEnum } from "../../common/enums/favorite-type.enum";
 import { FavoriteItem } from "../../common/types/conversation.types";
+import { ConversationMessage } from "../../common/types/conversation.types";
 import {
   DailyReviewPayload,
   ReviewCard,
+  ReviewSourceType,
 } from "../../common/types/review.types";
-import { FavoritesService } from "../favorites/favorites.service";
 import { PrismaService } from "../../core/prisma/prisma.service";
-import { ConversationMessage } from "../../common/types/conversation.types";
 import { ConversationService } from "../conversation/conversation.service";
+import { FavoritesService } from "../favorites/favorites.service";
 import {
   ReviewFeedbackAction,
   ReviewFeedbackDto,
@@ -16,6 +19,27 @@ import {
 const LOW_SCORE_THRESHOLD = 60;
 const MAX_LOW_SCORE_CARDS = 4;
 const MAX_DAILY_CARDS = 10;
+const MIN_EASE_FACTOR = 1.3;
+const MAX_EASE_FACTOR = 3.0;
+
+interface ReviewQueueSnapshot {
+  id: string;
+  userId: string;
+  sourceType: ReviewSourceType;
+  sourceId?: string;
+  term: string;
+  definition?: string;
+  example?: string;
+  exampleTranslation?: string;
+  favoriteType?: FavoriteTypeEnum;
+  conversationId?: string;
+  score?: number;
+  reviewCount: number;
+  intervalDays: number;
+  easeFactor: number;
+  lastReviewedAt?: string;
+  nextReviewAt?: string;
+}
 
 @Injectable()
 export class ReviewService {
@@ -24,6 +48,8 @@ export class ReviewService {
     string,
     ReviewFeedbackDto & { createdAt: string }
   >();
+  private readonly queueFallback = new Map<string, ReviewQueueSnapshot>();
+  private reviewTablesReady: boolean | null = null;
 
   constructor(
     private readonly favoritesService: FavoritesService,
@@ -31,10 +57,10 @@ export class ReviewService {
     private readonly conversationService: ConversationService,
   ) {}
 
-  async buildDailyReview(): Promise<DailyReviewPayload> {
-    const favorites = this.favoritesService.list();
+  async buildDailyReview(userId?: string): Promise<DailyReviewPayload> {
+    const favorites = await this.favoritesService.list(userId);
     const favoriteCards = this.buildFavoriteCards(favorites);
-    const lowScoreCards = await this.buildLowScoreCards();
+    const lowScoreCards = await this.buildLowScoreCards(userId);
 
     const merged = [
       ...lowScoreCards.slice(0, MAX_LOW_SCORE_CARDS),
@@ -42,14 +68,26 @@ export class ReviewService {
     ];
 
     const deduped = this.deduplicateCards(merged);
+    let cards = deduped.slice(0, MAX_DAILY_CARDS);
+
+    if (userId && (await this.canUseReviewTables())) {
+      await this.syncQueueFromCards(userId, deduped);
+      const dueCards = await this.fetchDueQueueCards(userId, MAX_DAILY_CARDS);
+      if (dueCards.length > 0) {
+        cards = dueCards;
+      }
+    }
 
     return {
       date: new Date().toISOString().split("T")[0],
-      cards: deduped.slice(0, MAX_DAILY_CARDS),
+      cards,
     };
   }
 
-  recordFeedback(dto: ReviewFeedbackDto): { status: string } {
+  async recordFeedback(
+    dto: ReviewFeedbackDto,
+    userId?: string,
+  ): Promise<{ status: string }> {
     const createdAt = new Date().toISOString();
     const entry = { ...dto, createdAt };
     this.feedbackLog.set(`${dto.cardId}-${createdAt}`, entry);
@@ -58,7 +96,70 @@ export class ReviewService {
     this.logger.log(
       `Review feedback: card=${dto.cardId} action=${actionLabel} source=${dto.sourceType ?? "unknown"}`,
     );
+
+    if (!userId) {
+      return { status: "ok" };
+    }
+
+    if (!(await this.canUseReviewTables())) {
+      this.updateFallbackSchedule(dto, userId, createdAt);
+      return { status: "ok" };
+    }
+
+    try {
+      await this.prisma.reviewFeedback.create({
+        data: {
+          userId,
+          cardId: dto.cardId,
+          action: dto.action,
+          sourceType: dto.sourceType,
+          conversationId: dto.conversationId,
+        },
+      });
+      await this.applyFeedbackToQueue(dto, userId);
+    } catch (error) {
+      if (this.isMissingTableError(error)) {
+        this.reviewTablesReady = false;
+        this.updateFallbackSchedule(dto, userId, createdAt);
+      } else {
+        throw error;
+      }
+    }
+
     return { status: "ok" };
+  }
+
+  private async buildLowScoreCards(
+    userId?: string,
+  ): Promise<ReviewCard[]> {
+    const cards: ReviewCard[] = [];
+    if (this.prisma.canUseDatabase()) {
+      const records = await this.prisma.conversation.findMany({
+        where: userId ? { userId } : undefined,
+        orderBy: { updatedAt: "desc" },
+        take: 12,
+        select: {
+          id: true,
+          messages: true,
+        },
+      });
+      records.forEach((record) => {
+        const messages = Array.isArray(record.messages)
+          ? (record.messages as unknown as ConversationMessage[])
+          : [];
+        cards.push(...this.extractLowScoreCards(record.id, messages));
+      });
+      return cards;
+    }
+
+    const sessions = this.conversationService.listCachedSessions();
+    sessions.forEach((session) => {
+      if (userId && session.userId !== userId) {
+        return;
+      }
+      cards.push(...this.extractLowScoreCards(session.id, session.messages));
+    });
+    return cards;
   }
 
   private buildFavoriteCards(favorites: FavoriteItem[]): ReviewCard[] {
@@ -91,33 +192,6 @@ export class ReviewService {
         conversationId: favorite.conversationId,
       };
     });
-  }
-
-  private async buildLowScoreCards(): Promise<ReviewCard[]> {
-    const cards: ReviewCard[] = [];
-    if (this.prisma.canUseDatabase()) {
-      const records = await this.prisma.conversation.findMany({
-        orderBy: { updatedAt: "desc" },
-        take: 12,
-        select: {
-          id: true,
-          messages: true,
-        },
-      });
-      records.forEach((record) => {
-        const messages = Array.isArray(record.messages)
-          ? (record.messages as unknown as ConversationMessage[])
-          : [];
-        cards.push(...this.extractLowScoreCards(record.id, messages));
-      });
-      return cards;
-    }
-
-    const sessions = this.conversationService.listCachedSessions();
-    sessions.forEach((session) => {
-      cards.push(...this.extractLowScoreCards(session.id, session.messages));
-    });
-    return cards;
   }
 
   private extractLowScoreCards(
@@ -165,5 +239,245 @@ export class ReviewService {
       output.push(card);
     });
     return output;
+  }
+
+  private async canUseReviewTables(): Promise<boolean> {
+    if (!this.prisma.canUseDatabase()) {
+      return false;
+    }
+    if (this.reviewTablesReady !== null) {
+      return this.reviewTablesReady;
+    }
+    try {
+      await this.prisma.reviewQueueItem.findFirst({
+        select: { id: true },
+      });
+      this.reviewTablesReady = true;
+      return true;
+    } catch (error) {
+      if (this.isMissingTableError(error)) {
+        this.reviewTablesReady = false;
+        this.logger.warn(
+          "Review tables not available. Falling back to in-memory schedule.",
+        );
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private isMissingTableError(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      (error.code === "P2021" || error.code === "P2022")
+    );
+  }
+
+  private buildQueueId(userId: string, card: ReviewCard): string {
+    return `review-${userId}-${card.sourceType}-${card.id}`.toLowerCase();
+  }
+
+  private async syncQueueFromCards(
+    userId: string,
+    cards: ReviewCard[],
+  ): Promise<void> {
+    const now = new Date();
+    const tablesReady = await this.canUseReviewTables();
+    await Promise.all(
+      cards.map(async (card) => {
+        const queueId = this.buildQueueId(userId, card);
+        const createPayload = {
+          id: queueId,
+          userId,
+          sourceType: card.sourceType,
+          sourceId: card.id,
+          term: card.term,
+          definition: card.definition,
+          example: card.example,
+          exampleTranslation: card.exampleTranslation,
+          favoriteType: card.favoriteType,
+          conversationId: card.conversationId,
+          score: card.score,
+          nextReviewAt: now,
+        };
+        const updatePayload = {
+          term: card.term,
+          definition: card.definition,
+          example: card.example,
+          exampleTranslation: card.exampleTranslation,
+          favoriteType: card.favoriteType,
+          conversationId: card.conversationId,
+          score: card.score,
+          sourceId: card.id,
+        };
+        if (tablesReady) {
+          try {
+            await this.prisma.reviewQueueItem.upsert({
+              where: { id: queueId },
+              create: createPayload,
+              update: updatePayload,
+            });
+            return;
+          } catch (error) {
+            if (this.isMissingTableError(error)) {
+              this.reviewTablesReady = false;
+            } else {
+              throw error;
+            }
+          }
+        }
+
+        const fallback = this.queueFallback.get(queueId);
+        const snapshot: ReviewQueueSnapshot = fallback ?? {
+          id: queueId,
+          userId,
+          sourceType: card.sourceType,
+          sourceId: card.id,
+          term: card.term,
+          definition: card.definition,
+          example: card.example,
+          exampleTranslation: card.exampleTranslation,
+          favoriteType: card.favoriteType,
+          conversationId: card.conversationId,
+          score: card.score,
+          reviewCount: 0,
+          intervalDays: 1,
+          easeFactor: 2.5,
+          lastReviewedAt: undefined,
+          nextReviewAt: now.toISOString(),
+        };
+        this.queueFallback.set(queueId, snapshot);
+      }),
+    );
+  }
+
+  private async fetchDueQueueCards(
+    userId: string,
+    limit: number,
+  ): Promise<ReviewCard[]> {
+    const now = new Date();
+    if (await this.canUseReviewTables()) {
+      try {
+        const items = await this.prisma.reviewQueueItem.findMany({
+          where: {
+            userId,
+            OR: [{ nextReviewAt: null }, { nextReviewAt: { lte: now } }],
+          },
+          orderBy: [{ nextReviewAt: "asc" }, { updatedAt: "desc" }],
+          take: limit,
+        });
+        return items.map((item) => ({
+          id: item.id,
+          term: item.term,
+          definition: item.definition ?? undefined,
+          example: item.example ?? undefined,
+          exampleTranslation: item.exampleTranslation ?? undefined,
+          sourceType: item.sourceType as ReviewSourceType,
+          favoriteType: item.favoriteType as FavoriteTypeEnum | undefined,
+          conversationId: item.conversationId ?? undefined,
+          score: item.score ?? undefined,
+        }));
+      } catch (error) {
+        if (this.isMissingTableError(error)) {
+          this.reviewTablesReady = false;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return Array.from(this.queueFallback.values())
+      .filter((item) => item.userId === userId)
+      .sort((a, b) => {
+        const nextA = a.nextReviewAt ?? "";
+        const nextB = b.nextReviewAt ?? "";
+        return nextA.localeCompare(nextB);
+      })
+      .slice(0, limit)
+      .map((item) => ({
+        id: item.id,
+        term: item.term,
+        definition: item.definition,
+        example: item.example,
+        exampleTranslation: item.exampleTranslation,
+        sourceType: item.sourceType,
+        favoriteType: item.favoriteType,
+        conversationId: item.conversationId,
+        score: item.score,
+      }));
+  }
+
+  private async applyFeedbackToQueue(
+    dto: ReviewFeedbackDto,
+    userId: string,
+  ): Promise<void> {
+    const queue = await this.prisma.reviewQueueItem.findUnique({
+      where: { id: dto.cardId },
+    });
+    if (!queue || queue.userId !== userId) {
+      return;
+    }
+    const next = this.computeNextSchedule(
+      queue.intervalDays,
+      queue.easeFactor,
+      dto.action,
+    );
+    const now = new Date();
+    await this.prisma.reviewQueueItem.update({
+      where: { id: queue.id },
+      data: {
+        reviewCount: queue.reviewCount + 1,
+        intervalDays: next.intervalDays,
+        easeFactor: next.easeFactor,
+        lastReviewedAt: now,
+        nextReviewAt: next.nextReviewAt,
+      },
+    });
+  }
+
+  private updateFallbackSchedule(
+    dto: ReviewFeedbackDto,
+    userId: string,
+    createdAt: string,
+  ) {
+    const item = this.queueFallback.get(dto.cardId);
+    if (!item || item.userId !== userId) {
+      return;
+    }
+    const next = this.computeNextSchedule(
+      item.intervalDays,
+      item.easeFactor,
+      dto.action,
+    );
+    item.reviewCount += 1;
+    item.intervalDays = next.intervalDays;
+    item.easeFactor = next.easeFactor;
+    item.lastReviewedAt = createdAt;
+    item.nextReviewAt = next.nextReviewAt.toISOString();
+    this.queueFallback.set(dto.cardId, item);
+  }
+
+  private computeNextSchedule(
+    intervalDays: number,
+    easeFactor: number,
+    action: ReviewFeedbackAction,
+  ): { intervalDays: number; easeFactor: number; nextReviewAt: Date } {
+    const now = new Date();
+    if (action === ReviewFeedbackAction.Practice) {
+      const nextEase = Math.max(MIN_EASE_FACTOR, easeFactor - 0.2);
+      const nextInterval = 1;
+      return {
+        intervalDays: nextInterval,
+        easeFactor: nextEase,
+        nextReviewAt: new Date(now.getTime() + nextInterval * 86400000),
+      };
+    }
+    const nextEase = Math.min(MAX_EASE_FACTOR, easeFactor + 0.1);
+    const nextInterval = Math.max(1, Math.round(intervalDays * nextEase));
+    return {
+      intervalDays: nextInterval,
+      easeFactor: nextEase,
+      nextReviewAt: new Date(now.getTime() + nextInterval * 86400000),
+    };
   }
 }

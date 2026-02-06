@@ -38,6 +38,14 @@ export class PrismaService
     return this.databaseReady;
   }
 
+  markDatabaseUnavailable(reason: string): void {
+    if (!this.databaseReady) {
+      return;
+    }
+    this.databaseReady = false;
+    this.logger.warn(`Prisma connection disabled: ${reason}`);
+  }
+
   async onModuleDestroy(): Promise<void> {
     if (this.databaseReady) {
       await this.$disconnect();

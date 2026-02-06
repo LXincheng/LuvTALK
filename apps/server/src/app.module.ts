@@ -10,6 +10,7 @@ import { TranslationModule } from "./modules/translation/translation.module";
 import { VoiceTutorModule } from "./modules/voice-tutor/voice-tutor.module";
 import { AppCacheModule } from "./common/cache/cache.module";
 import { ReviewModule } from "./modules/review/review.module";
+import { AchievementModule } from "./modules/achievement/achievement.module";
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ReviewModule } from "./modules/review/review.module";
     TranslationModule,
     FavoritesModule,
     ReviewModule,
+    AchievementModule,
     HealthModule,
     VoiceTutorModule,
   ],

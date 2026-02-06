@@ -12,6 +12,7 @@ import {
 } from '../services/conversationService';
 import { createFavorite } from '../services/favoritesService';
 import { useLocale } from '../providers/LocaleContext';
+import { PREFERRED_RECORDING_MIMES } from '../constants/ui';
 import type { Annotation, Message } from '../types/chat';
 import type {
   ConversationSession,
@@ -146,11 +147,11 @@ export default function ConversationPage() {
 
   const targetLanguageLabels = useMemo(
     () => ({
-      cantonese: locale === 'zh' ? '粤语' : 'Cantonese',
-      mandarin: locale === 'zh' ? '普通话' : 'Mandarin',
-      english: locale === 'zh' ? '英语' : 'English',
+      cantonese: t('languageCantonese'),
+      mandarin: t('languageMandarin'),
+      english: t('languageEnglish'),
     }),
-    [locale],
+    [t],
   );
 
   useEffect(() => {
@@ -431,12 +432,7 @@ export default function ConversationPage() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/mp4',
-      ];
-      const supportedType = preferredTypes.find((type) =>
+      const supportedType = PREFERRED_RECORDING_MIMES.find((type) =>
         MediaRecorder.isTypeSupported(type),
       );
       const options = supportedType ? { mimeType: supportedType } : undefined;

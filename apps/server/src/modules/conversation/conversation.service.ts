@@ -724,6 +724,12 @@ export class ConversationService {
           this.logMissingUserColumnWarning();
           return;
         }
+        if (this.isDatabaseConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Database connection lost (P1001/P1002).",
+          );
+          return;
+        }
         throw error;
       }
     }
@@ -837,6 +843,13 @@ export class ConversationService {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2022"
+    );
+  }
+
+  private isDatabaseConnectionError(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      (error.code === "P1001" || error.code === "P1002")
     );
   }
 

@@ -14,6 +14,7 @@ pnpm-debug.log*
 dist/
 build/
 coverage/
+apps/server/tmp/
 
 # 环境变量
 .env

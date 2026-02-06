@@ -6,6 +6,7 @@ import {
   startConversation,
   synthesizeConversationSpeech,
 } from '../services/conversationService';
+import AudioPlayer from '../components/chat/AudioPlayer';
 import type { DailyReviewPayload, LanguageCode, ReviewCard } from '../types/api';
 
 const getStoredTargetLanguage = (): LanguageCode => {
@@ -324,7 +325,7 @@ export default function DailyReviewPage() {
                 )}
               </div>
               {audioUrl && (
-                <audio controls src={audioUrl} className="w-full" />
+                <AudioPlayer src={audioUrl} />
               )}
             </div>
           )}

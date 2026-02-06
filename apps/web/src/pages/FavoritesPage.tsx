@@ -20,12 +20,12 @@ export default function FavoritesPage() {
 
   const favoriteTypeLabels: Record<FavoriteType, string> = useMemo(
     () => ({
-      phrase: locale === 'zh' ? '表达' : 'Phrase',
-      cultural: locale === 'zh' ? '文化' : 'Cultural',
-      vocabulary: locale === 'zh' ? '词汇' : 'Vocabulary',
-      scenario: locale === 'zh' ? '场景' : 'Scenario',
+      phrase: t('favoriteTypePhrase'),
+      cultural: t('favoriteTypeCultural'),
+      vocabulary: t('favoriteTypeVocabulary'),
+      scenario: t('favoriteTypeScenario'),
     }),
-    [locale],
+    [t],
   );
 
   useEffect(() => {
@@ -59,13 +59,13 @@ export default function FavoritesPage() {
   const categories = useMemo(() => {
     const types = Array.from(new Set(favorites.map((item) => item.type)));
     return [
-      { id: 'all' as const, label: locale === 'zh' ? '全部' : 'All' },
+      { id: 'all' as const, label: t('categoryAll') },
       ...types.map((type) => ({
         id: type,
         label: favoriteTypeLabels[type],
       })),
     ];
-  }, [favoriteTypeLabels, favorites, locale]);
+  }, [favoriteTypeLabels, favorites, t]);
 
   const filteredFavorites =
     selectedCategory === 'all'

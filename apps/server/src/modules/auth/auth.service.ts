@@ -11,6 +11,16 @@ interface GoogleIdTokenPayload {
   picture?: string;
 }
 
+interface SupabaseUserPayload {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
+  user_metadata?: {
+    full_name?: string | null;
+    avatar_url?: string | null;
+  };
+}
+
 export interface AuthTokens {
   accessToken: string;
 }
@@ -149,6 +159,10 @@ export class AuthService {
     if (!token) {
       return undefined;
     }
+    const supabaseProfile = await this.verifySupabaseAccessToken(token);
+    if (supabaseProfile) {
+      return supabaseProfile;
+    }
     return this.verifyAccessToken(token);
   }
 
@@ -162,6 +176,65 @@ export class AuthService {
       );
       return undefined;
     }
+  }
+
+  async verifySupabaseAccessToken(
+    token: string,
+  ): Promise<AuthUserProfile | undefined> {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return undefined;
+    }
+    try {
+      const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          apikey: supabaseAnonKey,
+        },
+      });
+      if (!response.ok) {
+        return undefined;
+      }
+      const payload = (await response.json()) as SupabaseUserPayload;
+      if (!payload?.id) {
+        return undefined;
+      }
+      const profile = await this.upsertSupabaseUser(payload);
+      return profile;
+    } catch (error) {
+      this.logger.warn(
+        `Supabase token verification failed: ${(error as Error).message}`,
+      );
+      return undefined;
+    }
+  }
+
+  private async upsertSupabaseUser(
+    payload: SupabaseUserPayload,
+  ): Promise<AuthUserProfile> {
+    const displayName =
+      payload.user_metadata?.full_name ??
+      payload.email ??
+      payload.phone ??
+      undefined;
+    const avatarUrl = payload.user_metadata?.avatar_url ?? undefined;
+    const user = await this.prisma.user.upsert({
+      where: { id: payload.id },
+      update: {
+        email: payload.email ?? undefined,
+        name: displayName,
+        avatarUrl,
+      },
+      create: {
+        id: payload.id,
+        email: payload.email ?? undefined,
+        name: displayName,
+        avatarUrl,
+      },
+    });
+    return this.mapUserToProfile(user);
   }
 
   private extractTokenFromHeader(header: string): string | undefined {

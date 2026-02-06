@@ -4,6 +4,8 @@ import ConversationPage from './pages/ConversationPage';
 import DailyReviewPage from './pages/DailyReviewPage';
 import FavoritesPage from './pages/FavoritesPage';
 import ProfilePage from './pages/ProfilePage';
+import LoginPage from './pages/LoginPage';
+import AchievementHallPage from './pages/AchievementHallPage';
 
 export default function App() {
   return (
@@ -14,6 +16,8 @@ export default function App() {
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="review" element={<DailyReviewPage />} />
         <Route path="profile" element={<ProfilePage />} />
+        <Route path="login" element={<LoginPage />} />
+        <Route path="achievements" element={<AchievementHallPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/chat" replace />} />
     </Routes>

@@ -113,3 +113,35 @@
 - 后端：Prompt 放宽 key_terms 输出，仅在确有重点词时返回（0-3），减少强行标注。
 - 前端：TTS 采用“文字先显示、语音后补齐”策略，最新消息优先请求，旧消息空闲时补齐，提升响应速度。
 - 前端：聊天文本支持换行与长文本自动换行，避免排版挤成一团。
+
+### 2026-02-05
+
+- Prisma datasource 增加 directUrl（env("DIRECT_URL")），以支持生产环境连接池 + 迁移直连拆分。
+- 使用 Supabase Pooler 连接串尝试 migrate dev --create-only，报错 P1002：连接可达但无法获取 advisory lock（pg_advisory_lock 超时）。
+- 按当前 .env（IPv4 + DIRECT_URL 指向 pooler）执行 prisma migrate dev --create-only，结果仍为 P1002（pg_advisory_lock 超时）。
+- 结论：使用 pooler 作为 DIRECT_URL 无法完成 Prisma 迁移（锁不可用/超时）。
+- 前端新增 Supabase Auth：提供游客登录、手机号验证码登录、验证码校验与退出登录，接入 Profile 页登录面板；新增 AuthProvider 统一维护会话状态与 access_token。
+- API 请求自动附带 Supabase access_token（Authorization Bearer），以便后端识别用户并做数据归属。
+- 后端鉴权调整：AuthService 增加 Supabase access_token 校验（调用 /auth/v1/user），支持游客与手机号用户；JwtAuthGuard 改为使用 AuthService 解析用户。
+- 收藏持久化升级：FavoritesService 读取 DB（按 userId 过滤），创建收藏时写入 userId；无登录时保持默认演示数据。
+- 复习持久化升级：新增 ReviewQueueItem / ReviewFeedback Prisma 模型与调度逻辑（简化 SM-2），支持持久化队列与反馈日志；无表时自动回退内存队列。
+- Prisma schema 补充 Review 关系字段，并完成 prisma generate。
+- 新增设计文档 docs/auth-review-design.md，记录 Supabase Auth 与复习调度算法与手动建表 SQL。
+
+### 2026-02-06
+
+- 前端新增 LoginPage（Supabase 匿名/手机号 OTP 登录）与 AchievementHallPage（成就/等级双标签页），路由增加 /login 和 /achievements。
+- Prisma schema 增补 Achievement/UserAchievement/LevelDefinition/UserLevel 及 AchievementRarity 枚举。
+- 后端新增成就/等级 API（/achievements、/achievements/levels、/achievements/summary），按用户返回进度与概览；抽离 achievement.types.ts 解决 TS4053。
+- 会话持久化增加 Prisma 连接中断（P1001/P1002）自动降级内存存储，避免请求直接抛错。
+- 成就殿堂国际化：LocaleContext 新增 60+ 翻译键，覆盖成就标题/描述、等级名称、稀有度标签、统计标签等；AchievementHallPage 全面使用 `t()` 替换硬编码文本。
+- 常量集中化：新建 `constants/ui.ts`，收录 RARITY_COLORS/RARITY_GLOW、PREFERRED_AUDIO_MIMES/PREFERRED_RECORDING_MIMES、STAT_COLOR_CLASSES/PROGRESS_COLORS、DEFAULTS 等常量，各页面统一引用。
+- LocaleContext 扩展通用标签：语言标签（languageCantonese 等）、收藏类型（favoriteTypePhrase 等）、分类筛选（categoryAll）、Profile 页全部文案（profileGuest/profileStatSessions/profileVocabulary 等 30+ 键）。
+- ConversationPage 优化：语言切换标签改用 `t()` 函数，录音 MIME 类型改用 PREFERRED_RECORDING_MIMES 常量。
+- FavoritesPage 优化：收藏类型标签和分类筛选"全部"改用 `t()` 函数，消除内联 locale 判断。
+- ProfilePage 重构：所有内联 `locale === 'zh' ? ... : ...` 替换为 `t()` 调用，统计卡片颜色和进度条颜色改用 STAT_COLOR_CLASSES/PROGRESS_COLORS 常量，成就数据改用翻译键驱动。
+- 语音播放 UI 升级：新建 AudioPlayer 组件（玻璃态透明背景、播放/暂停按钮、进度条点击跳转、时间显示），替换 MessageBubble 和 DailyReviewPage 中的原生 `<audio>` 元素，与文字气泡视觉风格统一。
+- AuthProvider 拆分为 auth-context + AuthProvider，修复 eslint only-export-components 规则。
+- 登录页游客登录跳转调整为 /chat；侧边栏底部头像改为跳转 /profile。
+- 清理：ProfilePage 移除未使用引用，.gitignore 忽略 apps/server/tmp。
+- 新增 docs/supabase-setup.md（完整配置指南）和 docs/achievement-level-design.md（成就/等级表结构与种子 SQL）。

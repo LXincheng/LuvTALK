@@ -100,7 +100,11 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           )}
         </button>
 
-        <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors cursor-pointer">
+        <NavLink
+          to="/profile"
+          onClick={onNavigate}
+          className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors"
+        >
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white font-semibold">
             JD
           </div>
@@ -112,7 +116,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
               {locale === 'zh' ? '中级' : 'Intermediate'}
             </p>
           </div>
-        </div>
+        </NavLink>
       </div>
     </aside>
   );

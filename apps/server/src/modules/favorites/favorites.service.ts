@@ -36,14 +36,48 @@ export class FavoritesService {
     },
   ];
 
-  list(): FavoriteItem[] {
+  async list(userId?: string): Promise<FavoriteItem[]> {
+    if (this.prisma.canUseDatabase()) {
+      const records = await this.prisma.favorite.findMany({
+        where: userId ? { userId } : undefined,
+        orderBy: { createdAt: "desc" },
+      });
+      if (records.length > 0) {
+        return records.map((record) => ({
+          id: record.id,
+          type: record.type as FavoriteTypeEnum,
+          title: record.title,
+          content: record.content,
+          metadata: (record.metadata as Record<string, unknown>) ?? undefined,
+          createdAt: record.createdAt.toISOString(),
+          pinned: false,
+          authorName:
+            record.type === FavoriteTypeEnum.Phrase
+              ? "Learner"
+              : "LuvTALK 导师",
+          avatar:
+            record.type === FavoriteTypeEnum.Phrase
+              ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
+              : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
+          conversationId: record.conversationId ?? undefined,
+        }));
+      }
+    }
+
+    if (userId) {
+      return [];
+    }
+
     const items = this.favorites.size
       ? Array.from(this.favorites.values())
       : this.defaultFavorites;
     return items.sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
   }
 
-  async create(dto: CreateFavoriteDto): Promise<FavoriteItem> {
+  async create(
+    dto: CreateFavoriteDto,
+    userId?: string,
+  ): Promise<FavoriteItem> {
     const favorite: FavoriteItem = {
       id: randomUUID(),
       type: dto.type ?? FavoriteTypeEnum.Phrase,
@@ -72,6 +106,7 @@ export class FavoritesService {
           content: favorite.content,
           metadata: favorite.metadata as Prisma.InputJsonValue,
           conversationId: favorite.conversationId,
+          userId,
         },
       });
     }
