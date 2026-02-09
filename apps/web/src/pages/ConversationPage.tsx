@@ -5,6 +5,7 @@ import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
 import ChatHistoryDrawer from '../components/chat/ChatHistoryDrawer';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
+import VoiceStyleSelector from '../components/chat/VoiceStyleSelector';
 import type { ChatMode } from '../components/chat/ChatModeSwitcher';
 import { API_BASE_URL } from '../services/apiClient';
 import {
@@ -18,7 +19,7 @@ import {
 } from '../services/conversationService';
 import { createFavorite } from '../services/favoritesService';
 import { useLocale } from '../providers/LocaleContext';
-import { PREFERRED_RECORDING_MIMES } from '../constants/ui';
+import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
 import type { Annotation, Message } from '../types/chat';
 import type {
   ConversationHistorySummary,
@@ -82,19 +83,30 @@ const mapAnnotationTypeToFavoriteType = (
   return 'vocabulary';
 };
 
+/** Resolve backend-relative audio URLs to full URLs using the API base. */
+const resolveAudioUrl = (url: string | undefined): string | undefined => {
+  if (!url) return undefined;
+  if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  // Backend returns paths like /api/conversation/{id}/voice/{file}
+  if (url.startsWith('/api/')) {
+    return `${API_BASE_URL}${url.slice(4)}`;
+  }
+  return url;
+};
+
 const mapSessionToMessages = (
   session: ConversationSession,
   ttsAudioMap: Record<string, string>,
 ): Message[] => {
-  const mapped: Message[] = session.messages.map((message) => ({
+  const mapped: Message[] = session.messages.map((message, index) => ({
     id: message.id,
     type: message.sender,
     content: message.text,
     translation: message.meta?.translation,
     timestamp: new Date(message.createdAt),
-    audioUrl: message.meta?.audioUrl ?? ttsAudioMap[message.id],
+    audioUrl: resolveAudioUrl(message.meta?.audioUrl) ?? ttsAudioMap[message.id],
     annotations:
-      message.sender === 'ai'
+      message.sender === 'ai' && index > 0
         ? message.meta?.keyTerms?.map((term) => ({
             word: term.term,
             explanation: term.definition,
@@ -114,7 +126,11 @@ const mapSessionToMessages = (
     }
     for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
       if (session.messages[cursor]?.sender === 'user') {
-        mapped[cursor] = { ...mapped[cursor], pronunciationScore: score };
+        mapped[cursor] = {
+          ...mapped[cursor],
+          pronunciationScore: score,
+          pronunciationTip: message.meta?.pronunciationTip,
+        };
         break;
       }
     }
@@ -176,6 +192,10 @@ export default function ConversationPage() {
   const [nativeLanguage, setNativeLanguage] = useState<LanguageCode>(
     locale === 'zh' ? 'mandarin' : 'english',
   );
+  const [ttsVoice, setTtsVoice] = useState<string>(() => {
+    if (typeof window === 'undefined') return DEFAULT_TTS_VOICE;
+    return localStorage.getItem('ttsVoice') || DEFAULT_TTS_VOICE;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -185,6 +205,7 @@ export default function ConversationPage() {
   const [ttsAudioMap, setTtsAudioMap] = useState<Record<string, string>>({});
   const voiceDraftUrlRef = useRef<string | null>(null);
   const ttsAudioMapRef = useRef<Record<string, string>>({});
+  const ttsVoiceRef = useRef(ttsVoice);
 
   const targetLanguageLabels = useMemo(
     () => ({
@@ -212,8 +233,18 @@ export default function ConversationPage() {
   }, [chatMode]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('ttsVoice', ttsVoice);
+    }
+  }, [ttsVoice]);
+
+  useEffect(() => {
     ttsAudioMapRef.current = ttsAudioMap;
   }, [ttsAudioMap]);
+
+  useEffect(() => {
+    ttsVoiceRef.current = ttsVoice;
+  }, [ttsVoice]);
 
   const sessionMessages = useMemo(
     () => (session ? mapSessionToMessages(session, ttsAudioMap) : []),
@@ -252,6 +283,8 @@ export default function ConversationPage() {
           window.localStorage.setItem('activeConversationId', nextSession.id);
           trackConversationId(nextSession.id);
         }
+        // Pre-load history so it's ready when the drawer opens
+        void loadHistory();
       })
       .catch(() => {
         if (!isMounted) {
@@ -279,6 +312,7 @@ export default function ConversationPage() {
     const prevCount = lastSessionMessageCountRef.current;
     if (nextCount > prevCount) {
       setOptimisticMessages([]);
+      setIsSending(false);
       if (voiceDraftUrlRef.current) {
         URL.revokeObjectURL(voiceDraftUrlRef.current);
         voiceDraftUrlRef.current = null;
@@ -337,7 +371,7 @@ export default function ConversationPage() {
       return;
     }
     ttsRequestsRef.current.add(message.id);
-    synthesizeConversationSpeech(session.id, message.text)
+    synthesizeConversationSpeech(session.id, message.text, ttsVoiceRef.current)
       .then((payload) => {
         setTtsAudioMap((prev) => ({
           ...prev,
@@ -421,7 +455,15 @@ export default function ConversationPage() {
       const history = await fetchConversationHistory(ids);
       setConversationHistory(history);
     } catch {
-      // History is non-critical, silently fail
+      // Retry once after a short delay for transient failures
+      try {
+        await new Promise((r) => setTimeout(r, 800));
+        const ids = getStoredConversationIds();
+        const history = await fetchConversationHistory(ids);
+        setConversationHistory(history);
+      } catch {
+        // History is non-critical, keep previous data if any
+      }
     } finally {
       setIsLoadingHistory(false);
     }
@@ -527,6 +569,7 @@ export default function ConversationPage() {
       await uploadConversationVoice(session.id, audio);
     } catch {
       updateOptimisticVoiceStatus(t('voiceSendError'));
+      setIsSending(false);
       setOptimisticMessages((prev) =>
         prev.filter((message) => !(message.type === 'ai' && message.isLoading)),
       );
@@ -540,7 +583,7 @@ export default function ConversationPage() {
       setErrorMessage(t('voiceUnsupported'));
       return;
     }
-    if (isRecording || !session) {
+    if (isRecording || isSending || !session) {
       return;
     }
     setErrorMessage(null);
@@ -579,6 +622,7 @@ export default function ConversationPage() {
           URL.revokeObjectURL(voiceDraftUrlRef.current);
         }
         voiceDraftUrlRef.current = previewUrl;
+        setIsSending(true);
         setOptimisticMessages([
           {
             ...buildOptimisticUserMessage(t('voiceMessageLabel'), previewUrl),
@@ -690,16 +734,16 @@ export default function ConversationPage() {
         isLoading={isLoadingHistory}
       />
 
-      <div className="border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-3 py-2 md:px-4 md:py-3">
-        {/* Mobile: two compact rows */}
-        <div className="flex flex-col gap-2 md:hidden">
-          <div className="flex items-center gap-2">
+      <div className="border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm">
+        {/* Mobile */}
+        <div className="flex flex-col md:hidden">
+          <div className="flex items-center gap-2 px-3 py-2">
             <button
               onClick={() => {
                 setHistoryDrawerOpen(true);
                 void loadHistory();
               }}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
               title={t('chatHistory')}
             >
               <History className="w-5 h-5 text-slate-500 dark:text-slate-400" />
@@ -711,69 +755,84 @@ export default function ConversationPage() {
               <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
             </div>
           </div>
-          <div className="flex items-center gap-1.5 pl-1">
-            {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
-              (language) => {
-                const isActive = targetLanguage === language;
-                return (
-                  <button
-                    key={language}
-                    onClick={() => setTargetLanguage(language)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                      isActive
-                        ? 'glass-button text-white'
-                        : 'text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    {targetLanguageLabels[language]}
-                  </button>
-                );
-              },
+          <div className="flex items-center gap-2 px-3 pb-2 overflow-x-auto scrollbar-none">
+            <div className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60 shrink-0">
+              {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
+                (language) => {
+                  const isActive = targetLanguage === language;
+                  return (
+                    <button
+                      key={language}
+                      onClick={() => setTargetLanguage(language)}
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                        isActive
+                          ? 'glass-button text-white'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {targetLanguageLabels[language]}
+                    </button>
+                  );
+                },
+              )}
+            </div>
+            {chatMode !== 'text' && (
+              <>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} />
+              </>
             )}
           </div>
         </div>
 
-        {/* Desktop: two-column layout */}
-        <div className="hidden md:flex md:items-center md:justify-between">
-          <div className="flex items-center gap-3">
+        {/* Desktop */}
+        <div className="hidden md:flex md:items-center md:justify-between px-4 py-2.5">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => {
                 setHistoryDrawerOpen(true);
                 void loadHistory();
               }}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
               title={t('chatHistory')}
             >
               <History className="w-5 h-5 text-slate-600 dark:text-slate-400" />
             </button>
-            <div>
-              <h2 className="font-semibold text-slate-900 dark:text-white">
+            <div className="min-w-0">
+              <h2 className="font-semibold text-slate-900 dark:text-white truncate">
                 {session?.title || t('chatTitle')}
               </h2>
-              <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
-                <span>{t('learningLanguage')}</span>
-                {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
-                  (language) => {
-                    const isActive = targetLanguage === language;
-                    return (
-                      <button
-                        key={language}
-                        onClick={() => setTargetLanguage(language)}
-                        className={`px-2.5 py-0.5 rounded-lg transition-all ${
-                          isActive
-                            ? 'glass-button text-white'
-                            : 'text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        {targetLanguageLabels[language]}
-                      </button>
-                    );
-                  },
-                )}
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-xs text-slate-400 dark:text-slate-500 shrink-0">{t('learningLanguage')}</span>
+                <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60">
+                  {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
+                    (language) => {
+                      const isActive = targetLanguage === language;
+                      return (
+                        <button
+                          key={language}
+                          onClick={() => setTargetLanguage(language)}
+                          className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-all ${
+                            isActive
+                              ? 'glass-button text-white'
+                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {targetLanguageLabels[language]}
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
               </div>
             </div>
           </div>
-          <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
+          <div className="flex items-center gap-3 shrink-0">
+            {chatMode !== 'text' && (
+              <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} />
+            )}
+            <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
+          </div>
         </div>
       </div>
 

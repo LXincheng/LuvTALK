@@ -203,6 +203,10 @@ export class ReviewService {
       if (message.sender !== "ai") {
         return;
       }
+      // Skip the first AI message (system welcome) — it has no score and no user input
+      if (index === 0) {
+        return;
+      }
       const score = message.meta?.score;
       if (typeof score !== "number" || score >= LOW_SCORE_THRESHOLD) {
         return;
@@ -210,6 +214,10 @@ export class ReviewService {
       for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
         const userMessage = messages[cursor];
         if (userMessage?.sender === "user") {
+          // Skip nonsensical inputs that aren't worth reviewing
+          if (!this.isQualityInput(userMessage.text)) {
+            break;
+          }
           cards.push({
             id: `${conversationId}-${message.id}`,
             term: userMessage.text,
@@ -225,6 +233,32 @@ export class ReviewService {
       }
     });
     return cards;
+  }
+
+  /** Returns false for gibberish, random chars, repeated chars, pure numbers, or very short inputs */
+  private isQualityInput(text: string): boolean {
+    const trimmed = text.trim();
+    // Too short to be meaningful
+    if (trimmed.length < 2) {
+      return false;
+    }
+    // Pure numbers or punctuation
+    if (/^[\d\s.,!?;:'"()\-_+=]+$/.test(trimmed)) {
+      return false;
+    }
+    // Repeated single character (e.g. "aaaa", "1111")
+    if (/^(.)\1{2,}$/.test(trimmed)) {
+      return false;
+    }
+    // Random keyboard mashing: only ASCII letters with no vowels or very low variety
+    const alphaOnly = trimmed.replace(/[^a-zA-Z]/g, "");
+    if (alphaOnly.length >= 3) {
+      const uniqueChars = new Set(alphaOnly.toLowerCase()).size;
+      if (uniqueChars <= 2) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private deduplicateCards(cards: ReviewCard[]): ReviewCard[] {

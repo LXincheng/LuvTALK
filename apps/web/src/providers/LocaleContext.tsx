@@ -111,6 +111,7 @@ const translations = {
     profileConvMasterTitle: '会话达人',
     profileConvMasterDesc: '完成 20 次对话',
     profileConvMasterDate: '1 周前',
+    profileNoAchievements: '暂无成就，继续加油！',
     // Category filter
     categoryAll: '全部',
     learningLanguage: '学习语言',
@@ -189,6 +190,11 @@ const translations = {
     chatModeText: '文字',
     chatModeImmersive: '沉浸',
     chatModeImmersiveDisabled: '即将推出',
+    // Voice style
+    voiceStyle: 'AI 语音风格',
+    voiceShimmer: '柔和',
+    voiceNova: '活力',
+    voiceAlloy: '自然',
   },
   en: {
     appName: 'LuvTALK',
@@ -291,6 +297,7 @@ const translations = {
     profileConvMasterTitle: 'Conversation Master',
     profileConvMasterDesc: 'Completed 20 chat sessions',
     profileConvMasterDate: '1 week ago',
+    profileNoAchievements: 'No achievements yet, keep going!',
     // Category filter
     categoryAll: 'All',
     learningLanguage: 'Learning Language',
@@ -369,6 +376,11 @@ const translations = {
     chatModeText: 'Text',
     chatModeImmersive: 'Immersive',
     chatModeImmersiveDisabled: 'Coming soon',
+    // Voice style
+    voiceStyle: 'AI Voice Style',
+    voiceShimmer: 'Soft',
+    voiceNova: 'Lively',
+    voiceAlloy: 'Natural',
   },
 } as const;
 

@@ -1,6 +1,6 @@
 import { Star, Trash2, Copy, Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { fetchFavorites, removeFavorite } from '../services/favoritesService';
+import { fetchFavoritesCached, removeFavorite } from '../services/favoritesService';
 import type { FavoriteItem, FavoriteType } from '../types/api';
 import { useLocale } from '../providers/LocaleContext';
 
@@ -30,24 +30,25 @@ export default function FavoritesPage() {
 
   useEffect(() => {
     let isMounted = true;
-    fetchFavorites()
+    const { cached, fresh } = fetchFavoritesCached();
+
+    if (cached) {
+      setFavorites(cached);
+      setIsLoading(false);
+    }
+
+    fresh
       .then((items) => {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
         setFavorites(items);
         setErrorMessage(null);
       })
       .catch(() => {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
         setErrorMessage(t('favoritesLoadError'));
       })
       .finally(() => {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
         setIsLoading(false);
       });
 
@@ -130,8 +131,15 @@ export default function FavoritesPage() {
         )}
 
         {isLoading ? (
-          <div className="text-center py-16 text-slate-500 dark:text-slate-400 text-sm">
-            {t('favoritesLoading')}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="glass-card border border-slate-200 dark:border-slate-700 rounded-xl p-4">
+                <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-20 mb-3" />
+                <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-2" />
+                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-full mb-4" />
+                <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-24 mt-3 pt-3" />
+              </div>
+            ))}
           </div>
         ) : filteredFavorites.length === 0 ? (
           <div className="text-center py-16">

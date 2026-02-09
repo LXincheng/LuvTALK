@@ -256,11 +256,11 @@ export class ConversationService {
     );
     session.messages.push(userMessage);
 
-    // Auto-generate title from first user message
-    if (
-      !session.title &&
-      session.messages.filter((m) => m.sender === "user").length === 1
-    ) {
+    // Auto-generate title from first user message (replace default scenario title)
+    const userMessageCount = session.messages.filter(
+      (m) => m.sender === "user",
+    ).length;
+    if (userMessageCount === 1) {
       session.title = trimmed.slice(0, 60);
     }
 
@@ -293,6 +293,7 @@ export class ConversationService {
         meta: {
           score: aiPayload.score,
           scoreReason: aiPayload.scoreReason,
+          pronunciationTip: aiPayload.pronunciationTip,
           translation: translationText,
           keyTerms: normalizedKeyTerms,
         },
@@ -840,48 +841,75 @@ export class ConversationService {
   }
 
   async listByIds(ids: string[], limit = 20) {
-    if (!ids.length || !this.prisma.canUseDatabase()) {
+    if (!ids.length) {
       return [];
     }
     const safeIds = ids.slice(0, limit);
-    let records: Array<{
-      id: string;
-      scenarioId: string;
-      targetLanguage: string;
-      nativeLanguage: string | null;
-      updatedAt: Date;
-      score: number | null;
-      title: string | null;
-      status: string | null;
-      messages: Prisma.JsonValue;
-    }> = [];
-    try {
-      records = await this.prisma.conversation.findMany({
-        where: { id: { in: safeIds } },
-        orderBy: { updatedAt: "desc" },
-        select: {
-          id: true,
-          scenarioId: true,
-          targetLanguage: true,
-          nativeLanguage: true,
-          updatedAt: true,
-          score: true,
-          title: true,
-          status: true,
-          messages: true,
-        },
-      });
-    } catch (error) {
-      if (this.isDatabaseConnectionError(error)) {
-        this.prisma.markDatabaseUnavailable(
-          "Database connection lost (P1001/P1002).",
-        );
-        return [];
+
+    // Try database first
+    if (this.prisma.canUseDatabase()) {
+      let records: Array<{
+        id: string;
+        scenarioId: string;
+        targetLanguage: string;
+        nativeLanguage: string | null;
+        updatedAt: Date;
+        score: number | null;
+        title: string | null;
+        status: string | null;
+        messages: Prisma.JsonValue;
+      }> = [];
+      try {
+        records = await this.prisma.conversation.findMany({
+          where: { id: { in: safeIds } },
+          orderBy: { updatedAt: "desc" },
+          select: {
+            id: true,
+            scenarioId: true,
+            targetLanguage: true,
+            nativeLanguage: true,
+            updatedAt: true,
+            score: true,
+            title: true,
+            status: true,
+            messages: true,
+          },
+        });
+      } catch (error) {
+        if (this.isDatabaseConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Database connection lost (P1001/P1002).",
+          );
+        } else {
+          this.logger.warn(`listByIds failed: ${(error as Error).message}`);
+        }
       }
-      this.logger.warn(`listByIds failed: ${(error as Error).message}`);
-      return [];
+      if (records.length > 0) {
+        return records.map((record) => this.toHistorySummary(record));
+      }
     }
-    return records.map((record) => this.toHistorySummary(record));
+
+    // Fallback: resolve from in-memory cache
+    const idSet = new Set(safeIds);
+    const cached = Array.from(this.sessions.values())
+      .filter((s) => idSet.has(s.id))
+      .sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      )
+      .slice(0, limit);
+    return cached.map((s) => ({
+      id: s.id,
+      scenarioId: s.scenarioId,
+      targetLanguage: s.targetLanguage,
+      nativeLanguage: s.nativeLanguage ?? null,
+      updatedAt: s.updatedAt,
+      score: s.coach?.overallScore ?? undefined,
+      title: s.title ?? undefined,
+      status: s.status ?? "active",
+      lastMessage: s.messages.at(-1)?.text ?? "",
+      messageCount: s.messages.length,
+    }));
   }
 
   async listUserHistory(userId: string, limit = 20) {

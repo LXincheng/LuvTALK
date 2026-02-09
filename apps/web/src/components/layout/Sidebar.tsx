@@ -3,6 +3,7 @@ import { Moon, Sun } from 'lucide-react';
 import { navItems } from '../../constants/navigation';
 import { useLocale } from '../../providers/LocaleContext';
 import { useTheme } from '../../providers/ThemeContext';
+import { useAuth } from '../../hooks/useAuth';
 
 interface SidebarProps {
   onNavigate?: () => void;
@@ -11,6 +12,14 @@ interface SidebarProps {
 export default function Sidebar({ onNavigate }: SidebarProps) {
   const { t, locale, setLocale } = useLocale();
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
+  const isGuest = user?.app_metadata?.provider === 'anonymous';
+  const displayName =
+    (user?.user_metadata?.full_name as string | undefined) ||
+    user?.email ||
+    user?.phone ||
+    (isGuest ? t('profileGuest') : t('profileLearner'));
+  const initials = displayName.slice(0, 2).toUpperCase();
 
   return (
     <aside className="w-64 h-full glass-sidebar border-r border-slate-200 dark:border-slate-700 flex flex-col">
@@ -106,14 +115,14 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors"
         >
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white font-semibold">
-            JD
+            {initials}
           </div>
           <div className="flex-1">
             <p className="text-sm font-medium text-slate-900 dark:text-white">
-              John Doe
+              {displayName}
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {locale === 'zh' ? '中级' : 'Intermediate'}
+              {isGuest ? t('profileGuestMode') : t('profileLearningStatus')}
             </p>
           </div>
         </NavLink>

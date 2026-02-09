@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, X, RotateCcw, Volume2 } from 'lucide-react';
 import { useLocale } from '../providers/LocaleContext';
-import { fetchDailyReview, submitReviewFeedback } from '../services/reviewService';
+import { fetchDailyReviewCached, submitReviewFeedback } from '../services/reviewService';
 import {
   startConversation,
   synthesizeConversationSpeech,
@@ -45,29 +45,32 @@ export default function DailyReviewPage() {
 
   useEffect(() => {
     let isMounted = true;
-    setIsLoading(true);
     setErrorMessage(null);
-    fetchDailyReview()
-      .then((payload: DailyReviewPayload) => {
-        if (!isMounted) {
-          return;
-        }
-        setCards(payload.cards);
-        const fallbackConversationId =
-          payload.cards.find((card) => card.conversationId)?.conversationId ??
-          null;
-        setTtsConversationId(fallbackConversationId);
-      })
+    const { cached, fresh } = fetchDailyReviewCached();
+
+    const applyPayload = (payload: DailyReviewPayload) => {
+      if (!isMounted) return;
+      setCards(payload.cards);
+      const fallbackConversationId =
+        payload.cards.find((card) => card.conversationId)?.conversationId ?? null;
+      setTtsConversationId(fallbackConversationId);
+    };
+
+    if (cached) {
+      applyPayload(cached);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+    }
+
+    fresh
+      .then(applyPayload)
       .catch(() => {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
         setErrorMessage(t('reviewLoadError'));
       })
       .finally(() => {
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
         setIsLoading(false);
       });
 
@@ -171,8 +174,6 @@ export default function DailyReviewPage() {
         currentCard.term,
       );
       setAudioUrl(payload.audioUrl);
-      const audio = new Audio(payload.audioUrl);
-      await audio.play();
     } catch {
       setErrorMessage(t('reviewTtsError'));
     } finally {
@@ -182,9 +183,19 @@ export default function DailyReviewPage() {
 
   if (isLoading) {
     return (
-      <div className="h-full flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
-        <div className="glass-card rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-8 max-w-md w-full text-center text-slate-600 dark:text-slate-400">
-          {t('reviewLoading')}
+      <div className="h-full flex flex-col items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
+        <div className="w-full max-w-lg space-y-6 animate-pulse">
+          <div className="flex items-center justify-between">
+            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-24" />
+            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-32" />
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2" />
+          <div className="glass-card rounded-2xl border border-slate-200 dark:border-slate-700 p-8 min-h-[420px] flex flex-col items-center justify-center space-y-6">
+            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-20" />
+            <div className="h-10 bg-slate-200 dark:bg-slate-700 rounded w-48" />
+            <div className="h-8 bg-slate-200 dark:bg-slate-700 rounded-xl w-28" />
+            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-24" />
+          </div>
         </div>
       </div>
     );
@@ -284,14 +295,20 @@ export default function DailyReviewPage() {
             <h2 className="text-4xl font-semibold text-slate-900 dark:text-white">
               {currentCard.term}
             </h2>
-            <button
-              onClick={handleSpeak}
-              disabled={isSpeaking}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-60"
-            >
-              <Volume2 className="w-4 h-4" />
-              {t('reviewSpeak')}
-            </button>
+            {audioUrl ? (
+              <div className="max-w-xs mx-auto">
+                <AudioPlayer src={audioUrl} compact autoPlay />
+              </div>
+            ) : (
+              <button
+                onClick={handleSpeak}
+                disabled={isSpeaking}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 transition-colors disabled:opacity-60 font-medium"
+              >
+                <Volume2 className={`w-4 h-4 ${isSpeaking ? 'animate-pulse' : ''}`} />
+                {isSpeaking ? t('reviewLoading') : t('reviewSpeak')}
+              </button>
+            )}
           </div>
 
           <button
@@ -324,9 +341,6 @@ export default function DailyReviewPage() {
                   </p>
                 )}
               </div>
-              {audioUrl && (
-                <AudioPlayer src={audioUrl} />
-              )}
             </div>
           )}
         </div>

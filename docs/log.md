@@ -174,3 +174,42 @@
 - 后端：彻底移除 fluent-ffmpeg / ffmpeg-static 依赖，`ensureMp3()` 直接透传原始文件给 Whisper API（原生支持 webm/wav/mp3/m4a 等格式），根治 spawn EFTYPE 崩溃。
 - 后端：历史记录接口从 `GET` 改为 `POST /conversation/history`，新增 `listByIds()` 方法——游客用户通过 body `{ ids: [...] }` 传入 localStorage 中保存的会话 ID 列表查询历史，认证用户仍按 userId 查询。
 - 前端：新增 `getStoredConversationIds()` / `trackConversationId()` 工具函数，在 localStorage 维护 `conversationIds` 列表（去重、最多 50 条）；`loadHistory()` 将 ID 列表传给后端，游客用户也能看到历史记录。
+
+### 2026-02-09（UI 优化与语音风格）
+
+- 前端：VocabularyPopover 改用 `createPortal` + 固定定位，根据触发元素位置动态计算弹窗坐标，自动适配视口边界（上下翻转、左右夹紧），解决关键词弹窗被消息气泡遮挡的问题。
+- 前端：游客模式聊天历史稳定性修复——会话初始化成功后自动预加载历史记录，`loadHistory()` 增加一次自动重试（800ms 延迟），避免瞬时网络抖动导致历史列表为空。
+- 前端：侧边栏用户信息改为从 AuthProvider 读取，与 ProfilePage 保持一致——显示真实用户名/邮箱/手机号，游客显示"游客"，移除硬编码 "John Doe"。
+- 前端：ProfilePage 统计卡片与进度条数据改用 `PROFILE_DEFAULT_STATS` / `PROFILE_DEFAULT_PROGRESS` 常量（默认值 "--" / "0%"），清除写死的 47/342/12/B1 等假数据，为后续接入后端统计 API 做准备。
+- 前端：复习卡片 TTS 优化——移除 `handleSpeak` 中的 `new Audio().play()` 重复播放，改为设置 `audioUrl` 后由 AudioPlayer 组件统一播放（新增 `autoPlay` prop）；合并顶部发音按钮与翻译区 AudioPlayer 为单一入口，消除两个朗读按钮的问题。
+- 前端：VoiceStyleSelector 精简为 3 种自然语音风格（柔和 shimmer / 活力 nova / 自然 alloy），移除机械感较强的 echo/fable/onyx；组件改为紧凑分段控制器样式，与 ChatModeSwitcher 视觉风格统一。
+- 前端：ConversationPage 集成语音风格选择器，桌面端显示在模式切换器左侧，移动端显示在语言选择下方；文字模式下自动隐藏。
+- 前端：修复同一会话内 TTS 语音不一致问题——`queueTtsForMessage` 使用 `ttsVoiceRef` 避免闭包捕获旧值，所有 TTS 请求统一携带用户选择的 voice 参数，确保同一会话内语音风格一致。
+- 前端：聊天页顶部栏布局重构——移动端：标题行（历史/标题/模式切换）+ 控制行（语言分段 | 分隔线 | 语音分段），水平滚动不换行；桌面端：左侧标题区（历史按钮 + 标题 + 语言分段控制器）+ 右侧工具区（语音风格 + 模式切换），所有控件统一为圆角分段控制器风格。
+- 国际化：LocaleContext 精简为 voiceStyle/voiceShimmer/voiceNova/voiceAlloy 翻译键。
+- 常量：`constants/ui.ts` 新增 `TTS_VOICE_OPTIONS`（3 项）、`DEFAULT_TTS_VOICE`、`PROFILE_DEFAULT_STATS`、`PROFILE_DEFAULT_PROGRESS`。
+
+### 2026-02-09（Bug 修复与数据接入）
+
+- 前端：语音模式 turn-based 限制——录音/上传期间设置 `isSending=true`，阻止用户在上一条语音处理完成前发送新消息，防止并发覆盖；SSE 收到新消息或上传失败时自动解锁。
+- 前端：语音文件 URL 解析修复——新增 `resolveAudioUrl()` 辅助函数，将后端返回的相对路径 `/api/conversation/...` 正确映射到 `API_BASE_URL`，修复开发环境下 Vite 代理 400 错误。
+- 后端：游客历史记录修复——`listByIds()` 在数据库不可用时回退到内存缓存查找会话，游客创建新对话后可立即看到历史记录。
+- 前端：VocabularyPopover 修复——将 `AnimatePresence` 移入 `createPortal` 内部（始终渲染 portal，内部条件渲染动画子元素），解决 AnimatePresence 包裹 portal 导致弹窗无法显示的问题；按钮点击增加 `stopPropagation` 防止事件冒泡。
+- 前端：成就殿堂页接入后端 API——新建 `achievementService.ts`，AchievementHallPage 从 `GET /achievements`、`GET /achievements/levels`、`GET /achievements/summary` 获取真实数据，移除全部硬编码成就/等级/XP 数据；增加加载态。
+- 前端：ProfilePage 接入后端成就 API——统计卡片（会话数/词汇量/成就数/等级）和进度条从 `fetchAchievementSummary()` 获取真实数据；最近成就列表从 `fetchAchievements()` 获取已解锁成就，移除硬编码假数据。
+- 后端：AI Prompt 强化 key_terms 过滤——明确要求 key_terms 仅包含目标语言词汇，禁止包含教学元语言和母语词汇，减少系统提示语混入复习词库。
+- 后端：ReviewService 过滤系统欢迎消息——`extractLowScoreCards()` 跳过首条 AI 消息（系统欢迎语），防止其被纳入低分复习卡片。
+- 前端：`mapSessionToMessages` 跳过首条 AI 消息的 keyTerms 注解映射，避免欢迎语中的词汇被标注和收藏。
+- 国际化：新增 `profileNoAchievements` 翻译键（中/英）。
+
+### 2026-02-09（发音评估与性能优化）
+
+- 后端：对话标题自动生成修复——`processMessage()` 改为在首条用户消息时始终替换默认场景标题（原逻辑因 `startSession` 已设置标题导致 `!session.title` 永远为 false），用户首句话自动成为对话标题。
+- 后端：发音评估系统重新设计——Prompt 新增详细评分规则：非目标语言 10-30 分、无意义输入 0-15 分、目标语言按语法(40%)+词汇(30%)+自然度(30%)评分；新增 `pronunciationTip` 字段，AI 每次回复附带一句简短的发音/表达建议。
+- 后端：AiResponseSchema 新增 `pronunciationTip: z.string().optional()`；ConversationMessage.meta 新增 `pronunciationTip` 字段；`processMessage()` 将 AI 返回的 pronunciationTip 写入消息 meta。
+- 前端：Message 类型新增 `pronunciationTip` 字段；`mapSessionToMessages` 将 AI 消息的 pronunciationTip 映射到对应用户消息；MessageBubble 在评分徽章下方显示发音建议文本。
+- 前端：SWR 缓存机制——`apiClient.ts` 新增 `cachedGet()` 和 `invalidateCache()` 工具函数，实现 stale-while-revalidate 模式：首次访问正常加载，后续访问立即显示缓存数据并在后台刷新。
+- 前端：achievementService/reviewService/favoritesService 各新增 `*Cached()` 版本，AchievementHallPage/DailyReviewPage/FavoritesPage/ProfilePage 全部改用缓存版本，二次访问页面即时渲染。
+- 前端：三个页面的加载态从纯文本/spinner 升级为骨架屏（animate-pulse），提升感知加载速度。
+- 前端：FavoritesService 在 `createFavorite`/`removeFavorite` 时自动 `invalidateCache('favorites')`，确保修改后下次访问获取最新数据。
+- 后端：ReviewService 新增 `isQualityInput()` 质量过滤——`extractLowScoreCards()` 跳过纯数字、重复字符、过短输入（<2字符）、低字符多样性等无意义用户消息，防止 "1111"、"asdf" 等垃圾输入进入复习词库。

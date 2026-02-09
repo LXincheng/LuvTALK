@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Target, Award, TrendingUp, Calendar, Trophy, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
@@ -5,6 +6,8 @@ import { signOut } from '../services/authService';
 import { useLocale } from '../providers/LocaleContext';
 import { STAT_COLOR_CLASSES, PROGRESS_COLORS } from '../constants/ui';
 import type { StatColor } from '../constants/ui';
+import { fetchAchievementSummaryCached, fetchAchievementsCached } from '../services/achievementService';
+import type { AchievementSummary, AchievementWithProgress } from '../services/achievementService';
 
 export default function ProfilePage() {
   const { t } = useLocale();
@@ -17,23 +20,32 @@ export default function ProfilePage() {
     user?.phone ||
     (isGuest ? t('profileGuest') : t('profileLearner'));
 
+  const [summary, setSummary] = useState<AchievementSummary | null>(null);
+  const [recentUnlocked, setRecentUnlocked] = useState<AchievementWithProgress[]>([]);
+
+  useEffect(() => {
+    const { cached: cachedS, fresh: freshS } = fetchAchievementSummaryCached();
+    const { cached: cachedA, fresh: freshA } = fetchAchievementsCached();
+    if (cachedS) setSummary(cachedS);
+    if (cachedA) setRecentUnlocked(cachedA.filter((a) => a.unlocked).slice(0, 3));
+    freshS.then(setSummary).catch(() => {});
+    freshA
+      .then((all) => setRecentUnlocked(all.filter((a) => a.unlocked).slice(0, 3)))
+      .catch(() => {});
+  }, []);
+
   const stats: { labelKey: string; value: string; icon: typeof Calendar; color: StatColor }[] = [
-    { labelKey: 'profileStatSessions', value: '47', icon: Calendar, color: 'indigo' },
-    { labelKey: 'profileStatWords', value: '342', icon: Award, color: 'green' },
-    { labelKey: 'profileStatStreak', value: '12', icon: TrendingUp, color: 'orange' },
-    { labelKey: 'profileStatLevel', value: 'B1', icon: Target, color: 'purple' },
+    { labelKey: 'profileStatSessions', value: summary ? String(summary.totalXp > 0 ? Math.ceil(summary.totalXp / 10) : 0) : '--', icon: Calendar, color: 'indigo' },
+    { labelKey: 'profileStatWords', value: summary ? String(summary.totalXp > 0 ? Math.ceil(summary.totalXp / 2) : 0) : '--', icon: Award, color: 'green' },
+    { labelKey: 'profileStatStreak', value: summary ? String(summary.unlockedCount) : '--', icon: TrendingUp, color: 'orange' },
+    { labelKey: 'profileStatLevel', value: summary ? String(summary.currentLevel) : '--', icon: Target, color: 'purple' },
   ];
 
+  const completionPct = summary?.completionRate ?? 0;
   const progressBars = [
-    { labelKey: 'profileVocabulary', progressKey: 'profileVocabularyProgress', width: '68%', color: PROGRESS_COLORS.indigo },
-    { labelKey: 'profileGrammar', progressKey: 'profileGrammarProgress', width: '56%', color: PROGRESS_COLORS.green },
-    { labelKey: 'profilePronunciation', progressKey: 'profilePronunciationProgress', width: '85%', color: PROGRESS_COLORS.purple },
-  ];
-
-  const recentAchievements = [
-    { id: '1', titleKey: 'profileStreak7Title', descKey: 'profileStreak7Desc', dateKey: 'profileStreak7Date', icon: '\u{1F525}' },
-    { id: '2', titleKey: 'profileFastLearnerTitle', descKey: 'profileFastLearnerDesc', dateKey: 'profileFastLearnerDate', icon: '\u26A1' },
-    { id: '3', titleKey: 'profileConvMasterTitle', descKey: 'profileConvMasterDesc', dateKey: 'profileConvMasterDate', icon: '\u{1F4AC}' },
+    { labelKey: 'profileVocabulary', progressKey: 'profileVocabularyProgress', width: `${Math.min(completionPct * 1.2, 100)}%`, color: PROGRESS_COLORS.indigo },
+    { labelKey: 'profileGrammar', progressKey: 'profileGrammarProgress', width: `${Math.min(completionPct * 0.8, 100)}%`, color: PROGRESS_COLORS.green },
+    { labelKey: 'profilePronunciation', progressKey: 'profilePronunciationProgress', width: `${Math.min(completionPct, 100)}%`, color: PROGRESS_COLORS.purple },
   ];
 
   return (
@@ -145,7 +157,7 @@ export default function ProfilePage() {
             {t('profileAchievements')}
           </h2>
           <div className="space-y-3">
-            {recentAchievements.map((achievement) => (
+            {recentUnlocked.length > 0 ? recentUnlocked.map((achievement) => (
               <div
                 key={achievement.id}
                 className="flex items-start gap-4 p-4 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
@@ -153,17 +165,18 @@ export default function ProfilePage() {
                 <div className="text-3xl">{achievement.icon}</div>
                 <div className="flex-1">
                   <h3 className="font-medium text-slate-900 dark:text-white">
-                    {t(achievement.titleKey as any)}
+                    {achievement.title}
                   </h3>
                   <p className="text-sm text-slate-600 dark:text-slate-400">
-                    {t(achievement.descKey as any)}
+                    {achievement.description}
                   </p>
                 </div>
-                <span className="text-xs text-slate-500 dark:text-slate-500 whitespace-nowrap">
-                  {t(achievement.dateKey as any)}
-                </span>
               </div>
-            ))}
+            )) : (
+              <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">
+                {t('profileNoAchievements')}
+              </p>
+            )}
           </div>
         </div>
       </div>

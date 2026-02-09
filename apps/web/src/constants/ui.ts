@@ -54,3 +54,26 @@ export const PROGRESS_COLORS = {
 
 export type RarityType = keyof typeof RARITY_COLORS;
 export type StatColor = keyof typeof STAT_COLOR_CLASSES;
+
+// Default placeholder data for profile page (used when no backend data is available)
+export const PROFILE_DEFAULT_STATS = [
+  { labelKey: 'profileStatSessions', value: '--', color: 'indigo' as StatColor },
+  { labelKey: 'profileStatWords', value: '--', color: 'green' as StatColor },
+  { labelKey: 'profileStatStreak', value: '--', color: 'orange' as StatColor },
+  { labelKey: 'profileStatLevel', value: '--', color: 'purple' as StatColor },
+] as const;
+
+export const PROFILE_DEFAULT_PROGRESS = [
+  { labelKey: 'profileVocabulary', progressKey: 'profileVocabularyProgress', width: '0%', color: PROGRESS_COLORS.indigo },
+  { labelKey: 'profileGrammar', progressKey: 'profileGrammarProgress', width: '0%', color: PROGRESS_COLORS.green },
+  { labelKey: 'profilePronunciation', progressKey: 'profilePronunciationProgress', width: '0%', color: PROGRESS_COLORS.purple },
+] as const;
+
+// Available TTS voice options for AI speech (curated for natural sound)
+export const TTS_VOICE_OPTIONS = [
+  { id: 'shimmer', labelKey: 'voiceShimmer' },
+  { id: 'nova', labelKey: 'voiceNova' },
+  { id: 'alloy', labelKey: 'voiceAlloy' },
+] as const;
+
+export const DEFAULT_TTS_VOICE = 'shimmer';

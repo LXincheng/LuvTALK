@@ -4,6 +4,7 @@ import { Pause, Play } from 'lucide-react';
 interface AudioPlayerProps {
   src: string;
   compact?: boolean;
+  autoPlay?: boolean;
 }
 
 const formatTime = (seconds: number): string => {
@@ -13,7 +14,7 @@ const formatTime = (seconds: number): string => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-export default function AudioPlayer({ src, compact }: AudioPlayerProps) {
+export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -47,7 +48,10 @@ export default function AudioPlayer({ src, compact }: AudioPlayerProps) {
     setProgress(0);
     setCurrentTime(0);
     setDuration(0);
-  }, [src]);
+    if (autoPlay) {
+      audio.play().catch(() => {});
+    }
+  }, [src, autoPlay]);
 
   const handleLoadedMetadata = () => {
     const audio = audioRef.current;

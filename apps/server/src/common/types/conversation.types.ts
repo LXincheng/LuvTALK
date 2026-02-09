@@ -15,6 +15,7 @@ export interface ConversationMessage {
   meta?: {
     score?: number;
     scoreReason?: string;
+    pronunciationTip?: string;
     translation?: string;
     audioUrl?: string;
     keyTerms?: KeyTerm[];

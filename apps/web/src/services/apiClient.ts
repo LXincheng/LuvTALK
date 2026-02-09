@@ -49,3 +49,24 @@ export const apiClient = {
     apiRequest<T>(path, { method: 'POST', body: formData }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
 };
+
+// Simple stale-while-revalidate cache for GET requests
+const swrCache = new Map<string, { data: unknown; timestamp: number }>();
+const SWR_TTL = 60_000; // 1 minute stale window
+
+export function cachedGet<T>(key: string, fetcher: () => Promise<T>): {
+  cached: T | null;
+  fresh: Promise<T>;
+} {
+  const entry = swrCache.get(key);
+  const cached = entry ? (entry.data as T) : null;
+  const fresh = fetcher().then((data) => {
+    swrCache.set(key, { data, timestamp: Date.now() });
+    return data;
+  });
+  return { cached, fresh };
+}
+
+export function invalidateCache(key: string) {
+  swrCache.delete(key);
+}

@@ -45,7 +45,7 @@ export default function MessageBubble({
 
   const scoreBlock =
     message.pronunciationScore !== undefined ? (
-      <div className="flex justify-end px-2">
+      <div className="flex flex-col items-end gap-1 px-2">
         <div
           className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${
             message.pronunciationScore >= 80
@@ -57,6 +57,11 @@ export default function MessageBubble({
         >
           {t('pronunciation')}: {message.pronunciationScore}/100
         </div>
+        {message.pronunciationTip && (
+          <p className="text-xs text-slate-500 dark:text-slate-400 text-right max-w-xs">
+            {message.pronunciationTip}
+          </p>
+        )}
       </div>
     ) : null;
 

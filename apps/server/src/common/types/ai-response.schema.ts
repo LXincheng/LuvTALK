@@ -14,6 +14,7 @@ export const AiResponseSchema = z.object({
   associativePhrases: z.array(z.string()).min(2),
   score: z.number().min(0).max(100),
   scoreReason: z.string().min(1),
+  pronunciationTip: z.string().optional(),
   keyTerms: z.array(KeyTermSchema).default([]),
 });
 

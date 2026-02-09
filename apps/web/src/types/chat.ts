@@ -13,6 +13,7 @@ export interface Message {
   content: string;
   translation?: string;
   pronunciationScore?: number;
+  pronunciationTip?: string;
   audioUrl?: string;
   annotations?: Annotation[];
   isLoading?: boolean;

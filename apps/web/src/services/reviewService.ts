@@ -1,4 +1,4 @@
-import { apiClient } from './apiClient';
+import { apiClient, cachedGet } from './apiClient';
 import type {
   DailyReviewPayload,
   ReviewSourceType,
@@ -15,6 +15,10 @@ export interface ReviewFeedbackPayload {
 
 export function fetchDailyReview() {
   return apiClient.get<DailyReviewPayload>('/review/daily');
+}
+
+export function fetchDailyReviewCached() {
+  return cachedGet('daily-review', fetchDailyReview);
 }
 
 export function submitReviewFeedback(payload: ReviewFeedbackPayload) {
