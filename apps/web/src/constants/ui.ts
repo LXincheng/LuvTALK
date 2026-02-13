@@ -21,10 +21,11 @@ export const PREFERRED_AUDIO_MIMES = [
 ] as const;
 
 // Voice recording MIME type preferences (browser MediaRecorder)
+// mp4 preferred — Yunwu transcription API has issues parsing webm duration
 export const PREFERRED_RECORDING_MIMES = [
+  'audio/mp4',
   'audio/webm;codecs=opus',
   'audio/webm',
-  'audio/mp4',
 ] as const;
 
 // Default values for conversation settings

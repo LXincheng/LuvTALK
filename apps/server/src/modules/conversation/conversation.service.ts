@@ -264,6 +264,9 @@ export class ConversationService {
       session.title = trimmed.slice(0, 60);
     }
 
+    // Early broadcast: user message appears instantly in the UI
+    this.broadcastSession(session);
+
     const aiPayload =
       (await this.requestOpenAi(session, trimmed)) ??
       (await this.requestDsAi(session, trimmed)) ??
@@ -273,17 +276,13 @@ export class ConversationService {
         session.scenarioId,
       );
 
-    const translationText = await this.translateForNativeLanguage(
-      aiPayload.reply,
-      session.targetLanguage,
-      session.nativeLanguage ?? LanguageCode.Mandarin,
-    );
-
     const normalizedKeyTerms = this.normalizeKeyTerms(
       aiPayload.reply,
       aiPayload.keyTerms,
     );
 
+    // Build AI message immediately (without translation) and broadcast early
+    // so the user sees the reply ASAP while translation runs in background.
     const aiMessage = this.buildMessage(
       "ai",
       aiPayload.reply,
@@ -293,8 +292,9 @@ export class ConversationService {
         meta: {
           score: aiPayload.score,
           scoreReason: aiPayload.scoreReason,
-          pronunciationTip: aiPayload.pronunciationTip,
-          translation: translationText,
+          pronunciationTip: aiPayload.pronunciationTip || undefined,
+          rhythmTip: aiPayload.rhythmTip || undefined,
+          grammarTip: aiPayload.grammarTip || undefined,
           keyTerms: normalizedKeyTerms,
         },
       },
@@ -303,8 +303,29 @@ export class ConversationService {
     session.coach = this.buildCoachNote(aiPayload);
     session.updatedAt = new Date().toISOString();
 
+    // Early broadcast: user sees AI reply before translation is ready
     await this.persistSession(session);
     this.broadcastSession(session);
+
+    // Run translation in background, then update the message
+    this.translateForNativeLanguage(
+      aiPayload.reply,
+      session.targetLanguage,
+      session.nativeLanguage ?? LanguageCode.Mandarin,
+    )
+      .then(async (translationText) => {
+        if (translationText) {
+          aiMessage.meta = { ...aiMessage.meta, translation: translationText };
+          await this.persistSession(session);
+          this.broadcastSession(session);
+        }
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `Background translation failed: ${(err as Error).message}`,
+        );
+      });
+
     return session;
   }
 

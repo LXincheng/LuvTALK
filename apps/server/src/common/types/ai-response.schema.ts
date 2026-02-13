@@ -15,6 +15,8 @@ export const AiResponseSchema = z.object({
   score: z.number().min(0).max(100),
   scoreReason: z.string().min(1),
   pronunciationTip: z.string().optional(),
+  rhythmTip: z.string().optional(),
+  grammarTip: z.string().optional(),
   keyTerms: z.array(KeyTermSchema).default([]),
 });
 

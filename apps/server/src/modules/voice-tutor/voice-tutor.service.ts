@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { exec } from "child_process";
 import { randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { access, mkdir, readFile, writeFile } from "fs/promises";
+import { access, mkdir, readFile, unlink, writeFile } from "fs/promises";
 import { basename, extname, join } from "path";
 import { Readable } from "stream";
 import { envConfig } from "../../common/config/env.config";
@@ -47,13 +48,13 @@ export class VoiceTutorService {
   }
 
   private validateOpenAiSetup(): void {
-    const { apiKey, apiUrl, transcribeModel, ttsModel } = envConfig.openai;
+    const { apiKey, apiUrl, audioApiUrl, transcribeModel, ttsModel } = envConfig.openai;
     if (!apiKey) {
       this.logger.warn("Yunwu OpenAI API key missing; STT/TTS disabled.");
       return;
     }
     this.logger.log(
-      `Yunwu OpenAI ready | base=${apiUrl ?? "default"} | stt=${transcribeModel} | tts=${ttsModel}`,
+      `Yunwu OpenAI ready | base=${apiUrl ?? "default"} | audio=${audioApiUrl ?? "default"} | stt=${transcribeModel} | tts=${ttsModel}`,
     );
   }
 
@@ -194,13 +195,37 @@ export class VoiceTutorService {
   }
 
   /**
-   * Whisper API natively supports webm, wav, mp3, m4a, mp4, mpeg, mpga, oga, ogg —
-   * no server-side conversion needed.
+   * Convert webm/wav/m4a to mp3 via ffmpeg so the transcription API
+   * can reliably parse audio duration.
    */
   private async ensureMp3(
     upload: VoiceUploadResult,
   ): Promise<VoiceUploadResult> {
-    return upload;
+    const ext = extname(upload.filePath).toLowerCase();
+    if (ext === ".mp3") return upload;
+
+    const mp3Path = upload.filePath.replace(/\.[^.]+$/, ".mp3");
+    const mp3FileName = upload.fileName.replace(/\.[^.]+$/, ".mp3");
+
+    try {
+      const { path: ffmpegPath } = require("@ffmpeg-installer/ffmpeg");
+      await new Promise<void>((resolve, reject) => {
+        exec(
+          `"${ffmpegPath}" -i "${upload.filePath}" -y -vn -ar 16000 -ac 1 -b:a 64k "${mp3Path}"`,
+          { timeout: 30_000 },
+          (err) => (err ? reject(err) : resolve()),
+        );
+      });
+      // Remove original file
+      await unlink(upload.filePath).catch(() => {});
+      this.logger.debug(`Converted ${ext} -> mp3: ${mp3FileName}`);
+      return { ...upload, filePath: mp3Path, fileName: mp3FileName, mimeType: "audio/mpeg" };
+    } catch (error) {
+      this.logger.warn(
+        `ffmpeg conversion failed, sending original ${ext}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return upload;
+    }
   }
 
   private async forwardTranscript(
@@ -278,8 +303,8 @@ export class VoiceTutorService {
     upload: VoiceUploadResult,
     languageHint: LanguageHint,
   ): Promise<string | undefined> {
-    const { apiKey, apiUrl, transcribeModel } = envConfig.openai;
-    if (!apiKey || !transcribeModel || !apiUrl) {
+    const { apiKey, audioApiUrl, transcribeModel } = envConfig.openai;
+    if (!apiKey || !transcribeModel || !audioApiUrl) {
       this.logger.warn("Yunwu OpenAI 配置缺失，无法执行语音识别");
       return undefined;
     }
@@ -295,7 +320,7 @@ export class VoiceTutorService {
       formData.append("prompt", languageHint.transcriptionPrompt);
       formData.append("response_format", "json");
       const response = await fetch(
-        `${apiUrl.replace(/\/$/, "")}/audio/transcriptions`,
+        `${audioApiUrl.replace(/\/$/, "")}/transcriptions`,
         {
           method: "POST",
           headers: {
@@ -338,8 +363,8 @@ export class VoiceTutorService {
     text: string,
     voice?: string,
   ): Promise<{ audioUrl: string; fileName: string } | undefined> {
-    const { apiKey, apiUrl, ttsModel } = envConfig.openai;
-    if (!apiKey || !ttsModel || !apiUrl) {
+    const { apiKey, audioApiUrl, ttsModel } = envConfig.openai;
+    if (!apiKey || !ttsModel || !audioApiUrl) {
       this.logger.warn("Yunwu OpenAI 配置缺失，无法执行语音合成");
       return undefined;
     }
@@ -348,7 +373,7 @@ export class VoiceTutorService {
     const directory = join(this.storageRoot, conversationId);
     try {
       const response = await fetch(
-        `${apiUrl.replace(/\/$/, "")}/audio/speech`,
+        `${audioApiUrl.replace(/\/$/, "")}/speech`,
         {
           method: "POST",
           headers: {

@@ -16,6 +16,8 @@ export interface ConversationMessage {
     score?: number;
     scoreReason?: string;
     pronunciationTip?: string;
+    rhythmTip?: string;
+    grammarTip?: string;
     translation?: string;
     audioUrl?: string;
     keyTerms?: KeyTerm[];

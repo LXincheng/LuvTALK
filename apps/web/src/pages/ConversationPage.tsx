@@ -130,6 +130,8 @@ const mapSessionToMessages = (
           ...mapped[cursor],
           pronunciationScore: score,
           pronunciationTip: message.meta?.pronunciationTip,
+          rhythmTip: message.meta?.rhythmTip,
+          grammarTip: message.meta?.grammarTip,
         };
         break;
       }

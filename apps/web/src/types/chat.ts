@@ -14,6 +14,8 @@ export interface Message {
   translation?: string;
   pronunciationScore?: number;
   pronunciationTip?: string;
+  rhythmTip?: string;
+  grammarTip?: string;
   audioUrl?: string;
   annotations?: Annotation[];
   isLoading?: boolean;
