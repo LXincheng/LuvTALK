@@ -313,7 +313,9 @@ const buildSessionUpdate = (params: {
       input_audio_format: "pcm16",
       output_audio_format: "pcm16",
       input_audio_transcription: {
-        model: params.transcribeModel || "whisper-1",
+        // Realtime API only supports whisper-1 for input transcription.
+        // The transcribeModel env var is for the regular audio API.
+        model: "whisper-1",
       },
       modalities: ["audio", "text"],
     },

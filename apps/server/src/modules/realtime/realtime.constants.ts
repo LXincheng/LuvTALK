@@ -8,8 +8,8 @@ export const REALTIME_DEFAULT_VOICE = "shimmer";
 export const REALTIME_DEFAULT_TURN_DETECTION = {
   type: "server_vad",
   threshold: 0.6,
-  prefix_padding_ms: 300,
-  silence_duration_ms: 800,
+  prefix_padding_ms: 400,
+  silence_duration_ms: 1500,
 } as const;
 
 export const REALTIME_OFFER_COOLDOWN_MS = 1500;

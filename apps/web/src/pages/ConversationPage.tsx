@@ -527,6 +527,8 @@ export default function ConversationPage() {
     if (!inputValue.trim() || !session || isSending) {
       return;
     }
+    // Reset TTS baseline so new AI replies get synthesized
+    ttsBaselineRef.current = 0;
     const messageText = inputValue.trim();
     setInputValue('');
     setIsSending(true);
@@ -572,6 +574,8 @@ export default function ConversationPage() {
     if (!session) {
       return;
     }
+    // Reset TTS baseline so new AI replies get synthesized
+    ttsBaselineRef.current = 0;
     updateOptimisticVoiceStatus(t('voiceSending'));
     try {
       await uploadConversationVoice(session.id, audio);
@@ -731,8 +735,10 @@ export default function ConversationPage() {
         voice={ttsVoice}
         onVoiceChange={setTtsVoice}
         onExit={() => {
-          // Keep baseline so TTS won't re-synthesize immersive session messages
-          ttsBaselineRef.current = session.messages.length;
+          // Block ALL TTS until user sends a new message in voice mode.
+          // Immersive transcript saves are async — using message count would
+          // still allow TTS for messages that arrive via SSE after exit.
+          ttsBaselineRef.current = Number.MAX_SAFE_INTEGER;
           setChatMode('voice');
         }}
       />

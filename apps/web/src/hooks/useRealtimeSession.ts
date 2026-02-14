@@ -199,6 +199,17 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     }
   }, []);
 
+  /** Stop all scheduled AI audio immediately (used on user interruption). */
+  const flushOutputAudio = useCallback(() => {
+    if (outputContextRef.current) {
+      void outputContextRef.current.close();
+      outputContextRef.current = null;
+    }
+    outputTimeRef.current = 0;
+    clearAiSpeakingTimer();
+    setIsAiSpeaking(false);
+  }, [clearAiSpeakingTimer]);
+
   const schedulePlaybackEndCheck = useCallback(() => {
     const outCtx = outputContextRef.current;
     const outEnd = outputTimeRef.current;
@@ -235,6 +246,11 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
   const disconnect = useCallback(
     (nextStatus: RealtimeStatus = 'ended') => {
       closingRef.current = true;
+      // Cancel any in-flight AI response before closing
+      const ws = socketRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'response.cancel' }));
+      }
       cleanupConnection();
       releaseLock(lockKey, lockIdRef.current);
       setIsAiSpeaking(false);
@@ -258,6 +274,18 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       if (type === 'session.created' || type === 'session.updated') {
         sessionReadyRef.current = true;
         setLastError(undefined);
+        return;
+      }
+
+      // User started speaking — interrupt AI, cancel response, flush audio
+      if (type === 'input_audio_buffer.speech_started') {
+        flushOutputAudio();
+        aiTranscriptRef.current = '';
+        setAiTranscript('');
+        const ws = socketRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'response.cancel' }));
+        }
         return;
       }
 
@@ -331,7 +359,7 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         setLastError('CONNECT_FAILED');
       }
     },
-    [clearAiSpeakingTimer, commitTranscript, disconnect, schedulePlaybackEndCheck, scheduleTranscriptUi],
+    [clearAiSpeakingTimer, commitTranscript, disconnect, flushOutputAudio, schedulePlaybackEndCheck, scheduleTranscriptUi],
   );
 
   const startAudioCapture = useCallback(
