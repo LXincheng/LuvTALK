@@ -213,3 +213,61 @@
 - 前端：三个页面的加载态从纯文本/spinner 升级为骨架屏（animate-pulse），提升感知加载速度。
 - 前端：FavoritesService 在 `createFavorite`/`removeFavorite` 时自动 `invalidateCache('favorites')`，确保修改后下次访问获取最新数据。
 - 后端：ReviewService 新增 `isQualityInput()` 质量过滤——`extractLowScoreCards()` 跳过纯数字、重复字符、过短输入（<2字符）、低字符多样性等无意义用户消息，防止 "1111"、"asdf" 等垃圾输入进入复习词库。
+
+### 2026-02-14（沉浸模式修复与 UI 重设计）
+
+- 后端 WS 代理修复：`resolveRealtimeWsUrl()` 强制使用 `wss://` 协议（原逻辑将 `http://` 转为 `ws://`，导致 yunwu API 拒绝非 TLS 连接）。
+- 后端 session.update 修复：`input_audio_transcription.model` 从 `gpt-4o-mini-transcribe` 改为 `whisper-1`（Realtime API 标准模型），消除因模型不支持导致的静默失败。
+- 后端 server_vad 配置完善：`REALTIME_DEFAULT_TURN_DETECTION` 新增 `threshold: 0.5`、`prefix_padding_ms: 300`、`silence_duration_ms: 500`，让服务端 VAD 更精准地检测语音起止。
+- 后端上游事件日志：upstream `message` 处理器新增 `session.created`、`session.updated`、`error` 事件的日志输出，方便排查连接问题。
+- 后端事件白名单：新增 `conversation.item.create` 到 CLIENT_EVENT_ALLOWLIST。
+- 前端 VAD 冲突修复：移除 `useRealtimeSession` 中的客户端 VAD 逻辑（speakingRef/lastSpeechAtRef/speechStartAtRef/hasAudioRef），改为持续流式发送所有音频数据，由服务端 server_vad 统一处理语音检测与响应触发，消除客户端手动 `commit` + `response.create` 与服务端 VAD 的冲突。
+- 前端新增 `sessionReadyRef` 追踪 `session.created`/`session.updated` 事件，确保会话就绪。
+- 沉浸模式 UI 重设计：
+  - ImmersiveMode：深色渐变背景（`immersive-bg`）+ 环境光晕层 + framer-motion 动画过渡，顶栏极简化（pill 形退出按钮 + 模式标签），底部控制栏改为 pill 形容器。
+  - AudioOrb：多层设计（外环 + 内环 + 主球体 + 高光层 + 中心点），音量驱动缩放/光晕/环形扩展，AI 说话时渐变色切换（indigo→violet/fuchsia/pink）。
+  - TranscriptSubtitles：blur 进出动画，用户消息 indigo 半透明背景，AI 消息白色半透明背景，草稿条目带脉冲光标。
+  - ImmersiveControls：pill 形控制栏（backdrop-blur），静音按钮带红色边框指示，结束按钮红色圆形 + 阴影，设置按钮高亮状态。
+- CSS 新增：`immersive-bg`（深色渐变）、`safe-area-inset-top`、`scrollbar-none`（隐藏滚动条）、优化 `orbPulse` 动画参数。
+- 聊天页导航栏修复：移动端第一行减小间距（gap-1.5, px-2），标题 `flex-1 min-w-0 truncate` 确保不挤压模式切换器；第二行语言标签减小内边距（px-2 py-1），VoiceStyleSelector 包裹 `shrink-0` 防止被压缩；ChatModeSwitcher 移动端按钮内边距从 `px-2.5 py-2` 减为 `px-2 py-1.5`。
+
+### 2026-02-14（沉浸模式关键 Bug 修复）
+
+- **[Critical] 二进制帧转发 Bug**：`ws` 库从 yunwu 上游收到的消息为 `Buffer` 类型，`client.send(buffer)` 会以 WebSocket binary frame 发送；浏览器端 `onmessage` 收到 binary frame 时 `event.data` 为 `Blob`（非 string），前端 `typeof event.data !== 'string'` 判断直接丢弃所有上游事件——导致前端从未收到任何 `session.created`、`response.audio.delta`、`response.audio_transcript.delta` 等事件，表现为"有连接无回复"。修复：新增 `toTextMessage()` 辅助函数将 `Buffer`/`Buffer[]` 转为 UTF-8 字符串，`client.send(text)` 以 text frame 发送，浏览器正常接收。
+- **WS 协议回退**：第一轮修复错误地将 yunwu URL 强制转为 `wss://`，但 yunwu Realtime API 实际使用 `ws://`（参考官方 Python 示例 `ws://yunwu.ai/v1/realtime`）。回退 `resolveRealtimeWsUrl()` 为协议感知映射（ws/wss 保持原样，http→ws，https→wss），`env.config.ts` 默认值改为 `ws://yunwu.ai/v1/realtime`。
+- 下游消息同样使用 `toTextMessage()` 统一处理，确保客户端发送的文本帧在转发给上游时也正确解析。
+
+### 2026-02-14（沉浸模式体验优化）
+
+- **重复 AI 回复修复**：`silence_duration_ms` 从 500ms 提升至 1200ms，`threshold` 从 0.5 提升至 0.6，避免用户自然停顿（换气、思考）被误判为语音结束而触发多次 AI 回复。
+- **useEffect 稳定化**：ImmersiveMode 的 connect/disconnect 改用 `useRef` 存储，useEffect 依赖数组为空，避免回调身份变化导致反复断连重连。
+- **错误提示修复**：`handleRealtimeEvent` 在收到 `session.created`/`session.updated` 时清除 `lastError`，避免连接成功后仍显示旧错误信息。
+- **TTS 重复调用修复**：新增 `ttsBaselineRef` 记录进入沉浸模式时的消息数量，退出后 TTS effect 仅处理 baseline 之后的新消息，避免对沉浸模式期间的对话重复调用 TTS/STT 服务。
+- **沉浸模式 UI 重设计 v2**：
+  - ImmersiveMode：更深的背景渐变（`#06060c`→`#0e0a1a`），三层非对称环境光晕，顶栏极简化为单个返回箭头 + 右侧错误提示，fade-in 入场动画。
+  - AudioOrb：单环设计（去掉多余内环），更柔和的 violet 系光晕，glass overlay 层增加深度感，cubic-bezier 缓动曲线更自然。
+  - TranscriptSubtitles：去掉用户消息的彩色背景和边框，用户消息改为极淡白色背景，AI 消息无背景纯文字，更大的 blur 进出动画。
+  - ImmersiveControls：去掉 pill 容器背景，三个按钮直接排列，更大间距（gap-5），静音状态用红色图标而非红色边框，整体更通透。
+  - CSS：orbPulse 动画改用 violet 色调，周期延长至 2.8s 更沉稳。
+
+### 2026-02-14（体验优化与 Toast 统一）
+
+- **沉浸模式连接提示**：连接中状态显示"正在连接导师..."，1.2s 后淡入"首次连接可能需要几秒钟"提示，避免用户误以为是 Bug。
+- **用户实时字幕修复**：`buildSessionUpdate` 的 `input_audio_transcription.model` 改为使用 `transcribeModel` 参数（而非硬编码 `whisper-1`），确保 yunwu 代理正确配置转写模型。
+- **对话标题优化**：新增 `summarizeTitle()` 方法，根据首条用户消息智能生成标题——CJK 文本截取 15 字符，英文按词边界截取 28 字符，去除标点符号，替代原来的直接复制。
+- **游客历史限制**：localStorage 中的 `conversationIds` 列表从最多 50 条缩减为最多 5 条，避免游客模式下历史记录无限增长。
+- **沉浸模式通话时长**：游客从 180s 缩减为 120s（2 分钟），认证用户从 900s 缩减为 180s（3 分钟），控制 API 消耗。
+- **Toast 通知统一**：引入 `sonner` 库，在 `main.tsx` 添加全局 `<Toaster>` 组件（暗色玻璃态风格，顶部居中），ConversationPage/FavoritesPage/DailyReviewPage 的所有 `setErrorMessage` 替换为 `toast.error()`，移除内联错误 div，统一通知风格。
+- **状态文案优化**：沉浸模式状态标签去掉省略号（"正在聆听"而非"正在聆听..."），更简洁。
+
+### 2026-02-14（沉浸模式卡顿修复与 UI v3）
+
+- **[Critical] 回声反馈修复**：新增 `isAiSpeakingRef`，在 `onaudioprocess` 中当 AI 正在播放音频时抑制麦克风输入（`setAudioLevel(0); return`），防止 AI 音频被麦克风拾取后发送给服务端 VAD，导致状态在"聆听/说话"间反复跳跃、AI 音频卡顿、以及触发重复回复。
+- **VAD 灵敏度回调**：`silence_duration_ms` 从 1200ms 降回 800ms——之前的重复回复根因是回声反馈而非静默时间过短，1200ms 反而增加了不必要的响应延迟。
+- **10s 响应延迟说明**：服务器日志显示 yunwu API 首次连接耗时约 10s（16:00:53→16:01:03），属于上游代理冷启动延迟，非应用层问题；`do_request_failed` 错误为 yunwu 代理侧问题。
+- **沉浸模式 UI v3**：
+  - ImmersiveMode：纯黑背景（`#000`），去掉渐变和环境光晕层，X 关闭按钮替代返回箭头，更极简的布局。
+  - AudioOrb：缩小尺寸（w-28/h-28 → w-36/h-36），新增 ambient glow 层（blur-3xl），AI 说话时切换为更亮的紫色光晕（rgba(168,130,255)），去掉多余的外环和内环。
+  - TranscriptSubtitles：居中对齐布局，去掉左右对齐和背景色，用户消息 white/40、AI 消息 white/80，更简洁的字幕风格。
+  - ImmersiveControls：去掉外层容器，按钮改为固定尺寸（w-12/h-12，结束按钮 w-14/h-14），静音状态用 red-500/20 背景 + red-400 图标。
+  - CSS：orbPulse 动画改用蓝紫色调（rgba(120,100,255)），周期延长至 3s，增加 scale 变化；移除未使用的 `immersive-bg` 类。

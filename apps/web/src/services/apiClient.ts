@@ -59,7 +59,9 @@ export function cachedGet<T>(key: string, fetcher: () => Promise<T>): {
   fresh: Promise<T>;
 } {
   const entry = swrCache.get(key);
-  const cached = entry ? (entry.data as T) : null;
+  const now = Date.now();
+  const cached =
+    entry && now - entry.timestamp < SWR_TTL ? (entry.data as T) : null;
   const fresh = fetcher().then((data) => {
     swrCache.set(key, { data, timestamp: Date.now() });
     return data;

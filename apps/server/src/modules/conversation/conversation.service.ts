@@ -83,6 +83,12 @@ interface ProcessMessageOptions {
   userMessageMeta?: ConversationMessage["meta"];
 }
 
+interface RealtimeTranscriptEntry {
+  role: "user" | "ai";
+  text: string;
+  timestamp?: string;
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
@@ -154,6 +160,67 @@ export class ConversationService {
     await this.persistSession(session);
     this.broadcastSession(session);
     return session;
+  }
+
+  async appendRealtimeTranscript(
+    conversationId: string,
+    entries: RealtimeTranscriptEntry[],
+    userId?: string,
+  ): Promise<number> {
+    const session = await this.getSession(conversationId);
+    if (session.userId && (!userId || session.userId !== userId)) {
+      throw new NotFoundException("Conversation not found");
+    }
+    if (!session.userId && userId) {
+      session.userId = userId;
+    }
+
+    const normalized = entries
+      .map((entry) => ({
+        role: entry.role,
+        text: entry.text?.trim(),
+        timestamp: resolveTimestamp(entry.timestamp),
+      }))
+      .filter((entry) => entry.text) as Array<{
+      role: "user" | "ai";
+      text: string;
+      timestamp?: string;
+    }>;
+
+    if (!normalized.length) {
+      return 0;
+    }
+
+    const initialUserCount = session.messages.filter(
+      (message) => message.sender === "user",
+    ).length;
+
+    const appended = normalized.map((entry) =>
+      this.buildMessage(
+        entry.role,
+        entry.text,
+        session.targetLanguage,
+        session.nativeLanguage,
+        entry.timestamp ? { createdAt: entry.timestamp } : undefined,
+      ),
+    );
+
+    session.messages.push(...appended);
+
+    if (initialUserCount === 0) {
+      const firstUser = appended.find((message) => message.sender === "user");
+      if (firstUser) {
+        session.title = this.summarizeTitle(
+          firstUser.text,
+          session.nativeLanguage,
+        );
+      }
+    }
+
+    session.updatedAt = new Date().toISOString();
+    await this.persistSession(session);
+    this.broadcastSession(session);
+    return appended.length;
   }
 
   async resumeOrCreateSession(
@@ -261,7 +328,8 @@ export class ConversationService {
       (m) => m.sender === "user",
     ).length;
     if (userMessageCount === 1) {
-      session.title = trimmed.slice(0, 60);
+      // Set a temporary title immediately; refine asynchronously after AI responds
+      session.title = this.summarizeTitle(trimmed, session.nativeLanguage);
     }
 
     // Early broadcast: user message appears instantly in the UI
@@ -431,6 +499,41 @@ export class ConversationService {
         createdAt: timestamp,
       },
     );
+  }
+
+  /**
+   * Generate a concise title (≤20 chars) from the first user message.
+   * Strips punctuation, truncates intelligently at word/character boundaries.
+   */
+  private summarizeTitle(
+    text: string,
+    nativeLanguage?: LanguageCode,
+  ): string {
+    const cleaned = text
+      .replace(/[\n\r]+/g, " ")
+      .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .trim();
+    if (!cleaned) {
+      return this.describeScenario("daily", nativeLanguage);
+    }
+    // For CJK-heavy text, truncate by character count
+    const cjkRatio =
+      (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g)?.length ?? 0) /
+      cleaned.length;
+    if (cjkRatio > 0.3) {
+      return cleaned.length > 15 ? cleaned.slice(0, 15) + "…" : cleaned;
+    }
+    // For alphabetic text, truncate at word boundary
+    if (cleaned.length <= 30) {
+      return cleaned;
+    }
+    const words = cleaned.split(/\s+/);
+    let result = "";
+    for (const word of words) {
+      if ((result + " " + word).trim().length > 28) break;
+      result = (result + " " + word).trim();
+    }
+    return result ? result + "…" : cleaned.slice(0, 28) + "…";
   }
 
   private describeScenario(
@@ -1117,3 +1220,14 @@ export class ConversationService {
     return `${raw}/v1/chat/completions`;
   }
 }
+
+const resolveTimestamp = (timestamp?: string): string | undefined => {
+  if (!timestamp) {
+    return undefined;
+  }
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return undefined;
+  }
+  return date.toISOString();
+};

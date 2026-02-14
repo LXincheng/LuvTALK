@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, X, RotateCcw, Volume2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useLocale } from '../providers/LocaleContext';
 import { fetchDailyReviewCached, submitReviewFeedback } from '../services/reviewService';
 import {
@@ -36,7 +37,7 @@ export default function DailyReviewPage() {
   const [reviewedCount, setReviewedCount] = useState(0);
   const [needPracticeCount, setNeedPracticeCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [ttsConversationId, setTtsConversationId] = useState<string | null>(
@@ -45,7 +46,6 @@ export default function DailyReviewPage() {
 
   useEffect(() => {
     let isMounted = true;
-    setErrorMessage(null);
     const { cached, fresh } = fetchDailyReviewCached();
 
     const applyPayload = (payload: DailyReviewPayload) => {
@@ -67,7 +67,7 @@ export default function DailyReviewPage() {
       .then(applyPayload)
       .catch(() => {
         if (!isMounted) return;
-        setErrorMessage(t('reviewLoadError'));
+        toast.error(t('reviewLoadError'), { id: 'review' });
       })
       .finally(() => {
         if (!isMounted) return;
@@ -115,7 +115,7 @@ export default function DailyReviewPage() {
         conversationId: currentCard.conversationId ?? ttsConversationId ?? undefined,
       });
     } catch {
-      setErrorMessage(t('reviewFeedbackError'));
+      toast.error(t('reviewFeedbackError'), { id: 'review' });
     }
   };
 
@@ -160,12 +160,11 @@ export default function DailyReviewPage() {
       return;
     }
     setIsSpeaking(true);
-    setErrorMessage(null);
     const conversationId =
       currentCard.conversationId ?? (await ensureTtsConversationId());
     if (!conversationId) {
       setIsSpeaking(false);
-      setErrorMessage(t('reviewTtsUnavailable'));
+      toast.error(t('reviewTtsUnavailable'), { id: 'tts' });
       return;
     }
     try {
@@ -175,7 +174,7 @@ export default function DailyReviewPage() {
       );
       setAudioUrl(payload.audioUrl);
     } catch {
-      setErrorMessage(t('reviewTtsError'));
+      toast.error(t('reviewTtsError'), { id: 'tts' });
     } finally {
       setIsSpeaking(false);
     }

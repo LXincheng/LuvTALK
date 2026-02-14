@@ -27,8 +27,7 @@ export default function ChatModeSwitcher({
       id: 'immersive',
       label: t('chatModeImmersive'),
       icon: Radio,
-      disabled: true,
-      tooltip: t('chatModeImmersiveDisabled'),
+      disabled: false,
     },
   ];
 
@@ -49,7 +48,7 @@ export default function ChatModeSwitcher({
                 : m.disabled
                   ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50'
                   : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-            } px-2.5 py-2 md:px-3 md:py-1.5`}
+            } px-2 py-1.5 md:px-3 md:py-1.5`}
           >
             <Icon className="w-4 h-4 shrink-0" />
             <span className="hidden md:inline text-xs font-medium">{m.label}</span>

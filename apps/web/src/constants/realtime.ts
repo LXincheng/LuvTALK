@@ -1,0 +1,17 @@
+export const REALTIME_DATA_CHANNEL = 'oai-events';
+export const REALTIME_SUBTITLE_LIMIT = 4;
+export const REALTIME_TRANSCRIPT_THROTTLE_MS = 120;
+export const REALTIME_AUDIO_FPS = 30;
+export const REALTIME_AUDIO_SAMPLE_RATE = 24_000;
+export const REALTIME_AUDIO_BUFFER_SIZE = 4096;
+export const REALTIME_AI_SPEAKING_TIMEOUT_MS = 500;
+export const REALTIME_VAD_START_RMS = 0.02;
+export const REALTIME_VAD_END_RMS = 0.012;
+export const REALTIME_VAD_SILENCE_MS = 600;
+export const REALTIME_VAD_MIN_UTTERANCE_MS = 200;
+export const REALTIME_RECONNECT_MAX_ATTEMPTS = 1;
+export const REALTIME_RECONNECT_DELAY_MS = 800;
+export const REALTIME_VISIBILITY_TIMEOUT_MS = 30_000;
+export const REALTIME_LOCK_PREFIX = 'luvtalk:realtime:lock';
+export const REALTIME_AUDIO_ANALYSER_FFT_SIZE = 1024;
+export const REALTIME_WS_PATH = '/realtime/ws';

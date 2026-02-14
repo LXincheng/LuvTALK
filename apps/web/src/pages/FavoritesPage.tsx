@@ -1,5 +1,6 @@
 import { Star, Trash2, Copy, Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { fetchFavoritesCached, removeFavorite } from '../services/favoritesService';
 import type { FavoriteItem, FavoriteType } from '../types/api';
 import { useLocale } from '../providers/LocaleContext';
@@ -12,7 +13,7 @@ export default function FavoritesPage() {
     'all',
   );
   const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage] = useState<string | null>(null);
 
   const copyLabel = t('favoritesCopy');
   const removeLabel = t('favoritesRemove');
@@ -41,11 +42,10 @@ export default function FavoritesPage() {
       .then((items) => {
         if (!isMounted) return;
         setFavorites(items);
-        setErrorMessage(null);
       })
       .catch(() => {
         if (!isMounted) return;
-        setErrorMessage(t('favoritesLoadError'));
+        toast.error(t('favoritesLoadError'), { id: 'favorites' });
       })
       .finally(() => {
         if (!isMounted) return;
@@ -77,19 +77,18 @@ export default function FavoritesPage() {
     try {
       await removeFavorite(id);
       setFavorites((prev) => prev.filter((favorite) => favorite.id !== id));
-      setErrorMessage(null);
     } catch {
-      setErrorMessage(t('favoritesDeleteError'));
+      toast.error(t('favoritesDeleteError'), { id: 'favorites' });
     }
   };
 
   const handleCopy = (phrase: string, id: string) => {
     if (!navigator.clipboard) {
-      setErrorMessage(t('favoritesClipboardUnsupported'));
+      toast.error(t('favoritesClipboardUnsupported'), { id: 'clipboard' });
       return;
     }
     navigator.clipboard.writeText(phrase).catch(() => {
-      setErrorMessage(t('favoritesCopyError'));
+      toast.error(t('favoritesCopyError'), { id: 'clipboard' });
       return;
     });
     setCopiedId(id);

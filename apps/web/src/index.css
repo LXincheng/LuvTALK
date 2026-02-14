@@ -151,6 +151,14 @@ html {
     padding-bottom: env(safe-area-inset-bottom);
   }
 
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   .glass-card {
     background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(20px) saturate(180%);
@@ -216,5 +224,34 @@ html {
   from {
     opacity: var(--tw-enter-opacity, 1);
     transform: translate3d(0, var(--tw-enter-translate-y, 0), 0);
+  }
+}
+
+@keyframes orbPulse {
+  0% {
+    box-shadow: 0 0 30px 12px rgba(120, 100, 255, 0.08);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 50px 20px rgba(120, 100, 255, 0.18);
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: 0 0 30px 12px rgba(120, 100, 255, 0.08);
+    transform: scale(1);
+  }
+}
+
+.animate-orb-pulse {
+  animation: orbPulse 3s ease-in-out infinite;
+}
+
+.safe-area-inset-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-orb-pulse {
+    animation: none;
   }
 }

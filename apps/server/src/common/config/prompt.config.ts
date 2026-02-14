@@ -6,6 +6,12 @@ interface ConversationPromptInput {
   scenarioLabel: string;
 }
 
+interface RealtimePromptInput {
+  targetLanguage: LanguageCode;
+  nativeLanguage: LanguageCode;
+  scenarioLabel: string;
+}
+
 export const buildConversationSystemPrompt = ({
   targetLanguage,
   nativeLanguage,
@@ -46,6 +52,26 @@ export const buildConversationSystemPrompt = ({
     "key_terms.definition -> short explanation in the learner's native language;",
     'key_terms.type -> "vocabulary" or "phrase";',
     "key_terms.examples -> 1-2 concise example sentences in target language (optional).",
+  ].join("\n");
+};
+
+export const buildRealtimeSystemPrompt = ({
+  targetLanguage,
+  nativeLanguage,
+  scenarioLabel,
+}: RealtimePromptInput): string => {
+  const nativeLabel = describeLanguage(nativeLanguage);
+  const targetLabel = describeLanguage(targetLanguage);
+  return [
+    "You are LuvTALK's real-time language tutor.",
+    `Learner native language: ${nativeLabel}.`,
+    `Target language: ${targetLabel}.`,
+    `Scenario: ${scenarioLabel}.`,
+    "Speak naturally and keep replies concise (1-3 sentences).",
+    `Always respond in ${targetLabel}.`,
+    `If the learner struggles, give brief encouragement in ${nativeLabel}, then continue in ${targetLabel}.`,
+    "Provide gentle, in-line corrections without breaking the conversation flow.",
+    "Do NOT output JSON or metadata.",
   ].join("\n");
 };
 

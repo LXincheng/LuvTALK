@@ -12,8 +12,8 @@ LuvTALK 当前的语音管道采用 **录音-停止-等待** 循环：用户按�
 
 ### 0.1 范围内 (In Scope)
 
-- 基于 WebRTC 的实时语音对话（前端直连 Realtime API）
-- 后端提供临时 Token + 会话配置 + 对话记录落库
+- 基于 WebSocket 的实时语音对话（前端 → 后端 WS 代理 → Yunwu Realtime）
+- 后端代理 WebSocket + 会话配置 + 对话记录落库
 - 全屏沉浸 UI（字幕 + 音频可视化 + 控制栏）
 
 ### 0.2 非目标 (Out of Scope)
@@ -24,7 +24,7 @@ LuvTALK 当前的语音管道采用 **录音-停止-等待** 循环：用户按�
 
 ### 0.3 前置依赖 (Dependencies)
 
-- Yunwu Realtime API 可用，支持 WebRTC + DataChannel 事件
+- Yunwu Realtime API 可用，支持 WebSocket 实时事件
 - 现有 Conversation 模块可作为唯一对话存储源
 - 前端已有 `motion/react`，可复用动画
 
@@ -34,31 +34,29 @@ LuvTALK 当前的语音管道采用 **录音-停止-等待** 循环：用户按�
 
 ## 1. Architecture / 架构方案
 
-### 连接方式：WebRTC（推荐）
+### 连接方式：WebSocket（推荐）
 
-- 浏览器通过 WebRTC 直连 Yunwu Realtime API，延迟最低
-- 后端仅负责生成临时 Token 和保存对话记录，**不中继音频**
+- 浏览器通过 WebSocket 连接后端代理，由后端直连 Yunwu Realtime API
+- 后端仅负责转发事件与保存对话记录，**不中继音频**
 
 ### 关键设计决策
 
 - **单一对话源**：所有转写最终写入 Conversation 会话，避免新建并行数据表
 - **短周期保存**：仅在“转写完成事件”落库，进行中的字幕留在前端
 - **统一模式状态**：前端沉浸模式与 `chatMode` 统一来源，避免双状态冲突
-- **安全优先**：Token 生成绑定用户与会话，并做频控
+- **功能取舍**：Realtime 模式不做翻译/评分，仅提供自然对话与轻量纠错
+- **安全优先**：WS 代理绑定用户与会话，并做频控
 
 ### 数据流
 
 ```
 Browser                    LuvTALK Backend              Yunwu Realtime API
   |                              |                              |
-  |-- POST /api/realtime/session -->                            |
-  |                              |-- POST {apiUrl}/realtime/    |
-  |                              |   sessions ----------------->|
-  |                              |<-- ephemeral token ----------|
-  |<-- { token, config } --------|                              |
-  |                                                             |
-  |============= WebRTC PeerConnection (direct) ===============>|
-  |  audio in/out + data channel (transcript events)            |
+  |== WebSocket /api/realtime/ws ==============================>|
+  |                              |== WebSocket /v1/realtime ===>|
+  |  audio/text events           |  audio/text events           |
+  |  (append/commit/response)    |                              |
+  |<=============================|<=============================|
   |                                                             |
   |-- (session ends) POST /api/realtime/transcript -->          |
   |                              |-- save to conversation DB    |
@@ -70,9 +68,10 @@ Browser                    LuvTALK Backend              Yunwu Realtime API
 
 ### 2.1 配置 — `apps/server/src/common/config/env.config.ts`
 
-在 `openai` 块中新增 `realtimeModel`：
+在 `openai` 块中新增 `realtimeApiUrl` 与 `realtimeModel`：
 
 ```typescript
+realtimeApiUrl: process.env.OPENAI_REALTIME_API_URL ?? "https://yunwu.ai/v1/realtime",
 realtimeModel: process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview",
 ```
 
@@ -84,19 +83,22 @@ realtimeModel: process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview",
 | ------------------------------------- | ------------------------------ |
 | `realtime.module.ts`                  | NestJS 模块定义                |
 | `realtime.controller.ts`              | REST 端点                      |
-| `realtime.service.ts`                 | 临时 Token 生成 + 对话记录保存 |
-| `dto/create-realtime-session.dto.ts`  | 创建会话请求验证               |
+| `realtime.service.ts`                 | Realtime 记录保存               |
+| `realtime.ws.ts`                      | WebSocket 代理                  |
 | `dto/save-realtime-transcript.dto.ts` | 保存记录请求验证               |
 
 **端点：**
 
-1. `POST /api/realtime/session` — 创建临时 Token
-   - **请求**：`{ conversationId, voice?, scenarioId? }`
+> 说明：旧的 `/api/realtime/offer` 已弃用（Yunwu 不支持），仅保留历史兼容。
+
+1. `WS /api/realtime/ws` — 代理 WebSocket
+   - **参数**：`?conversationId=&voice=&accessToken=`
    - 服务端根据 `conversationId` 拉取会话，生成 system prompt + locale + target language
-   - 调用 `{OPENAI_API_URL}/realtime/sessions`，传入 model、voice、instructions、turn_detection
-   - **返回**：`{ token, expiresAt, sessionConfig }`
+   - 服务端使用 API Key 连接 Yunwu Realtime（`wss://.../v1/realtime?model=...`）
+   - 服务端发送 `session.update`（instructions / voice / turn_detection）
    - **权限**：校验 conversation 所属用户（游客只允许自己的本地会话）
-   - **限流**：按 `userId/ip + conversationId` 做简单频控，避免 Token 滥用
+   - **限流**：按 `userId/ip + conversationId` 做简单频控，避免滥用
+   - **时长**：游客默认 3 分钟，登录用户默认 15 分钟
 
 2. `POST /api/realtime/transcript` — 保存对话记录
    - 接收 `{ conversationId, messages: [{ role, text, timestamp }] }`
@@ -134,7 +136,7 @@ apps/web/src/
     TranscriptSubtitles.tsx    -- 实时字幕显示
     ImmersiveControls.tsx      -- 静音、结束、设置按钮
   hooks/
-    useRealtimeSession.ts      -- WebRTC 连接管理 Hook
+    useRealtimeSession.ts      -- WebSocket 连接管理 Hook
   services/
     realtimeService.ts         -- Realtime API 调用
   types/
@@ -154,7 +156,7 @@ apps/web/src/
 
 ### 3.3 核心 Hook — `useRealtimeSession`
 
-管理完整 WebRTC 生命周期：
+管理完整 WebSocket 生命周期：
 
 ```typescript
 interface UseRealtimeSessionReturn {
@@ -178,26 +180,30 @@ interface UseRealtimeSessionReturn {
 }
 ```
 
-### 3.4 WebRTC 连接流程
+### 3.4 WebSocket 连接流程
 
-1. 请求临时 Token → `POST /api/realtime/session`
-2. 创建 `RTCPeerConnection`，设置 `ontrack` 播放远端音频
-3. `getUserMedia` 获取麦克风，创建 `AudioContext + AnalyserNode` 用于可视化
-4. 创建 DataChannel `"oai-events"` 接收转写事件
-5. `createOffer` → `setLocalDescription`
-6. 发送 SDP offer 到 `{apiUrl}/realtime?model={model}`，获取 answer SDP
-7. `setRemoteDescription` 完成连接
-8. 通过 DataChannel 处理事件：
+1. 建立 WebSocket `ws://<host>/api/realtime/ws`
+2. `getUserMedia` 获取麦克风，创建 `AudioContext`（24k PCM16）
+3. 前端做轻量 VAD（静音阈值），将语音段编码为 base64 PCM16
+4. 语音段发送 `input_audio_buffer.append`，静音后发送 `input_audio_buffer.commit` + `response.create`
+5. 通过 WS 接收事件：
    - `conversation.item.input_audio_transcription.completed` → 用户转写
    - `response.audio_transcript.delta` → AI 实时字幕
-   - `input_audio_buffer.speech_started/stopped` → VAD 状态
-9. 会话结束时保存记录到后端
+   - `response.audio.delta` → AI 音频输出（播放）
+6. 会话结束时保存记录到后端
 
 ### 3.5 状态统一与资源释放
 
 - **状态源**：只使用 `chatMode` 控制沉浸模式 UI，避免 `isImmersiveMode` 与 `chatMode` 冲突
-- **资源释放**：`RTCPeerConnection / MediaStream / AudioContext / AnalyserNode` 在 `disconnect` 中全部关闭
-- **可见性处理**：`visibilitychange` 时自动静音或断开，避免后台录音
+- **资源释放**：`WebSocket / MediaStream / AudioContext` 在 `disconnect` 中全部关闭
+- **可见性处理**：页面隐藏时先静音，超过 30s 自动断开；回到前台可一键重连
+
+### 3.6 WebSocket 兼容与设备策略
+
+- **浏览器限制**：浏览器 WebSocket 无法自定义 Header（Authorization），必须由后端代理
+- **音频编码**：统一 PCM16 24k，前端需做采样率对齐与 base64 编码
+- **自动播放**：AI 音频播放需用户手势触发 AudioContext
+- **并发会话**：同会话仅允许一个连接；新连接建立时关闭旧连接
 
 ---
 
@@ -228,10 +234,11 @@ interface UseRealtimeSessionReturn {
 
 - **尺寸**: 160px (mobile) / 200px (desktop)
 - **渐变**: indigo-500 → purple-500 → pink-500（匹配 app 主题）
-- **空闲**: 缓慢呼吸动画 (scale 0.95-1.05, 3s)
-- **用户说话**: 快速脉动，scale 随 audioLevel 变化 (1.0-1.3)
-- **AI 说话**: 流畅旋转动画，渐变色旋转加速
-- **连接中**: 慢速脉动 + 降低透明度
+- **Phase 1（简化版）**：
+  - 连接中：轻微脉动 + 文案“连接中…”
+  - 已连接：圆球大小随 audioLevel 变化
+  - AI 说话：颜色轻微变化（不做旋转）
+- **Phase 5（增强版）**：加入旋转/光晕等高级动画
 - 使用 inline style 由 `audioLevel` (0-1) 驱动 transform 和 box-shadow
 
 ### 4.3 TranscriptSubtitles
@@ -252,6 +259,7 @@ interface UseRealtimeSessionReturn {
 - 遵循 `prefers-reduced-motion` 关闭过度动画
 - 控制按钮具备 `aria-label`，支持键盘操作
 - 弱网提示与重连状态明确可见
+- 视觉风格与当前玻璃态组件一致（颜色/圆角/阴影/字体）
 
 ---
 
@@ -259,19 +267,22 @@ interface UseRealtimeSessionReturn {
 
 | 场景              | 处理方式                                   |
 | ----------------- | ------------------------------------------ |
-| Token 请求失败    | 显示错误 toast，留在当前模式               |
-| WebRTC 连接失败   | 重试一次（指数退避），失败则显示错误       |
-| 连接中断          | 显示"重新连接"状态，用新 Token 重连        |
+| WS 连接失败       | 显示错误 toast，留在当前模式               |
+| WebSocket 连接失败 | 重试一次（指数退避），失败则显示错误       |
+| 连接中断          | 显示"重新连接"状态，重新建立 WS 连接       |
 | 重连失败          | 保存已有记录，退出到普通模式               |
-| 浏览器不支持      | 检测 `RTCPeerConnection`，不支持则禁用按钮 |
+| 浏览器不支持      | 检测 `WebSocket`，不支持则禁用按钮 |
 | 麦克风权限拒绝    | 复用现有 voice mode 的权限处理逻辑         |
 | AI 说话时用户打断 | Realtime API 原生 VAD 处理，自动中断 AI    |
+| 429 限流          | 指数退避重试一次，提示用户稍后再试         |
+| 多标签并发        | 仅保留最后一个连接，其余连接断开并提示     |
 
 ### 5.1 数据一致性策略
 
 - **保存时机**：只在 `completed` 事件时落库，避免脏数据
 - **意外断线**：前端缓存 `fullTranscript`，重连成功后补偿提交
 - **写入失败**：重试一次，仍失败时提示用户可稍后在文本模式继续
+- **不做评分/翻译**：Realtime 模式不生成 `pronunciationTip/score/translation`
 
 ---
 
@@ -279,22 +290,22 @@ interface UseRealtimeSessionReturn {
 
 ### Phase 1: Backend 基础
 
-1. `env.config.ts` 添加 `realtimeModel`
+1. `env.config.ts` 添加 `realtimeApiUrl` 与 `realtimeModel`
 2. 创建 `RealtimeModule`（controller + service + DTOs）
 3. `prompt.config.ts` 添加 `buildRealtimeSystemPrompt`
 4. 注册模块到 `app.module.ts`
-5. 增加 Token 频控与权限校验
+5. 增加 WS 频控与权限校验
 
 ### Phase 2: Frontend 核心连接
 
 1. 创建 `realtimeService.ts`（API 调用）
 2. 创建 `types/realtime.ts`（类型定义）
-3. 实现 `useRealtimeSession` Hook（WebRTC 全流程）
+3. 实现 `useRealtimeSession` Hook（WebSocket 全流程）
 4. 统一 `chatMode` 状态驱动沉浸模式
 
 ### Phase 3: UI 组件
 
-1. 创建 `AudioOrb.tsx`（渐变动画圆球）
+1. 创建 `AudioOrb.tsx`（简化动画圆球）
 2. 创建 `TranscriptSubtitles.tsx`（实时字幕）
 3. 创建 `ImmersiveControls.tsx`（控制按钮）
 4. 创建 `ImmersiveMode.tsx`（组合容器）
@@ -313,6 +324,7 @@ interface UseRealtimeSessionReturn {
 2. 浏览器兼容性检测
 3. 移动端适配
 4. 更新 `docs/log.md`
+5. AudioOrb 高级动画与光效优化
 
 ---
 
@@ -323,17 +335,19 @@ interface UseRealtimeSessionReturn {
 | 沉浸状态与聊天模式冲突 | UI 无法进入或卡死 | 单一状态源（`chatMode`）驱动沉浸模式 |
 | 转写数据结构不一致 | 历史/评分/翻译异常 | 统一通过 `ConversationService` 落库 |
 | 断线导致对话丢失 | 用户体验下降 | completed 才落库 + 前端缓存补偿提交 |
-| Token 滥用 | 成本与安全风险 | 基于 userId/ip 频控 + 会话绑定 |
+| WS 滥用 | 成本与安全风险 | 基于 userId/ip 频控 + 会话绑定 |
 | 资源泄漏 | 移动端发热/耗电 | 严格 teardown + 可见性策略 |
+| ICE/网络穿透失败 | 连接率下降 | 预留 TURN 配置或使用 Yunwu ICE |
+| 多标签并发 | 音频冲突/卡顿 | 单连接策略 + 明确提示 |
 
 ---
 
 ## 8. Verification / 验证方式
 
-1. **后端**: 启动服务器，`POST /api/realtime/session` 应返回有效 token
+1. **后端**: 启动服务器，`WS /api/realtime/ws` 可成功建立连接
 2. **前端连接**: 点击 immersive 模式，应看到圆球动画和"连接中"状态
 3. **语音对话**: 说话后应听到 AI 实时回复，字幕同步显示
 4. **会话保存**: 结束通话后，对话记录应出现在聊天历史中
 5. **错误恢复**: 断网后应显示重连状态，恢复后继续对话
-6. **浏览器检测**: 在不支持 WebRTC 的环境中，immersive 按钮应保持禁用
+6. **浏览器检测**: 在不支持 WebSocket 的环境中，immersive 按钮应保持禁用
 7. **内存/资源**: 结束通话后麦克风灯熄灭、AudioContext 释放

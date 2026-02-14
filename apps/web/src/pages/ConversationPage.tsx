@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { History, X } from 'lucide-react';
+import { History } from 'lucide-react';
+import { toast } from 'sonner';
 import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
 import ChatHistoryDrawer from '../components/chat/ChatHistoryDrawer';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
 import VoiceStyleSelector from '../components/chat/VoiceStyleSelector';
+import ImmersiveMode from '../components/immersive/ImmersiveMode';
 import type { ChatMode } from '../components/chat/ChatModeSwitcher';
 import { API_BASE_URL } from '../services/apiClient';
 import {
@@ -55,15 +57,17 @@ const getStoredConversationIds = (): string[] => {
   }
 };
 
+const GUEST_MAX_HISTORY = 5;
+
 /** Add a conversation ID to the persisted list (deduped, most-recent first). */
 const trackConversationId = (id: string) => {
   if (typeof window === 'undefined') return;
   const ids = getStoredConversationIds().filter((v) => v !== id);
   ids.unshift(id);
-  // Keep at most 50 entries
+  // Keep at most 5 entries for guest users
   window.localStorage.setItem(
     'conversationIds',
-    JSON.stringify(ids.slice(0, 50)),
+    JSON.stringify(ids.slice(0, GUEST_MAX_HISTORY)),
   );
 };
 
@@ -177,8 +181,6 @@ export default function ConversationPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isImmersiveMode, setIsImmersiveMode] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>(() => {
     if (typeof window === 'undefined') return 'voice';
     return (localStorage.getItem('chatMode') as ChatMode) || 'voice';
@@ -208,6 +210,7 @@ export default function ConversationPage() {
   const voiceDraftUrlRef = useRef<string | null>(null);
   const ttsAudioMapRef = useRef<Record<string, string>>({});
   const ttsVoiceRef = useRef(ttsVoice);
+  const ttsBaselineRef = useRef(0);
 
   const targetLanguageLabels = useMemo(
     () => ({
@@ -264,7 +267,6 @@ export default function ConversationPage() {
   useEffect(() => {
     let isMounted = true;
     setIsInitializing(true);
-    setErrorMessage(null);
 
     const savedConversationId =
       typeof window !== 'undefined'
@@ -292,7 +294,7 @@ export default function ConversationPage() {
         if (!isMounted) {
           return;
         }
-        setErrorMessage(t('sessionInitError'));
+        toast.error(t('sessionInitError'), { id: 'session-init' });
       })
       .finally(() => {
         if (!isMounted) {
@@ -335,11 +337,11 @@ export default function ConversationPage() {
         const payload = JSON.parse(event.data) as ConversationSession;
         setSession(payload);
       } catch {
-        setErrorMessage(t('streamParseError'));
+        toast.error(t('streamParseError'), { id: 'stream' });
       }
     };
     source.onerror = () => {
-      setErrorMessage(t('streamError'));
+      toast.error(t('streamError'), { id: 'stream' });
       source.close();
     };
     return () => {
@@ -353,6 +355,7 @@ export default function ConversationPage() {
     }
     setTtsAudioMap({});
     ttsRequestsRef.current.clear();
+    ttsBaselineRef.current = 0;
     if (voiceDraftUrlRef.current) {
       URL.revokeObjectURL(voiceDraftUrlRef.current);
       voiceDraftUrlRef.current = null;
@@ -381,20 +384,23 @@ export default function ConversationPage() {
         }));
       })
       .catch(() => {
-        if (!errorMessage) {
-          setErrorMessage(t('tutorTtsError'));
-        }
+        toast.error(t('tutorTtsError'), { id: 'tts' });
       })
       .finally(() => {
         ttsRequestsRef.current.delete(message.id);
       });
-  }, [errorMessage, session, t]);
+  }, [session, t]);
 
   useEffect(() => {
-    if (!session || chatMode === 'text') {
+    if (!session || chatMode !== 'voice') {
       return;
     }
-    const pending = session.messages.filter(
+    // Only TTS messages added after the baseline (skip messages from immersive session)
+    const baseline = ttsBaselineRef.current;
+    const candidates = baseline > 0
+      ? session.messages.slice(baseline)
+      : session.messages;
+    const pending = candidates.filter(
       (message) =>
         message.sender === 'ai' &&
         !message.meta?.audioUrl &&
@@ -418,7 +424,7 @@ export default function ConversationPage() {
         rest.forEach(queueTtsForMessage);
       }, 0);
     }
-  }, [chatMode, errorMessage, queueTtsForMessage, session, t]);
+  }, [chatMode, queueTtsForMessage, session]);
 
   useEffect(() => {
     return () => {
@@ -474,7 +480,6 @@ export default function ConversationPage() {
   const handleSelectConversation = async (conversationId: string) => {
     setIsInitializing(true);
     setHistoryDrawerOpen(false);
-    setErrorMessage(null);
     try {
       const nextSession = await fetchConversationById(conversationId);
       setSession(nextSession);
@@ -483,7 +488,7 @@ export default function ConversationPage() {
         trackConversationId(nextSession.id);
       }
     } catch {
-      setErrorMessage(t('sessionInitError'));
+      toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
       setIsInitializing(false);
     }
@@ -492,7 +497,6 @@ export default function ConversationPage() {
   const handleNewChat = async () => {
     setHistoryDrawerOpen(false);
     setIsInitializing(true);
-    setErrorMessage(null);
     try {
       const newSession = await startConversation({
         targetLanguage,
@@ -505,13 +509,17 @@ export default function ConversationPage() {
       }
       void loadHistory();
     } catch {
-      setErrorMessage(t('sessionInitError'));
+      toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
       setIsInitializing(false);
     }
   };
 
   const handleModeChange = (nextMode: ChatMode) => {
+    if (nextMode === 'immersive') {
+      // Record current message count so we skip TTS for these when exiting
+      ttsBaselineRef.current = session?.messages.length ?? 0;
+    }
     setChatMode(nextMode);
   };
 
@@ -522,7 +530,6 @@ export default function ConversationPage() {
     const messageText = inputValue.trim();
     setInputValue('');
     setIsSending(true);
-    setErrorMessage(null);
     setOptimisticMessages([
       buildOptimisticUserMessage(messageText),
       buildTutorLoadingMessage(),
@@ -536,7 +543,7 @@ export default function ConversationPage() {
       setSession(nextSession);
       setOptimisticMessages([]);
     } catch {
-      setErrorMessage(t('sendError'));
+      toast.error(t('sendError'), { id: 'send' });
       setInputValue(messageText);
       setOptimisticMessages([]);
     } finally {
@@ -557,7 +564,7 @@ export default function ConversationPage() {
         metadata: payload.examples ? { examples: payload.examples } : undefined,
       });
     } catch {
-      setErrorMessage(t('favoritesSaveError'));
+      toast.error(t('favoritesSaveError'), { id: 'favorites' });
     }
   };
 
@@ -565,7 +572,6 @@ export default function ConversationPage() {
     if (!session) {
       return;
     }
-    setErrorMessage(null);
     updateOptimisticVoiceStatus(t('voiceSending'));
     try {
       await uploadConversationVoice(session.id, audio);
@@ -582,13 +588,12 @@ export default function ConversationPage() {
 
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setErrorMessage(t('voiceUnsupported'));
+      toast.error(t('voiceUnsupported'), { id: 'voice' });
       return;
     }
     if (isRecording || isSending || !session) {
       return;
     }
-    setErrorMessage(null);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -614,7 +619,7 @@ export default function ConversationPage() {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         if (!chunks.length) {
-          setErrorMessage(t('voiceNoCapture'));
+          toast.error(t('voiceNoCapture'), { id: 'voice' });
           return;
         }
         const mimeType = recorder.mimeType || 'audio/webm';
@@ -638,7 +643,7 @@ export default function ConversationPage() {
       recorder.start();
       setIsRecording(true);
     } catch {
-      setErrorMessage(t('voicePermissionDenied'));
+      toast.error(t('voicePermissionDenied'), { id: 'voice' });
     }
   };
 
@@ -658,16 +663,21 @@ export default function ConversationPage() {
     }
   };
 
+  useEffect(() => {
+    if (chatMode !== 'immersive') {
+      return;
+    }
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, [chatMode]);
+
   const messageList = (
     <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
       {isInitializing && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 glass-card px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
           {t('sessionInit')}
-        </div>
-      )}
-      {errorMessage && (
-        <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
-          {errorMessage}
         </div>
       )}
       <AnimatePresence>
@@ -705,22 +715,27 @@ export default function ConversationPage() {
     />
   );
 
-  if (isImmersiveMode) {
-    return (
-      <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col">
-        <div className="glass-sidebar border-b border-slate-700 px-4 py-3 flex items-center justify-between">
-          <h2 className="font-semibold text-white">{t('chatTitle')}</h2>
-          <button
-            onClick={() => setIsImmersiveMode(false)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 transition-all"
-          >
-            <X className="w-4 h-4" />
-            <span className="text-sm">{t('exitImmersive')}</span>
-          </button>
+  if (chatMode === 'immersive') {
+    if (!session?.id) {
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center">
+          <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-slate-200">
+            {t('sessionInit')}
+          </div>
         </div>
-        {messageList}
-        {inputArea}
-      </div>
+      );
+    }
+    return (
+      <ImmersiveMode
+        conversationId={session.id}
+        voice={ttsVoice}
+        onVoiceChange={setTtsVoice}
+        onExit={() => {
+          // Keep baseline so TTS won't re-synthesize immersive session messages
+          ttsBaselineRef.current = session.messages.length;
+          setChatMode('voice');
+        }}
+      />
     );
   }
 
@@ -739,7 +754,7 @@ export default function ConversationPage() {
       <div className="border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm">
         {/* Mobile */}
         <div className="flex flex-col md:hidden">
-          <div className="flex items-center gap-2 px-3 py-2">
+          <div className="flex items-center gap-1.5 px-2 py-2 min-w-0">
             <button
               onClick={() => {
                 setHistoryDrawerOpen(true);
@@ -753,12 +768,12 @@ export default function ConversationPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate min-w-0 flex-1">
               {session?.title || t('chatTitle')}
             </h2>
-            <div className="shrink-0">
+            <div className="shrink-0 ml-auto">
               <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
             </div>
           </div>
-          <div className="flex items-center gap-2 px-3 pb-2 overflow-x-auto scrollbar-none">
-            <div className="inline-flex items-center gap-1 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60 shrink-0">
+          <div className="flex items-center gap-1.5 px-2 pb-2 overflow-x-auto scrollbar-none min-w-0">
+            <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60 shrink-0">
               {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
                 (language) => {
                   const isActive = targetLanguage === language;
@@ -766,7 +781,7 @@ export default function ConversationPage() {
                     <button
                       key={language}
                       onClick={() => setTargetLanguage(language)}
-                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      className={`px-2 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                         isActive
                           ? 'glass-button text-white'
                           : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -781,7 +796,9 @@ export default function ConversationPage() {
             {chatMode !== 'text' && (
               <>
                 <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
-                <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} />
+                <div className="shrink-0">
+                  <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} />
+                </div>
               </>
             )}
           </div>
@@ -789,7 +806,7 @@ export default function ConversationPage() {
 
         {/* Desktop */}
         <div className="hidden md:flex md:items-center md:justify-between px-4 py-2.5">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <button
               onClick={() => {
                 setHistoryDrawerOpen(true);
@@ -800,7 +817,7 @@ export default function ConversationPage() {
             >
               <History className="w-5 h-5 text-slate-600 dark:text-slate-400" />
             </button>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h2 className="font-semibold text-slate-900 dark:text-white truncate">
                 {session?.title || t('chatTitle')}
               </h2>

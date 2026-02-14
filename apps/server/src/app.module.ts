@@ -11,6 +11,7 @@ import { VoiceTutorModule } from "./modules/voice-tutor/voice-tutor.module";
 import { AppCacheModule } from "./common/cache/cache.module";
 import { ReviewModule } from "./modules/review/review.module";
 import { AchievementModule } from "./modules/achievement/achievement.module";
+import { RealtimeModule } from "./modules/realtime/realtime.module";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AchievementModule } from "./modules/achievement/achievement.module";
     AchievementModule,
     HealthModule,
     VoiceTutorModule,
+    RealtimeModule,
   ],
 })
 export class AppModule {}
