@@ -7,6 +7,8 @@ import VoiceInput from '../components/chat/VoiceInput';
 import ChatHistoryDrawer from '../components/chat/ChatHistoryDrawer';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
 import VoiceStyleSelector from '../components/chat/VoiceStyleSelector';
+import ConversationRecoveryBanner from '../components/chat/ConversationRecoveryBanner';
+import type { ConversationRecoveryState } from '../components/chat/ConversationRecoveryBanner';
 import ImmersiveMode from '../components/immersive/ImmersiveMode';
 import type { ChatMode } from '../components/chat/ChatModeSwitcher';
 import { API_BASE_URL } from '../services/apiClient';
@@ -181,6 +183,17 @@ export default function ConversationPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [recoveryState, setRecoveryState] = useState<ConversationRecoveryState | null>(
+    'initializing',
+  );
+  const [recoveryReason, setRecoveryReason] = useState<
+    | 'init_failed'
+    | 'stream_recovering'
+    | 'stream_unavailable'
+    | 'send_failed'
+    | 'voice_failed'
+    | undefined
+  >(undefined);
   const [chatMode, setChatMode] = useState<ChatMode>(() => {
     if (typeof window === 'undefined') return 'voice';
     return (localStorage.getItem('chatMode') as ChatMode) || 'voice';
@@ -211,6 +224,74 @@ export default function ConversationPage() {
   const ttsAudioMapRef = useRef<Record<string, string>>({});
   const ttsVoiceRef = useRef(ttsVoice);
   const ttsBaselineRef = useRef(0);
+  const prevChatModeRef = useRef<ChatMode>(chatMode);
+  const streamRecoveryTimerRef = useRef<number | null>(null);
+
+  const clearStreamRecoveryTimer = useCallback(() => {
+    if (streamRecoveryTimerRef.current !== null) {
+      window.clearTimeout(streamRecoveryTimerRef.current);
+      streamRecoveryTimerRef.current = null;
+    }
+  }, []);
+
+  const recoveryMessage = useMemo(() => {
+    if (!recoveryState) {
+      return '';
+    }
+    if (recoveryReason === 'stream_recovering') {
+      return t('streamRecovering');
+    }
+    if (recoveryReason === 'stream_unavailable') {
+      return t('streamError');
+    }
+    if (recoveryReason === 'send_failed') {
+      return t('sendError');
+    }
+    if (recoveryReason === 'voice_failed') {
+      return t('voiceSendError');
+    }
+    if (recoveryReason === 'init_failed') {
+      return t('sessionInitError');
+    }
+    if (recoveryState === 'initializing') {
+      return t('sessionInit');
+    }
+    return t('streamRecovering');
+  }, [recoveryReason, recoveryState, t]);
+
+  const loadOrResumeSession = useCallback(async () => {
+    setIsInitializing(true);
+    setRecoveryState('initializing');
+    setRecoveryReason(undefined);
+    clearStreamRecoveryTimer();
+    const savedConversationId =
+      typeof window !== 'undefined'
+        ? window.localStorage.getItem('activeConversationId')
+        : null;
+    try {
+      const nextSession = await resumeConversation({
+        targetLanguage,
+        nativeLanguage,
+        conversationId: savedConversationId ?? undefined,
+      });
+      toast.dismiss('session-init');
+      toast.dismiss('stream');
+      setSession(nextSession);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('activeConversationId', nextSession.id);
+        trackConversationId(nextSession.id);
+      }
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
+      return nextSession;
+    } catch {
+      setRecoveryState('error');
+      setRecoveryReason('init_failed');
+      throw new Error('SESSION_INIT_FAILED');
+    } finally {
+      setIsInitializing(false);
+    }
+  }, [clearStreamRecoveryTimer, nativeLanguage, targetLanguage]);
 
   const targetLanguageLabels = useMemo(
     () => ({
@@ -266,26 +347,10 @@ export default function ConversationPage() {
 
   useEffect(() => {
     let isMounted = true;
-    setIsInitializing(true);
-
-    const savedConversationId =
-      typeof window !== 'undefined'
-        ? window.localStorage.getItem('activeConversationId')
-        : null;
-
-    resumeConversation({
-      targetLanguage,
-      nativeLanguage,
-      conversationId: savedConversationId ?? undefined,
-    })
-      .then((nextSession) => {
+    loadOrResumeSession()
+      .then(() => {
         if (!isMounted) {
           return;
-        }
-        setSession(nextSession);
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem('activeConversationId', nextSession.id);
-          trackConversationId(nextSession.id);
         }
         // Pre-load history so it's ready when the drawer opens
         void loadHistory();
@@ -295,18 +360,12 @@ export default function ConversationPage() {
           return;
         }
         toast.error(t('sessionInitError'), { id: 'session-init' });
-      })
-      .finally(() => {
-        if (!isMounted) {
-          return;
-        }
-        setIsInitializing(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [nativeLanguage, targetLanguage, t]);
+  }, [loadOrResumeSession, t]);
 
   useEffect(() => {
     if (!session) {
@@ -325,29 +384,112 @@ export default function ConversationPage() {
     lastSessionMessageCountRef.current = nextCount;
   }, [session]);
 
+  const handleRecoveryRetry = useCallback(async () => {
+    clearStreamRecoveryTimer();
+    setRecoveryState('recovering');
+    setRecoveryReason('stream_recovering');
+    try {
+      if (session?.id) {
+        const latest = await fetchConversationById(session.id);
+        setSession(latest);
+      } else {
+        await loadOrResumeSession();
+      }
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
+    } catch {
+      setRecoveryState('error');
+      setRecoveryReason(session?.id ? 'stream_unavailable' : 'init_failed');
+    }
+  }, [clearStreamRecoveryTimer, loadOrResumeSession, session?.id]);
+
   useEffect(() => {
-    if (!session?.id) {
+    if (!session?.id || chatMode === 'immersive') {
+      toast.dismiss('stream');
+      clearStreamRecoveryTimer();
       return;
     }
+    let disposed = false;
     const source = new EventSource(
       `${API_BASE_URL}/conversation/${session.id}/events`,
     );
+    source.onopen = () => {
+      toast.dismiss('stream');
+      clearStreamRecoveryTimer();
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
+    };
     source.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data) as ConversationSession;
+        toast.dismiss('stream');
+        clearStreamRecoveryTimer();
+        setRecoveryState(null);
+        setRecoveryReason(undefined);
         setSession(payload);
       } catch {
         toast.error(t('streamParseError'), { id: 'stream' });
       }
     };
     source.onerror = () => {
+      if (disposed) {
+        return;
+      }
+      if (!navigator.onLine) {
+        toast.error(t('streamError'), { id: 'stream' });
+      }
+      setRecoveryState('recovering');
+      setRecoveryReason('stream_recovering');
+      clearStreamRecoveryTimer();
+      streamRecoveryTimerRef.current = window.setTimeout(() => {
+        setRecoveryState('error');
+        setRecoveryReason('stream_unavailable');
+      }, 12_000);
+    };
+    const handleOnline = () => {
+      toast.dismiss('stream');
+      clearStreamRecoveryTimer();
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
+    };
+    const handleOffline = () => {
       toast.error(t('streamError'), { id: 'stream' });
-      source.close();
+      setRecoveryState('recovering');
+      setRecoveryReason('stream_recovering');
     };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     return () => {
+      disposed = true;
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       source.close();
+      toast.dismiss('stream');
+      clearStreamRecoveryTimer();
     };
-  }, [session?.id, t]);
+  }, [chatMode, clearStreamRecoveryTimer, session?.id, t]);
+
+  useEffect(() => {
+    const prevMode = prevChatModeRef.current;
+    prevChatModeRef.current = chatMode;
+    if (prevMode !== 'immersive' || chatMode === 'immersive' || !session?.id) {
+      return;
+    }
+    let cancelled = false;
+    void fetchConversationById(session.id)
+      .then((latestSession) => {
+        if (cancelled) {
+          return;
+        }
+        setSession(latestSession);
+      })
+      .catch(() => {
+        // Snapshot pull is best-effort; SSE will continue syncing.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [chatMode, session?.id]);
 
   useEffect(() => {
     if (!session?.id) {
@@ -367,6 +509,9 @@ export default function ConversationPage() {
       return;
     }
     if (message.sender !== 'ai') {
+      return;
+    }
+    if (message.meta?.source === 'realtime') {
       return;
     }
     if (message.meta?.audioUrl || ttsAudioMapRef.current[message.id]) {
@@ -392,7 +537,7 @@ export default function ConversationPage() {
   }, [session, t]);
 
   useEffect(() => {
-    if (!session || chatMode !== 'voice') {
+    if (!session || chatMode === 'immersive') {
       return;
     }
     // Only TTS messages added after the baseline (skip messages from immersive session)
@@ -403,6 +548,7 @@ export default function ConversationPage() {
     const pending = candidates.filter(
       (message) =>
         message.sender === 'ai' &&
+        message.meta?.source !== 'realtime' &&
         !message.meta?.audioUrl &&
         !ttsAudioMapRef.current[message.id],
     );
@@ -428,6 +574,7 @@ export default function ConversationPage() {
 
   useEffect(() => {
     return () => {
+      clearStreamRecoveryTimer();
       if (mediaRecorderRef.current?.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
@@ -436,7 +583,7 @@ export default function ConversationPage() {
         URL.revokeObjectURL(voiceDraftUrlRef.current);
       }
     };
-  }, []);
+  }, [clearStreamRecoveryTimer]);
 
   const updateOptimisticVoiceStatus = (statusText: string | null) => {
     setOptimisticMessages((prev) => {
@@ -544,10 +691,14 @@ export default function ConversationPage() {
       );
       setSession(nextSession);
       setOptimisticMessages([]);
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
     } catch {
       toast.error(t('sendError'), { id: 'send' });
       setInputValue(messageText);
       setOptimisticMessages([]);
+      setRecoveryState('error');
+      setRecoveryReason('send_failed');
     } finally {
       setIsSending(false);
     }
@@ -579,12 +730,16 @@ export default function ConversationPage() {
     updateOptimisticVoiceStatus(t('voiceSending'));
     try {
       await uploadConversationVoice(session.id, audio);
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
     } catch {
       updateOptimisticVoiceStatus(t('voiceSendError'));
       setIsSending(false);
       setOptimisticMessages((prev) =>
         prev.filter((message) => !(message.type === 'ai' && message.isLoading)),
       );
+      setRecoveryState('error');
+      setRecoveryReason('voice_failed');
       return;
     }
     updateOptimisticVoiceStatus(t('voiceWaiting'));
@@ -679,11 +834,6 @@ export default function ConversationPage() {
 
   const messageList = (
     <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-      {isInitializing && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 glass-card px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
-          {t('sessionInit')}
-        </div>
-      )}
       <AnimatePresence>
         {mergedMessages.map((message) => (
           <motion.div
@@ -735,10 +885,12 @@ export default function ConversationPage() {
         voice={ttsVoice}
         onVoiceChange={setTtsVoice}
         onExit={() => {
-          // Block ALL TTS until user sends a new message in voice mode.
-          // Immersive transcript saves are async — using message count would
-          // still allow TTS for messages that arrive via SSE after exit.
-          ttsBaselineRef.current = Number.MAX_SAFE_INTEGER;
+          // Skip existing messages but allow new incoming AI messages after exit.
+          ttsBaselineRef.current = session.messages.length;
+          setChatMode('voice');
+        }}
+        onFallbackToText={() => {
+          ttsBaselineRef.current = session.messages.length;
           setChatMode('voice');
         }}
       />
@@ -860,6 +1012,16 @@ export default function ConversationPage() {
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {recoveryState && recoveryMessage && (
+          <ConversationRecoveryBanner
+            state={recoveryState}
+            message={recoveryMessage}
+            onRetry={handleRecoveryRetry}
+          />
+        )}
+      </AnimatePresence>
 
       {messageList}
       {inputArea}

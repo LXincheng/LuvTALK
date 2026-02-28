@@ -268,6 +268,90 @@
 - **沉浸模式 UI v3**：
   - ImmersiveMode：纯黑背景（`#000`），去掉渐变和环境光晕层，X 关闭按钮替代返回箭头，更极简的布局。
   - AudioOrb：缩小尺寸（w-28/h-28 → w-36/h-36），新增 ambient glow 层（blur-3xl），AI 说话时切换为更亮的紫色光晕（rgba(168,130,255)），去掉多余的外环和内环。
-  - TranscriptSubtitles：居中对齐布局，去掉左右对齐和背景色，用户消息 white/40、AI 消息 white/80，更简洁的字幕风格。
-  - ImmersiveControls：去掉外层容器，按钮改为固定尺寸（w-12/h-12，结束按钮 w-14/h-14），静音状态用 red-500/20 背景 + red-400 图标。
-  - CSS：orbPulse 动画改用蓝紫色调（rgba(120,100,255)），周期延长至 3s，增加 scale 变化；移除未使用的 `immersive-bg` 类。
+- TranscriptSubtitles：居中对齐布局，去掉左右对齐和背景色，用户消息 white/40、AI 消息 white/80，更简洁的字幕风格。
+- ImmersiveControls：去掉外层容器，按钮改为固定尺寸（w-12/h-12，结束按钮 w-14/h-14），静音状态用 red-500/20 背景 + red-400 图标。
+- CSS：orbPulse 动画改用蓝紫色调（rgba(120,100,255)），周期延长至 3s，增加 scale 变化；移除未使用的 `immersive-bg` 类。
+
+### 2026-02-28（下一阶段开发计划）
+
+- 新增 `docs/plan.md`，沉淀下一阶段统一执行路线图，围绕 **稳定性、易用性、趣味性、学习效果** 四个维度给出 90 天目标和 KPI。
+- 在计划中明确 P0/P1/P2 需求分层、4 个 Sprint 里程碑、可验收标准与近期两周可直接开工的任务清单。
+- 增加文档维护约定：里程碑勾选、日志同步、环境变量变更同步 `.env.example`，用于约束后续协作流程。
+
+### 2026-02-28（P0 开工：Realtime 错误码与恢复链路）
+
+- 后端：新增 `realtime-error.types.ts`，定义统一 `server.error` 协议（`BAD_REQUEST / PERMISSION_DENIED / RATE_LIMITED / SERVICE_UNAVAILABLE / UPSTREAM_ERROR / INTERNAL_ERROR`）。
+- 后端：`realtime.ws.ts` 中连接前置校验、频控、上游关闭/异常、客户端异常均改为“先发送结构化错误，再关闭连接”，便于前端精确感知错误原因。
+- 前端：`useRealtimeSession` 增加服务端错误码解析与映射，新增 `RATE_LIMITED / SERVICE_UNAVAILABLE / INVALID_REQUEST` 客户端错误类型；通过 ref + state 同步写入，修复 `server.error` 与 `onclose` 竞态覆盖问题。
+- 前端：沉浸模式错误提示升级为玻璃态 pill，错误态新增“切换到文字模式”按钮，连接不可恢复错误时不再显示误导性的重连按钮。
+- i18n：新增中英文错误文案（限流、服务不可用、参数无效）及回退文案，保持双语体验一致。
+
+### 2026-02-28（P0 继续：Realtime 可观测埋点）
+
+- 后端：新增 `RealtimeMetricsService`（内存指标聚合），覆盖连接接入数、连接成功数、失败数、疑似重连次数、连接耗时（avg/min/max/count）、transcript 保存成功/失败计数。
+- 后端：`RealtimeWsProxy` 接入指标埋点，记录关键失败错误码与 WebSocket close code 分布，并保留最近失败事件列表（含是否可重试）。
+- 后端：新增 `GET /api/realtime/metrics` 查询接口，支持开发与运维快速查看实时链路健康度（无需改动数据库）。
+- 文档：`docs/plan.md` 勾选完成“WS/REST 关键埋点接入（成功率、耗时、错误）”。
+
+### 2026-02-28（回归修复：沉浸模式无回复 / Toast 残留 / TTS 不触发）
+
+- 后端 Realtime 会话配置修复：`buildSessionUpdate()` 改为使用 `transcribeModel`（默认 `gpt-4o-mini-transcribe`），不再硬编码 `whisper-1`；同时显式开启 `turn_detection.create_response=true` 与 `interrupt_response=true`，避免“有收音无回复”。
+- 后端 WS 关闭码修复：上游异常关闭返回 `1006` 时不再透传给 `client.close(1006)`（保留码），统一映射为可发送的 `1011`，避免客户端状态异常。
+- 前端 Realtime 兜底触发：新增 `speech_stopped -> 延迟检测 -> response.create` 兜底机制（若短时间内无 AI 输出），缓解上游 VAD 偶发未触发回复的问题。
+- 前端 Toast 刷新修复：`Toaster` 增加默认 `duration`，并在会话/SSE 恢复后主动 `toast.dismiss` 对应错误提示，避免顶部错误提示长期停留。
+- 前端 TTS 触发修复：TTS 自动合成从“仅 voice 模式”调整为“非 immersive 模式均可触发”；退出沉浸模式时 baseline 由 `MAX_SAFE_INTEGER` 改为当前消息长度，确保后续新增文本回复可正常生成导师语音。
+
+### 2026-02-28（沉浸模式回归修复收尾：转写完整性 / TTS 复用 / 状态同步 / UI）
+
+- 前端转写完整性：`useRealtimeSession` 扩展事件覆盖（`conversation.item.completed`、`response.output_item.done`），并增强 transcript 提取器，支持 `payload/item/content/formatted` 多种字段结构，修复“用户有收音但无文本回显”的漏识别路径。
+- 前端字幕可读性：沉浸字幕升级为左右分栏玻璃气泡（用户在右、导师在左），用户文本不再低对比隐藏，草稿态保留动态光标，减少“只有导师有 transcript”的感知误差。
+- 前端状态同步：聊天页 SSE `onerror` 不再主动 `close()`，恢复浏览器原生重连；新增 `online/offline` 事件联动 `toast.dismiss/error`，并在模式切换和卸载时清理 `stream` toast，避免网络错误提示长期滞留。
+- 沉浸模式提示生命周期：`immersive-status` toast 增加组件卸载清理，消除退出沉浸后残留错误提示。
+- 后端 TTS 复用增强：`VoiceTutorService` 复用同会话同文本同音色的历史音频时，新增文件存在性校验（`access`），命中脏链接时自动回退到新合成，避免前端拿到失效音频 URL。
+- 沉浸模式 UI 收尾：控制区改为统一玻璃容器（圆角、边框、阴影、自适应尺寸），按钮状态层级更清晰；底部字幕卡片限制最大宽度并移动端自适应，整体视觉更简约一致。
+
+### 2026-02-28（沉浸模式连接崩溃兜底：上游握手 400）
+
+- 复现确认：沉浸模式断连并非前端链路本身，后端直连上游 Realtime 握手返回 `400 Bad Request`，响应体包含 `type=new_api_panic`（上游网关异常），会导致连接阶段直接失败。
+- 后端：`realtime.ws.ts` 新增 `upstream.unexpected-response` 处理，读取并记录响应体摘要（status + body 片段），不再只看到 `Unexpected server response: 400` 的黑盒日志。
+- 后端：握手被拒绝时统一下发 `server.error(SERVICE_UNAVAILABLE, retriable=false)` 并停止同一连接重复 close/error 处理，避免前端误判和重试风暴。
+- 前端：Realtime 限流(`1013`)改为自动走重连分支；`REALTIME_RECONNECT_DELAY_MS` 从 `800ms` 调整到 `1800ms`，显式超过服务端 `1500ms` cooldown，减少“刚重连就再被限流”的失败循环。
+- 前端：沉浸失败回退按钮文案改为“切换到语音模式”，并直接回退到 `voice` 模式，保证在上游 Realtime 不可用时仍可继续语音学习对话。
+
+### 2026-02-28（沉浸模式连接体验增强：加载态 + 超时重连 + 延迟报错）
+
+- 前端连接策略调整：Realtime 从“首次失败立即报错”改为“连接超时后自动重连、达到阈值才报错”。
+- 新增连接超时控制：`REALTIME_CONNECT_TIMEOUT_MS=10000`，10 秒未完成握手自动关闭当前 socket 并进入重连流程，避免长时间卡死在假连接。
+- 重连策略升级：`REALTIME_RECONNECT_MAX_ATTEMPTS` 从 `1` 提升到 `4`，并使用退避延迟（`1.8s * attempt`，上限 8s），减少瞬时故障导致的误报。
+- 限流处理优化：`1013` 不再立即 error 结束，优先自动重连（延迟超过服务端 cooldown），仅在重试耗尽后展示错误。
+- 上游业务错误降噪：对 `response_cancel_not_active`、`conversation_already_has_active_response` 不再映射为网络错误 toast，避免“可正常使用时仍显示网络错误”。
+
+### 2026-02-28（P0 子模块完成：沉浸模式失败恢复 UI 标准化）
+
+- 新增连接恢复元数据：`useRealtimeSession` 输出 `reconnectAttempt`、`reconnectMaxAttempts`、`nextRetryAt`，让 UI 可展示明确的恢复过程，而不是只显示“网络错误”。
+- 新增组件：`ImmersiveConnectionStatus`（玻璃态），统一展示连接中/重连中状态、当前重试轮次、下一次重试倒计时，弱化“立即失败”的负反馈。
+- 重连体验升级：连接成功后自动清空重连元数据；重试耗尽后才落最终错误，保证“先恢复、后报错”的交互节奏。
+- 文本同步修复：退出沉浸模式立即 `fetchConversationById` 拉取会话快照，避免必须切换 tab 才看到最新文本。
+
+#### 反思（本轮）
+
+- 失败提示不能只基于单个 `onerror` 事件：实时链路天然抖动，需要“状态机 + 退避 + 可视化恢复”一体化设计。
+- 业务级 realtime error 与网络 error 必须分离：`response_cancel_not_active` 这类提示不应污染网络状态，否则会误导用户与排障方向。
+- 可维护性关键在于“UI 不推断底层细节”：连接/重连指标由 Hook 统一提供，组件只做展示，后续扩展（更多模式复用）成本更低。
+
+### 2026-02-28（P0 完整推进：恢复 UI 标准化 + 状态机边界收敛 + 关键路径测试）
+
+- `P0-1 失败恢复 UI 标准化（语音/文字模式）`
+  - 新增 `ConversationRecoveryBanner` 组件，统一展示 `initializing / recovering / error` 三态，并提供可操作 `Retry` CTA。
+  - `ConversationPage` 接入统一恢复状态：会话初始化、SSE 断流恢复、发送失败、语音上传失败均归一到同一状态层，不再仅依赖离散 toast。
+  - SSE 恢复流程增加 12s 升级策略：先显示“自动恢复中”，超时后再进入“可重试错误态”，降低误报与焦虑感。
+
+- `P0-2 状态机边界收敛（Realtime）`
+  - `useRealtimeSession` 增加 `responseInFlight` 门控：仅在存在活跃响应时发送 `response.cancel`，避免无效 cancel 请求污染日志。
+  - `response.create` 发送增加并发保护（仅在 `!responseInFlight` 下触发），并对 `response_cancel_not_active`、`conversation_already_has_active_response` 做业务级降噪，不再映射为网络错误。
+  - 重连元数据标准化输出：`reconnectAttempt / reconnectMaxAttempts / nextRetryAt`，沉浸模式可展示“第几次重连 + 倒计时”。
+
+- `P0-3 Realtime 关键路径测试`
+  - 新增 `realtime.ws.helpers.ts`，将 WS 关键状态映射逻辑抽离为可测试纯函数（提升可维护性）。
+  - 新增 `realtime.ws.helpers.spec.ts`，覆盖 9 条关键路径：session.update 构造、transcribe 模型回退、close code 映射、保留 close code 安全转换。
+  - 测试通过：`pnpm --filter server test --runInBand`（9/9 passed）。

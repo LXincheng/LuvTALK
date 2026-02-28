@@ -18,7 +18,7 @@
     ],
     "incremental": true,
     "skipLibCheck": true,
-    "types": ["node", "undici-types"],
+    "types": ["node", "undici-types", "jest"],
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,

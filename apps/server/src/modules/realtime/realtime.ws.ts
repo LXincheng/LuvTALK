@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import type { IncomingMessage, Server as HttpServer } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import type { RawData } from "ws";
@@ -13,6 +13,17 @@ import {
   REALTIME_SESSION_LIMITS,
   REALTIME_WS_COOLDOWN_MS,
 } from "./realtime.constants";
+import {
+  REALTIME_SERVER_ERROR_CODES,
+  RealtimeServerErrorCode,
+  RealtimeServerErrorPayload,
+} from "./realtime-error.types";
+import { RealtimeMetricsService } from "./realtime-metrics.service";
+import {
+  buildSessionUpdate,
+  mapCloseCodeToErrorCode,
+  resolveSafeCloseCode,
+} from "./realtime.ws.helpers";
 
 type ClientEvent =
   | "input_audio_buffer.append"
@@ -34,6 +45,7 @@ const CLIENT_EVENT_ALLOWLIST = new Set<ClientEvent>([
 ]);
 
 const MAX_AUDIO_BASE64_LENGTH = 512 * 1024;
+const RECONNECT_WINDOW_MS = 20_000;
 
 @Injectable()
 export class RealtimeWsProxy {
@@ -44,6 +56,7 @@ export class RealtimeWsProxy {
   constructor(
     private readonly conversationService: ConversationService,
     private readonly authService: AuthService,
+    private readonly realtimeMetrics: RealtimeMetricsService,
   ) {}
 
   attach(server: HttpServer) {
@@ -64,11 +77,20 @@ export class RealtimeWsProxy {
     client: WebSocket,
     req: IncomingMessage,
   ): Promise<void> {
+    const wsAcceptedAt = Date.now();
+    this.realtimeMetrics.recordConnectionAccepted();
+
     try {
       const url = new URL(req.url ?? "", "http://localhost");
       const conversationId = url.searchParams.get("conversationId") ?? "";
       if (!conversationId) {
-        client.close(1008, "conversationId required");
+        this.closeWithMetric({
+          client,
+          wsCode: 1008,
+          code: REALTIME_SERVER_ERROR_CODES.BAD_REQUEST,
+          message: "conversationId required",
+          retriable: false,
+        });
         return;
       }
 
@@ -80,7 +102,13 @@ export class RealtimeWsProxy {
 
       const session = await this.conversationService.getSession(conversationId);
       if (session.userId && (!profile || session.userId !== profile.id)) {
-        client.close(1008, "Conversation not found");
+        this.closeWithMetric({
+          client,
+          wsCode: 1008,
+          code: REALTIME_SERVER_ERROR_CODES.PERMISSION_DENIED,
+          message: "Conversation not found",
+          retriable: false,
+        });
         return;
       }
       if (!session.userId && profile) {
@@ -94,15 +122,30 @@ export class RealtimeWsProxy {
       const now = Date.now();
       const last = this.cooldown.get(cooldownKey);
       if (last && now - last < REALTIME_WS_COOLDOWN_MS) {
-        client.close(1013, "Too many connections");
+        this.closeWithMetric({
+          client,
+          wsCode: 1013,
+          code: REALTIME_SERVER_ERROR_CODES.RATE_LIMITED,
+          message: "Too many connections",
+          retriable: true,
+        });
         return;
+      }
+      if (last && now - last <= RECONNECT_WINDOW_MS) {
+        this.realtimeMetrics.recordReconnectAttempt();
       }
       this.cooldown.set(cooldownKey, now);
 
       const { apiKey, realtimeApiUrl, realtimeModel, transcribeModel } =
         envConfig.openai;
       if (!apiKey || !realtimeApiUrl || !realtimeModel) {
-        client.close(1011, "Realtime service unavailable");
+        this.closeWithMetric({
+          client,
+          wsCode: 1011,
+          code: REALTIME_SERVER_ERROR_CODES.SERVICE_UNAVAILABLE,
+          message: "Realtime service unavailable",
+          retriable: true,
+        });
         return;
       }
 
@@ -121,6 +164,7 @@ export class RealtimeWsProxy {
           "OpenAI-Beta": "realtime=v1",
         },
       });
+      let upstreamTerminalHandled = false;
 
       let currentVoice =
         (requestedVoice?.trim() || REALTIME_DEFAULT_VOICE) ??
@@ -130,16 +174,10 @@ export class RealtimeWsProxy {
         ? REALTIME_SESSION_LIMITS.authSeconds
         : REALTIME_SESSION_LIMITS.guestSeconds;
 
-      const closeAll = (code = 1000, reason?: string) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.close(code, reason);
-        }
-        if (upstream.readyState === WebSocket.OPEN) {
-          upstream.close(code, reason);
-        }
-      };
-
       upstream.on("open", () => {
+        this.realtimeMetrics.recordConnectionEstablished(
+          Date.now() - wsAcceptedAt,
+        );
         this.logger.log("Realtime upstream connected");
         const update = buildSessionUpdate({
           instructions: prompt,
@@ -183,18 +221,93 @@ export class RealtimeWsProxy {
         client.send(text);
       });
 
+      upstream.on("unexpected-response", (_request, response) => {
+        void safeReadResponseBody(response)
+          .then((body) => {
+            const detail = [
+              `status=${response.statusCode ?? "unknown"}`,
+              body ? `body=${body.slice(0, 220)}` : "",
+            ]
+              .filter(Boolean)
+              .join(" | ");
+            this.logger.warn(
+              `Realtime upstream unexpected response: ${detail || "unknown"}`,
+            );
+            if (upstreamTerminalHandled) {
+              return;
+            }
+            upstreamTerminalHandled = true;
+            this.closeWithMetric({
+              client,
+              wsCode: 1011,
+              code: REALTIME_SERVER_ERROR_CODES.SERVICE_UNAVAILABLE,
+              message: "Realtime upstream rejected connection",
+              retriable: false,
+              detail,
+            });
+          })
+          .catch(() => {
+            if (upstreamTerminalHandled) {
+              return;
+            }
+            upstreamTerminalHandled = true;
+            this.closeWithMetric({
+              client,
+              wsCode: 1011,
+              code: REALTIME_SERVER_ERROR_CODES.SERVICE_UNAVAILABLE,
+              message: "Realtime upstream rejected connection",
+              retriable: false,
+            });
+          });
+      });
+
       upstream.on("close", (code, reason) => {
+        if (upstreamTerminalHandled) {
+          return;
+        }
+        upstreamTerminalHandled = true;
+        this.realtimeMetrics.recordWsClosed(code);
         this.logger.warn(
           `Realtime upstream closed (${code}): ${reason.toString()}`,
         );
+        if (code !== 1000) {
+          const mapped = mapCloseCodeToErrorCode(code);
+          this.realtimeMetrics.recordConnectionFailure({
+            errorCode: mapped.code,
+            wsCode: code,
+            retriable: mapped.retriable,
+            message: reason.toString() || mapped.message,
+          });
+        }
         if (client.readyState === WebSocket.OPEN) {
-          client.close(code, reason.toString());
+          const mapped = mapCloseCodeToErrorCode(code);
+          if (code !== 1000) {
+            sendServerError(client, {
+              code: mapped.code,
+              message: mapped.message,
+              retriable: mapped.retriable,
+              detail: reason.toString(),
+            });
+          }
+          client.close(resolveSafeCloseCode(code), reason.toString());
         }
       });
 
       upstream.on("error", (error) => {
+        if (upstreamTerminalHandled) {
+          return;
+        }
+        upstreamTerminalHandled = true;
         this.logger.warn(`Realtime upstream error: ${(error as Error).message}`);
-        closeAll(1011, "Realtime upstream error");
+        this.closeWithMetric({
+          client,
+          upstream,
+          wsCode: 1011,
+          code: REALTIME_SERVER_ERROR_CODES.UPSTREAM_ERROR,
+          message: "Realtime upstream error",
+          retriable: true,
+          detail: (error as Error).message,
+        });
       });
 
       client.on("message", (data) => {
@@ -243,7 +356,8 @@ export class RealtimeWsProxy {
         upstream.send(JSON.stringify(payload));
       });
 
-      client.on("close", () => {
+      client.on("close", (code) => {
+        this.realtimeMetrics.recordWsClosed(code);
         if (upstream.readyState === WebSocket.OPEN) {
           upstream.close(1000, "Client disconnected");
         }
@@ -251,16 +365,51 @@ export class RealtimeWsProxy {
 
       client.on("error", (error) => {
         this.logger.warn(`Realtime client error: ${(error as Error).message}`);
-        closeAll(1011, "Realtime client error");
+        this.closeWithMetric({
+          client,
+          upstream,
+          wsCode: 1011,
+          code: REALTIME_SERVER_ERROR_CODES.INTERNAL_ERROR,
+          message: "Realtime client error",
+          retriable: true,
+          detail: (error as Error).message,
+        });
       });
     } catch (error) {
-      this.logger.warn(
-        `Realtime WS connection failed: ${(error as Error).message}`,
-      );
-      if (client.readyState === WebSocket.OPEN) {
-        client.close(1011, "Realtime connection failed");
-      }
+      const detail = (error as Error).message;
+      this.logger.warn(`Realtime WS connection failed: ${detail}`);
+      const isNotFound = error instanceof NotFoundException;
+      this.closeWithMetric({
+        client,
+        wsCode: isNotFound ? 1008 : 1011,
+        code: isNotFound
+          ? REALTIME_SERVER_ERROR_CODES.PERMISSION_DENIED
+          : REALTIME_SERVER_ERROR_CODES.INTERNAL_ERROR,
+        message: isNotFound
+          ? "Conversation not found"
+          : "Realtime connection failed",
+        retriable: !isNotFound,
+        detail,
+      });
     }
+  }
+
+  private closeWithMetric(params: {
+    client: WebSocket;
+    upstream?: WebSocket;
+    wsCode: number;
+    code: RealtimeServerErrorCode;
+    message: string;
+    retriable: boolean;
+    detail?: string;
+  }) {
+    this.realtimeMetrics.recordConnectionFailure({
+      errorCode: params.code,
+      wsCode: params.wsCode,
+      retriable: params.retriable,
+      message: params.detail || params.message,
+    });
+    closeWithServerError(params);
   }
 
   private async resolveProfile(
@@ -298,30 +447,6 @@ const resolveRealtimeWsUrl = (base: string, model: string): string => {
   return `${wsUrl}${joiner}model=${encodeURIComponent(model)}`;
 };
 
-const buildSessionUpdate = (params: {
-  instructions: string;
-  voice: string;
-  turnDetection: typeof REALTIME_DEFAULT_TURN_DETECTION;
-  transcribeModel?: string;
-}) => {
-  return {
-    type: "session.update",
-    session: {
-      instructions: params.instructions,
-      voice: params.voice,
-      turn_detection: params.turnDetection,
-      input_audio_format: "pcm16",
-      output_audio_format: "pcm16",
-      input_audio_transcription: {
-        // Realtime API only supports whisper-1 for input transcription.
-        // The transcribeModel env var is for the regular audio API.
-        model: "whisper-1",
-      },
-      modalities: ["audio", "text"],
-    },
-  };
-};
-
 const resolveVoice = (session?: unknown): string | undefined => {
   if (!session || typeof session !== "object") {
     return undefined;
@@ -332,6 +457,44 @@ const resolveVoice = (session?: unknown): string | undefined => {
 
 const resolveAudioPayload = (audio?: unknown): string | undefined => {
   return typeof audio === "string" && audio.trim() ? audio.trim() : undefined;
+};
+
+const sendServerError = (
+  client: WebSocket,
+  payload: Omit<RealtimeServerErrorPayload, "type">,
+) => {
+  if (client.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  client.send(
+    JSON.stringify({
+      type: "server.error",
+      ...payload,
+    }),
+  );
+};
+
+const closeWithServerError = (params: {
+  client: WebSocket;
+  upstream?: WebSocket;
+  wsCode: number;
+  code: RealtimeServerErrorCode;
+  message: string;
+  retriable: boolean;
+  detail?: string;
+}) => {
+  sendServerError(params.client, {
+    code: params.code,
+    message: params.message,
+    retriable: params.retriable,
+    detail: params.detail,
+  });
+  if (params.client.readyState === WebSocket.OPEN) {
+    params.client.close(params.wsCode, params.message);
+  }
+  if (params.upstream && params.upstream.readyState === WebSocket.OPEN) {
+    params.upstream.close(params.wsCode, params.message);
+  }
 };
 
 const safeParseJson = (value: string): Record<string, unknown> | null => {
@@ -353,4 +516,25 @@ const toTextMessage = (data: RawData): string | null => {
     return Buffer.concat(data).toString("utf8");
   }
   return null;
+};
+
+const safeReadResponseBody = async (
+  response: IncomingMessage,
+): Promise<string> => {
+  const chunks: Buffer[] = [];
+  return new Promise((resolve) => {
+    response.on("data", (chunk) => {
+      if (typeof chunk === "string") {
+        chunks.push(Buffer.from(chunk, "utf8"));
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    response.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    response.on("error", () => {
+      resolve("");
+    });
+  });
 };

@@ -18,6 +18,7 @@ import {
   REALTIME_SESSION_LIMITS,
   REALTIME_OFFER_COOLDOWN_MS,
 } from "./realtime.constants";
+import { RealtimeMetricsService } from "./realtime-metrics.service";
 
 export interface RealtimeSessionConfig {
   apiUrl: string;
@@ -51,7 +52,10 @@ export class RealtimeService {
   private readonly logger = new Logger(RealtimeService.name);
   private readonly offerCooldown = new Map<string, number>();
 
-  constructor(private readonly conversationService: ConversationService) {}
+  constructor(
+    private readonly conversationService: ConversationService,
+    private readonly realtimeMetrics: RealtimeMetricsService,
+  ) {}
 
   async createOffer(
     dto: CreateRealtimeOfferDto,
@@ -147,6 +151,7 @@ export class RealtimeService {
     userId?: string,
   ): Promise<{ saved: number }> {
     if (!dto.messages?.length) {
+      this.realtimeMetrics.recordTranscriptSaved(0);
       return { saved: 0 };
     }
     const cleaned: RealtimeTranscriptEntry[] = dto.messages
@@ -158,15 +163,21 @@ export class RealtimeService {
       .filter((entry) => entry.text);
 
     if (!cleaned.length) {
+      this.realtimeMetrics.recordTranscriptSaved(0);
       return { saved: 0 };
     }
-
-    const saved = await this.conversationService.appendRealtimeTranscript(
-      dto.conversationId,
-      cleaned,
-      userId,
-    );
-    return { saved };
+    try {
+      const saved = await this.conversationService.appendRealtimeTranscript(
+        dto.conversationId,
+        cleaned,
+        userId,
+      );
+      this.realtimeMetrics.recordTranscriptSaved(saved);
+      return { saved };
+    } catch (error) {
+      this.realtimeMetrics.recordTranscriptSaveFailure();
+      throw error;
+    }
   }
 }
 

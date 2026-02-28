@@ -40,32 +40,37 @@ export default function TranscriptSubtitles({
   if (!draftEntries.length) return null;
 
   return (
-    <div className="w-full max-w-sm mx-auto space-y-2.5">
+    <div className="w-full max-w-xl mx-auto space-y-2.5">
       <AnimatePresence mode="popLayout">
-        {draftEntries.map((entry) => (
-          <motion.div
-            key={entry.draft ? `${entry.role}-draft` : `${entry.role}-${entry.timestamp}`}
-            layout
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-            className="text-center"
-          >
-            <span
-              className={`inline-block text-[13px] leading-relaxed ${
-                entry.role === 'user'
-                  ? 'text-white/40'
-                  : 'text-white/80'
-              }`}
+        {draftEntries.map((entry) => {
+          const isUser = entry.role === 'user';
+          return (
+            <motion.div
+              key={entry.draft ? `${entry.role}-draft` : `${entry.role}-${entry.timestamp}`}
+              layout
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
+              className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
             >
-              {entry.text}
-              {entry.draft && (
-                <span className="inline-block w-[2px] h-3 ml-1 align-middle bg-white/30 animate-pulse rounded-full" />
-              )}
-            </span>
-          </motion.div>
-        ))}
+              <div
+                className={`max-w-[92%] rounded-2xl border px-3 py-2 backdrop-blur-2xl ${
+                  isUser
+                    ? 'bg-white/[0.08] border-white/[0.16] text-white/90'
+                    : 'bg-cyan-300/[0.10] border-cyan-200/[0.22] text-white'
+                }`}
+              >
+                <p className="text-[13px] leading-relaxed break-words">
+                  {entry.text}
+                  {entry.draft && (
+                    <span className="inline-block w-[2px] h-3 ml-1 align-middle bg-white/45 animate-pulse rounded-full" />
+                  )}
+                </p>
+              </div>
+            </motion.div>
+          );
+        })}
       </AnimatePresence>
     </div>
   );

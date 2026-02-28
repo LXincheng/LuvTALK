@@ -19,6 +19,7 @@ createRoot(document.getElementById('root')!).render(
               position="top-center"
               visibleToasts={2}
               toastOptions={{
+                duration: 3500,
                 style: {
                   background: 'rgba(15, 15, 25, 0.9)',
                   border: '1px solid rgba(255,255,255,0.08)',

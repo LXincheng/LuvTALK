@@ -25,6 +25,8 @@ export interface ConversationMessage {
     grammarTip?: string;
     translation?: string;
     audioUrl?: string;
+    ttsVoice?: string;
+    source?: 'default' | 'realtime';
     keyTerms?: KeyTerm[];
   };
 }

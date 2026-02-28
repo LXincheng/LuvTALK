@@ -4,6 +4,7 @@ import {
   REALTIME_AI_SPEAKING_TIMEOUT_MS,
   REALTIME_AUDIO_BUFFER_SIZE,
   REALTIME_AUDIO_SAMPLE_RATE,
+  REALTIME_CONNECT_TIMEOUT_MS,
   REALTIME_LOCK_PREFIX,
   REALTIME_RECONNECT_DELAY_MS,
   REALTIME_RECONNECT_MAX_ATTEMPTS,
@@ -14,7 +15,11 @@ import {
 import { getAccessToken } from '../services/authService';
 import { API_BASE_URL } from '../services/apiClient';
 import { saveRealtimeTranscript } from '../services/realtimeService';
-import type { RealtimeErrorCode, RealtimeTranscriptEntry } from '../types/realtime';
+import type {
+  RealtimeErrorCode,
+  RealtimeServerErrorCode,
+  RealtimeTranscriptEntry,
+} from '../types/realtime';
 
 export type RealtimeStatus =
   | 'idle'
@@ -38,6 +43,8 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
   const [fullTranscript, setFullTranscript] = useState<RealtimeTranscriptEntry[]>([]);
   const [audioLevel, setAudioLevel] = useState(0);
   const [lastError, setLastError] = useState<RealtimeErrorCode | undefined>();
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [nextRetryAt, setNextRetryAt] = useState<number | undefined>(undefined);
 
   const statusRef = useRef<RealtimeStatus>('idle');
   const socketRef = useRef<WebSocket | null>(null);
@@ -62,13 +69,30 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
   const lastTranscriptUiUpdateRef = useRef(0);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const aiSpeakingTimerRef = useRef<number | null>(null);
+  const manualResponseTimerRef = useRef<number | null>(null);
   const maxSessionTimerRef = useRef<number | null>(null);
   const visibilityTimerRef = useRef<number | null>(null);
+  const connectTimeoutTimerRef = useRef<number | null>(null);
   const closingRef = useRef(false);
   const isMutedRef = useRef(false);
   const isAiSpeakingRef = useRef(false);
+  const lastErrorRef = useRef<RealtimeErrorCode | undefined>(undefined);
   const voiceRef = useRef<string | undefined>(voice);
   const sessionReadyRef = useRef(false);
+  const sessionTokenRef = useRef(0);
+  const responseInFlightRef = useRef(false);
+  const reconnectErrorRef = useRef<RealtimeErrorCode>('CONNECT_FAILED');
+  const lastCommittedRef = useRef({
+    user: { text: '', at: 0 },
+    ai: { text: '', at: 0 },
+  });
+  const applyRealtimeError = useCallback(
+    (error: RealtimeErrorCode | undefined) => {
+      lastErrorRef.current = error;
+      setLastError(error);
+    },
+    [],
+  );
 
   const resetSessionState = useCallback(() => {
     setStatus('idle');
@@ -78,7 +102,9 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     setAiTranscript('');
     setFullTranscript([]);
     setAudioLevel(0);
-    setLastError(undefined);
+    applyRealtimeError(undefined);
+    setReconnectAttempt(0);
+    setNextRetryAt(undefined);
     aiTranscriptRef.current = '';
     userTranscriptRef.current = '';
     fullTranscriptRef.current = [];
@@ -86,13 +112,21 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     reconnectingRef.current = false;
     outputTimeRef.current = 0;
     sessionReadyRef.current = false;
-  }, []);
+    responseInFlightRef.current = false;
+    reconnectErrorRef.current = 'CONNECT_FAILED';
+    lastCommittedRef.current = {
+      user: { text: '', at: 0 },
+      ai: { text: '', at: 0 },
+    };
+  }, [applyRealtimeError]);
 
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
 
   useEffect(() => {
+    sessionTokenRef.current += 1;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- must reset local session state when conversation changes
     resetSessionState();
     releaseLock(lockKey, lockIdRef.current);
   }, [conversationId, lockKey, resetSessionState]);
@@ -140,10 +174,10 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
           });
         })
         .catch(() => {
-          setLastError('SAVE_FAILED');
+          applyRealtimeError('SAVE_FAILED');
         });
     },
-    [conversationId],
+    [applyRealtimeError, conversationId],
   );
 
   const commitTranscript = useCallback(
@@ -152,6 +186,15 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       if (!normalized) {
         return;
       }
+      const now = Date.now();
+      const prev = lastCommittedRef.current[role];
+      if (prev.text === normalized && now - prev.at < 3000) {
+        return;
+      }
+      lastCommittedRef.current[role] = {
+        text: normalized,
+        at: now,
+      };
       const entry: RealtimeTranscriptEntry = {
         role,
         text: normalized,
@@ -199,6 +242,13 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     }
   }, []);
 
+  const clearManualResponseTimer = useCallback(() => {
+    if (manualResponseTimerRef.current !== null) {
+      window.clearTimeout(manualResponseTimerRef.current);
+      manualResponseTimerRef.current = null;
+    }
+  }, []);
+
   /** Stop all scheduled AI audio immediately (used on user interruption). */
   const flushOutputAudio = useCallback(() => {
     if (outputContextRef.current) {
@@ -207,21 +257,26 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     }
     outputTimeRef.current = 0;
     clearAiSpeakingTimer();
+    clearManualResponseTimer();
     setIsAiSpeaking(false);
-  }, [clearAiSpeakingTimer]);
+  }, [clearAiSpeakingTimer, clearManualResponseTimer]);
 
   const schedulePlaybackEndCheck = useCallback(() => {
-    const outCtx = outputContextRef.current;
-    const outEnd = outputTimeRef.current;
-    if (outCtx && outEnd > outCtx.currentTime + 0.2) {
-      // Audio still playing — recheck after remaining duration + buffer
-      const remainMs = (outEnd - outCtx.currentTime) * 1000 + 150;
-      aiSpeakingTimerRef.current = window.setTimeout(() => {
-        schedulePlaybackEndCheck();
-      }, Math.min(remainMs, 2000));
-      return;
-    }
-    setIsAiSpeaking(false);
+    const checkPlaybackEnd = () => {
+      const outCtx = outputContextRef.current;
+      const outEnd = outputTimeRef.current;
+      if (outCtx && outEnd > outCtx.currentTime + 0.2) {
+        // Audio still playing — recheck after remaining duration + buffer
+        const remainMs = (outEnd - outCtx.currentTime) * 1000 + 150;
+        aiSpeakingTimerRef.current = window.setTimeout(
+          checkPlaybackEnd,
+          Math.min(remainMs, 2000),
+        );
+        return;
+      }
+      setIsAiSpeaking(false);
+    };
+    checkPlaybackEnd();
   }, []);
 
   const cleanupConnection = useCallback(() => {
@@ -229,9 +284,14 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     socketRef.current = null;
     stopAudioPipeline();
     clearAiSpeakingTimer();
+    clearManualResponseTimer();
     if (maxSessionTimerRef.current !== null) {
       window.clearTimeout(maxSessionTimerRef.current);
       maxSessionTimerRef.current = null;
+    }
+    if (connectTimeoutTimerRef.current !== null) {
+      window.clearTimeout(connectTimeoutTimerRef.current);
+      connectTimeoutTimerRef.current = null;
     }
     if (visibilityTimerRef.current !== null) {
       window.clearTimeout(visibilityTimerRef.current);
@@ -241,14 +301,17 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       window.clearTimeout(transcriptUiTimerRef.current);
       transcriptUiTimerRef.current = null;
     }
-  }, [clearAiSpeakingTimer, stopAudioPipeline]);
+  }, [clearAiSpeakingTimer, clearManualResponseTimer, stopAudioPipeline]);
 
   const disconnect = useCallback(
     (nextStatus: RealtimeStatus = 'ended') => {
+      if (nextStatus !== 'reconnecting') {
+        sessionTokenRef.current += 1;
+      }
       closingRef.current = true;
       // Cancel any in-flight AI response before closing
       const ws = socketRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN && responseInFlightRef.current) {
         ws.send(JSON.stringify({ type: 'response.cancel' }));
       }
       cleanupConnection();
@@ -273,7 +336,8 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
 
       if (type === 'session.created' || type === 'session.updated') {
         sessionReadyRef.current = true;
-        setLastError(undefined);
+        responseInFlightRef.current = false;
+        applyRealtimeError(undefined);
         return;
       }
 
@@ -283,8 +347,68 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         aiTranscriptRef.current = '';
         setAiTranscript('');
         const ws = socketRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (
+          ws &&
+          ws.readyState === WebSocket.OPEN &&
+          (responseInFlightRef.current || isAiSpeakingRef.current)
+        ) {
           ws.send(JSON.stringify({ type: 'response.cancel' }));
+        }
+        responseInFlightRef.current = false;
+        return;
+      }
+
+      if (type === 'input_audio_buffer.speech_stopped') {
+        clearManualResponseTimer();
+        const expectedTranscript = aiTranscriptRef.current;
+        const expectedUserDraft = userTranscriptRef.current;
+        manualResponseTimerRef.current = window.setTimeout(() => {
+          const ws = socketRef.current;
+          const hasNoAiOutput =
+            aiTranscriptRef.current === expectedTranscript && !isAiSpeakingRef.current;
+          const hasStableUserDraft =
+            userTranscriptRef.current === expectedUserDraft &&
+            expectedUserDraft.trim().length > 0;
+          if (hasStableUserDraft) {
+            commitTranscript('user', expectedUserDraft);
+          }
+          if (!hasNoAiOutput) {
+            return;
+          }
+          if (
+            ws &&
+            ws.readyState === WebSocket.OPEN &&
+            sessionReadyRef.current &&
+            !responseInFlightRef.current
+          ) {
+            responseInFlightRef.current = true;
+            ws.send(
+              JSON.stringify({
+                type: 'response.create',
+                response: { modalities: ['audio', 'text'] },
+              }),
+            );
+          }
+        }, 550);
+        return;
+      }
+
+      if (
+        type === 'conversation.item.created' ||
+        type === 'conversation.item.updated' ||
+        type === 'conversation.item.completed'
+      ) {
+        const role = extractItemRole(payload);
+        const text = extractTranscriptText(payload);
+        if (role === 'user' && text) {
+          commitTranscript('user', text, extractTimestamp(payload));
+        }
+        if (role === 'assistant' && text) {
+          aiTranscriptRef.current = text;
+          scheduleTranscriptUi();
+          if (type === 'conversation.item.completed') {
+            commitTranscript('ai', text, extractTimestamp(payload));
+          }
         }
         return;
       }
@@ -296,9 +420,23 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
             window.clearTimeout(maxSessionTimerRef.current);
           }
           maxSessionTimerRef.current = window.setTimeout(() => {
-            setLastError('SESSION_EXPIRED');
+            applyRealtimeError('SESSION_EXPIRED');
             disconnect('ended');
           }, maxSessionSeconds * 1000);
+        }
+        return;
+      }
+
+      if (type === 'server.error') {
+        const serverCode = resolveServerErrorCode(payload.code);
+        const retriable = resolveRetriable(payload.retriable);
+        if (serverCode) {
+          applyRealtimeError(mapServerErrorToClientError(serverCode));
+        } else {
+          applyRealtimeError('CONNECT_FAILED');
+        }
+        if (retriable === false) {
+          disconnect('error');
         }
         return;
       }
@@ -318,10 +456,29 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         return;
       }
 
+      if (type === 'response.output_item.done') {
+        const role = extractItemRole(payload);
+        const text = extractTranscriptText(payload);
+        if (role === 'assistant' && text) {
+          commitTranscript('ai', text, extractTimestamp(payload));
+        }
+        return;
+      }
+
+      if (
+        type === 'response.created' ||
+        type === 'response.in_progress' ||
+        type === 'response.output_item.added'
+      ) {
+        responseInFlightRef.current = true;
+        return;
+      }
+
       if (
         type === 'response.audio_transcript.delta' ||
         type === 'response.output_audio_transcript.delta'
       ) {
+        clearManualResponseTimer();
         const delta = extractTranscriptDelta(payload);
         if (delta) {
           aiTranscriptRef.current += delta;
@@ -336,12 +493,15 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         type === 'response.output_audio_transcript.done' ||
         type === 'response.completed'
       ) {
+        clearManualResponseTimer();
+        responseInFlightRef.current = false;
         const text = aiTranscriptRef.current;
         commitTranscript('ai', text, extractTimestamp(payload));
         return;
       }
 
       if (type === 'response.audio.delta' || type === 'response.output_audio.delta') {
+        clearManualResponseTimer();
         const chunk = extractAudioDelta(payload);
         if (chunk) {
           playOutputAudio(chunk, outputContextRef, outputTimeRef);
@@ -356,10 +516,35 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       }
 
       if (type === 'error') {
-        setLastError('CONNECT_FAILED');
+        const errorCode = extractUpstreamRealtimeErrorCode(payload);
+        if (errorCode === 'response_cancel_not_active') {
+          responseInFlightRef.current = false;
+          return;
+        }
+        if (errorCode === 'conversation_already_has_active_response') {
+          responseInFlightRef.current = true;
+          return;
+        }
+        if (
+          errorCode === 'session_expired' ||
+          errorCode === 'invalid_session' ||
+          errorCode === 'unauthorized'
+        ) {
+          applyRealtimeError('INVALID_REQUEST');
+          disconnect('error');
+        }
       }
     },
-    [clearAiSpeakingTimer, commitTranscript, disconnect, flushOutputAudio, schedulePlaybackEndCheck, scheduleTranscriptUi],
+    [
+      applyRealtimeError,
+      clearAiSpeakingTimer,
+      clearManualResponseTimer,
+      commitTranscript,
+      disconnect,
+      flushOutputAudio,
+      schedulePlaybackEndCheck,
+      scheduleTranscriptUi,
+    ],
   );
 
   const startAudioCapture = useCallback(
@@ -434,8 +619,11 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     socket.send(JSON.stringify(payload));
   }, []);
 
-  const connect = useCallback(async () => {
+  const connectWithToken = useCallback(async (expectedToken: number) => {
     if (!conversationId) {
+      return;
+    }
+    if (expectedToken !== sessionTokenRef.current) {
       return;
     }
     const currentStatus = statusRef.current;
@@ -443,18 +631,22 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       return;
     }
     if (!('WebSocket' in window) || !navigator.mediaDevices?.getUserMedia) {
-      setLastError('UNSUPPORTED');
+      applyRealtimeError('UNSUPPORTED');
       setStatus('error');
       return;
     }
 
     setStatus('connecting');
-    setLastError(undefined);
+    applyRealtimeError(undefined);
     closingRef.current = false;
 
     try {
       claimLock(lockKey, lockIdRef.current);
       const accessToken = await getAccessToken();
+      if (expectedToken !== sessionTokenRef.current) {
+        releaseLock(lockKey, lockIdRef.current);
+        return;
+      }
       const wsUrl = buildRealtimeWsUrl({
         baseUrl: API_BASE_URL,
         path: REALTIME_WS_PATH,
@@ -464,27 +656,69 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       });
 
       const socket = new WebSocket(wsUrl);
+      if (expectedToken !== sessionTokenRef.current) {
+        socket.close(1000, 'Session cancelled');
+        return;
+      }
       socketRef.current = socket;
+      if (connectTimeoutTimerRef.current !== null) {
+        window.clearTimeout(connectTimeoutTimerRef.current);
+      }
+      connectTimeoutTimerRef.current = window.setTimeout(() => {
+        if (expectedToken !== sessionTokenRef.current) {
+          return;
+        }
+        if (socketRef.current !== socket || socket.readyState === WebSocket.OPEN) {
+          return;
+        }
+        reconnectErrorRef.current = 'CONNECT_FAILED';
+        try {
+          socket.close(1011, 'Connect timeout');
+        } catch {
+          // noop
+        }
+      }, REALTIME_CONNECT_TIMEOUT_MS);
 
       socket.onopen = async () => {
+        if (connectTimeoutTimerRef.current !== null) {
+          window.clearTimeout(connectTimeoutTimerRef.current);
+          connectTimeoutTimerRef.current = null;
+        }
+        if (expectedToken !== sessionTokenRef.current) {
+          socket.close(1000, 'Session cancelled');
+          return;
+        }
         try {
           await startAudioCapture(socket);
+          if (expectedToken !== sessionTokenRef.current) {
+            socket.close(1000, 'Session cancelled');
+            return;
+          }
           setIsMuted(false);
-          setLastError(undefined);
+          applyRealtimeError(undefined);
           setStatus('connected');
           reconnectAttemptsRef.current = 0;
           reconnectingRef.current = false;
+          setReconnectAttempt(0);
+          setNextRetryAt(undefined);
         } catch (error) {
+          if (expectedToken !== sessionTokenRef.current) {
+            socket.close(1000, 'Session cancelled');
+            return;
+          }
           if (isMediaDenied(error)) {
-            setLastError('MEDIA_DENIED');
+            applyRealtimeError('MEDIA_DENIED');
           } else {
-            setLastError('CONNECT_FAILED');
+            applyRealtimeError('CONNECT_FAILED');
           }
           disconnect('error');
         }
       };
 
       socket.onmessage = (event) => {
+        if (expectedToken !== sessionTokenRef.current) {
+          return;
+        }
         if (typeof event.data !== 'string') {
           return;
         }
@@ -496,37 +730,61 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       };
 
       socket.onerror = () => {
-        setLastError('CONNECT_FAILED');
+        if (expectedToken !== sessionTokenRef.current) {
+          return;
+        }
+        // Wait for onclose to classify and retry; avoid immediate false error toast.
       };
 
       socket.onclose = (event) => {
+        if (expectedToken !== sessionTokenRef.current) {
+          return;
+        }
         if (closingRef.current) {
           closingRef.current = false;
           return;
         }
         if (event.code === 1008) {
-          setLastError('PERMISSION_DENIED');
+          if (!lastErrorRef.current) {
+            applyRealtimeError('PERMISSION_DENIED');
+          }
           disconnect('error');
           return;
         }
-        if (event.code === 1011 || event.code === 1013) {
-          setLastError('CONNECT_FAILED');
+        if (event.code === 1013) {
+          reconnectErrorRef.current = 'RATE_LIMITED';
+          if (!reconnectingRef.current) {
+            reconnectRef.current();
+            return;
+          }
           disconnect('error');
           return;
+        }
+        if (event.code === 1011) {
+          reconnectErrorRef.current = 'SERVICE_UNAVAILABLE';
+          if (!reconnectingRef.current) {
+            reconnectRef.current();
+            return;
+          }
         }
         if (!reconnectingRef.current) {
+          reconnectErrorRef.current = 'CONNECT_FAILED';
           reconnectRef.current();
         }
       };
     } catch (error) {
+      if (expectedToken !== sessionTokenRef.current) {
+        return;
+      }
       if (isMediaDenied(error)) {
-        setLastError('MEDIA_DENIED');
+        applyRealtimeError('MEDIA_DENIED');
       } else {
-        setLastError('CONNECT_FAILED');
+        applyRealtimeError('CONNECT_FAILED');
       }
       disconnect('error');
     }
   }, [
+    applyRealtimeError,
     conversationId,
     disconnect,
     handleRealtimeEvent,
@@ -534,21 +792,35 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     startAudioCapture,
   ]);
 
+  const connect = useCallback(async () => {
+    await connectWithToken(sessionTokenRef.current);
+  }, [connectWithToken]);
+
   const reconnect = useCallback(async () => {
+    const expectedToken = sessionTokenRef.current;
     if (reconnectingRef.current) {
       return;
     }
     if (reconnectAttemptsRef.current >= REALTIME_RECONNECT_MAX_ATTEMPTS) {
-      setLastError('CONNECT_FAILED');
+      applyRealtimeError(reconnectErrorRef.current);
+      setNextRetryAt(undefined);
       disconnect('ended');
       return;
     }
     reconnectAttemptsRef.current += 1;
+    setReconnectAttempt(reconnectAttemptsRef.current);
     reconnectingRef.current = true;
     disconnect('reconnecting');
-    await delay(REALTIME_RECONNECT_DELAY_MS);
-    await connect();
-  }, [connect, disconnect]);
+    const attempt = reconnectAttemptsRef.current;
+    const backoffMs = Math.min(8000, REALTIME_RECONNECT_DELAY_MS * attempt);
+    setNextRetryAt(Date.now() + backoffMs);
+    await delay(backoffMs);
+    setNextRetryAt(undefined);
+    if (expectedToken !== sessionTokenRef.current) {
+      return;
+    }
+    await connectWithToken(expectedToken);
+  }, [applyRealtimeError, connectWithToken, disconnect]);
 
   useEffect(() => {
     reconnectRef.current = reconnect;
@@ -624,7 +896,7 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       if (!payload || payload.id === lockIdRef.current) {
         return;
       }
-      setLastError('TAKEN_OVER');
+      applyRealtimeError('TAKEN_OVER');
       disconnect('ended');
     };
 
@@ -632,7 +904,7 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     return () => {
       window.removeEventListener('storage', handleStorage);
     };
-  }, [disconnect, lockKey]);
+  }, [applyRealtimeError, disconnect, lockKey]);
 
   return {
     status,
@@ -643,6 +915,9 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     fullTranscript,
     audioLevel,
     lastError,
+    reconnectAttempt,
+    reconnectMaxAttempts: REALTIME_RECONNECT_MAX_ATTEMPTS,
+    nextRetryAt,
     connect,
     disconnect,
     toggleMute,
@@ -696,15 +971,95 @@ const extractTranscriptText = (payload: Record<string, unknown>): string | undef
   }
   const item = payload.item;
   if (item && typeof item === 'object') {
-    const content = (item as Record<string, unknown>).content;
-    if (Array.isArray(content) && content.length > 0) {
-      const first = content[0];
-      if (first && typeof first === 'object') {
-        const transcript = (first as Record<string, unknown>).transcript;
-        if (typeof transcript === 'string') {
-          return transcript;
-        }
+    const itemRecord = item as Record<string, unknown>;
+    if (typeof itemRecord.transcript === 'string') {
+      return itemRecord.transcript;
+    }
+    const textFromItemContent = extractTextFromContent(itemRecord.content);
+    if (textFromItemContent) {
+      return textFromItemContent;
+    }
+    const textFromItemFormatted = extractTextFromFormatted(itemRecord.formatted);
+    if (textFromItemFormatted) {
+      return textFromItemFormatted;
+    }
+  }
+  const textFromPayloadContent = extractTextFromContent(payload.content);
+  if (textFromPayloadContent) {
+    return textFromPayloadContent;
+  }
+  const textFromPayloadFormatted = extractTextFromFormatted(payload.formatted);
+  if (textFromPayloadFormatted) {
+    return textFromPayloadFormatted;
+  }
+  return undefined;
+};
+
+const extractTextFromContent = (value: unknown): string | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  for (const part of value) {
+    if (!part || typeof part !== 'object') {
+      continue;
+    }
+    const record = part as Record<string, unknown>;
+    const candidates = [
+      record.transcript,
+      record.text,
+      record.output_text,
+      record.audio_transcript,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate;
       }
+    }
+    const nested = extractTextFromFormatted(record.formatted);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
+};
+
+const extractTextFromFormatted = (value: unknown): string | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const candidates = [
+    record.transcript,
+    record.text,
+    record.output_text,
+    record.audio_transcript,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate;
+    }
+  }
+  return undefined;
+};
+
+const extractItemRole = (
+  payload: Record<string, unknown>,
+): 'user' | 'assistant' | undefined => {
+  const role = payload.role;
+  if (role === 'ai') {
+    return 'assistant';
+  }
+  if (role === 'user' || role === 'assistant') {
+    return role;
+  }
+  const item = payload.item;
+  if (item && typeof item === 'object') {
+    const itemRole = (item as Record<string, unknown>).role;
+    if (itemRole === 'ai') {
+      return 'assistant';
+    }
+    if (itemRole === 'user' || itemRole === 'assistant') {
+      return itemRole;
     }
   }
   return undefined;
@@ -731,6 +1086,17 @@ const extractAudioDelta = (payload: Record<string, unknown>): string | undefined
   return typeof audio === 'string' ? audio : undefined;
 };
 
+const extractUpstreamRealtimeErrorCode = (
+  payload: Record<string, unknown>,
+): string | undefined => {
+  const error = payload.error;
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const code = (error as Record<string, unknown>).code;
+  return typeof code === 'string' ? code : undefined;
+};
+
 const resolveMaxSessionSeconds = (payload: Record<string, unknown>): number | undefined => {
   const raw = payload.maxSessionSeconds ?? payload.max_session_seconds;
   if (typeof raw === 'number' && Number.isFinite(raw)) {
@@ -741,6 +1107,45 @@ const resolveMaxSessionSeconds = (payload: Record<string, unknown>): number | un
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+};
+
+const resolveServerErrorCode = (raw: unknown): RealtimeServerErrorCode | undefined => {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  if (
+    raw === 'BAD_REQUEST' ||
+    raw === 'PERMISSION_DENIED' ||
+    raw === 'RATE_LIMITED' ||
+    raw === 'SERVICE_UNAVAILABLE' ||
+    raw === 'UPSTREAM_ERROR' ||
+    raw === 'INTERNAL_ERROR'
+  ) {
+    return raw;
+  }
+  return undefined;
+};
+
+const resolveRetriable = (raw: unknown): boolean | undefined => {
+  return typeof raw === 'boolean' ? raw : undefined;
+};
+
+const mapServerErrorToClientError = (
+  code: RealtimeServerErrorCode,
+): RealtimeErrorCode => {
+  if (code === 'PERMISSION_DENIED') {
+    return 'PERMISSION_DENIED';
+  }
+  if (code === 'BAD_REQUEST') {
+    return 'INVALID_REQUEST';
+  }
+  if (code === 'RATE_LIMITED') {
+    return 'RATE_LIMITED';
+  }
+  if (code === 'SERVICE_UNAVAILABLE') {
+    return 'SERVICE_UNAVAILABLE';
+  }
+  return 'CONNECT_FAILED';
 };
 
 const calculateRms = (data: Float32Array): number => {

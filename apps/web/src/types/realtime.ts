@@ -11,6 +11,14 @@ export interface SaveRealtimeTranscriptPayload {
   messages: RealtimeTranscriptEntry[];
 }
 
+export type RealtimeServerErrorCode =
+  | 'BAD_REQUEST'
+  | 'PERMISSION_DENIED'
+  | 'RATE_LIMITED'
+  | 'SERVICE_UNAVAILABLE'
+  | 'UPSTREAM_ERROR'
+  | 'INTERNAL_ERROR';
+
 export type RealtimeErrorCode =
   | 'UNSUPPORTED'
   | 'TOKEN_FAILED'
@@ -19,4 +27,7 @@ export type RealtimeErrorCode =
   | 'SAVE_FAILED'
   | 'TAKEN_OVER'
   | 'PERMISSION_DENIED'
-  | 'SESSION_EXPIRED';
+  | 'SESSION_EXPIRED'
+  | 'RATE_LIMITED'
+  | 'SERVICE_UNAVAILABLE'
+  | 'INVALID_REQUEST';

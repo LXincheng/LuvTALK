@@ -370,7 +370,22 @@ export class VoiceTutorService {
     }
     const session = await this.conversationService.getSession(conversationId);
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
+    const resolvedVoice = voice ?? languageHint.ttsVoice;
     const directory = join(this.storageRoot, conversationId);
+
+    // Reuse existing synthesized audio from the same session/text/voice to avoid duplicate API calls.
+    const reusable = await this.findReusableTtsAudio(
+      session,
+      conversationId,
+      text,
+      resolvedVoice,
+    );
+    if (reusable) {
+      this.logger.debug(
+        `Reused synthesized speech for ${conversationId} -> ${reusable.fileName}`,
+      );
+      return reusable;
+    }
     try {
       const response = await fetch(
         `${audioApiUrl.replace(/\/$/, "")}/speech`,
@@ -383,7 +398,7 @@ export class VoiceTutorService {
           body: JSON.stringify({
             model: ttsModel,
             input: text,
-            voice: voice ?? languageHint.ttsVoice,
+            voice: resolvedVoice,
           }),
         },
       );
@@ -411,7 +426,11 @@ export class VoiceTutorService {
           .reverse()
           .find((m) => m.sender === "ai" && m.text === text);
         if (targetMessage && !targetMessage.meta?.audioUrl) {
-          targetMessage.meta = { ...targetMessage.meta, audioUrl };
+          targetMessage.meta = {
+            ...targetMessage.meta,
+            audioUrl,
+            ttsVoice: resolvedVoice,
+          };
           await this.conversationService.persistSessionPublic(currentSession);
         }
       } catch (writebackError) {
@@ -432,6 +451,49 @@ export class VoiceTutorService {
       );
       return undefined;
     }
+  }
+
+  private async findReusableTtsAudio(
+    session: Awaited<ReturnType<ConversationService["getSession"]>>,
+    conversationId: string,
+    text: string,
+    voice: string,
+  ): Promise<{ audioUrl: string; fileName: string } | undefined> {
+    const target = text.trim();
+    if (!target) {
+      return undefined;
+    }
+    const candidate = [...session.messages]
+      .reverse()
+      .find((message) => {
+        if (message.sender !== "ai") {
+          return false;
+        }
+        if (message.text.trim() !== target) {
+          return false;
+        }
+        if (!message.meta?.audioUrl) {
+          return false;
+        }
+        // Backward compatible: old records may not have ttsVoice.
+        if (!message.meta.ttsVoice) {
+          return true;
+        }
+        return message.meta.ttsVoice === voice;
+      });
+    if (!candidate?.meta?.audioUrl) {
+      return undefined;
+    }
+    const fileName = basename(candidate.meta.audioUrl);
+    try {
+      await access(join(this.storageRoot, conversationId, fileName));
+    } catch {
+      return undefined;
+    }
+    return {
+      audioUrl: candidate.meta.audioUrl,
+      fileName,
+    };
   }
 
   async openAudioStream(

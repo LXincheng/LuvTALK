@@ -201,7 +201,10 @@ export class ConversationService {
         entry.text,
         session.targetLanguage,
         session.nativeLanguage,
-        entry.timestamp ? { createdAt: entry.timestamp } : undefined,
+        {
+          ...(entry.timestamp ? { createdAt: entry.timestamp } : {}),
+          meta: { source: "realtime" },
+        },
       ),
     );
 
