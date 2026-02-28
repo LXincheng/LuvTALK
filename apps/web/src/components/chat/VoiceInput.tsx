@@ -42,7 +42,7 @@ export default function VoiceInput({
           </div>
         )}
 
-        <div className="flex items-end gap-3">
+        <div className="flex items-end gap-2 sm:gap-3">
           <input
             type="text"
             value={value}
@@ -50,13 +50,13 @@ export default function VoiceInput({
             onKeyDown={(event) => event.key === 'Enter' && onSend()}
             disabled={disableInput || isRecording}
             placeholder={placeholder}
-            className="flex-1 px-4 py-3 glass-input border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
+            className="min-w-0 flex-1 px-3 sm:px-4 py-3 glass-input border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 focus:border-transparent transition-all text-slate-900 dark:text-white placeholder:text-slate-500 dark:placeholder:text-slate-400"
           />
           {!hideVoice && (
             <button
               onClick={onToggleRecording}
               disabled={disableToggle}
-              className={`p-3 rounded-xl transition-all ${
+              className={`shrink-0 p-2.5 sm:p-3 rounded-xl transition-all ${
                 isRecording
                   ? 'bg-red-500 hover:bg-red-600 text-white'
                   : 'glass-button text-white hover:opacity-90'
@@ -68,7 +68,7 @@ export default function VoiceInput({
           <button
             onClick={onSend}
             disabled={disableSend}
-            className="p-3 glass-button disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-all hover:opacity-90"
+            className="shrink-0 p-2.5 sm:p-3 glass-button disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-all hover:opacity-90"
           >
             <Send className="w-6 h-6" />
           </button>

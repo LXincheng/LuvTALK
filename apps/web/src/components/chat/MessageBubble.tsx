@@ -134,7 +134,7 @@ export default function MessageBubble({
   if (message.type === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-md md:max-w-lg space-y-2">
+        <div className="max-w-[85%] sm:max-w-md md:max-w-lg space-y-2">
           <div className="bg-indigo-600 dark:bg-indigo-500 text-white px-4 py-3 rounded-2xl rounded-tr-sm shadow-lg">
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           </div>
@@ -155,7 +155,7 @@ export default function MessageBubble({
 
   return (
     <div className="flex justify-start">
-      <div className="max-w-md md:max-w-lg space-y-2">
+      <div className="max-w-[85%] sm:max-w-md md:max-w-lg space-y-2">
         <div className="glass-card border border-slate-200 dark:border-slate-700 shadow-lg px-4 py-3 rounded-2xl rounded-tl-sm">
           {loadingBlock ? (
             loadingBlock

@@ -3,6 +3,7 @@ import type {
   ConversationHistorySummary,
   ConversationSession,
   LanguageCode,
+  SessionSummaryPayload,
   VoiceOperationSnapshot,
   VoiceUploadResponse,
 } from '../types/api';
@@ -41,6 +42,12 @@ export function fetchConversationHistory(ids?: string[]) {
 export function fetchConversationById(conversationId: string) {
   return apiClient.get<ConversationSession>(
     `/conversation/${conversationId}`,
+  );
+}
+
+export function fetchConversationSummary(conversationId: string) {
+  return apiClient.get<SessionSummaryPayload>(
+    `/conversation/${conversationId}/summary`,
   );
 }
 

@@ -60,7 +60,7 @@ export default function ChatHistoryDrawer({
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="fixed inset-y-0 left-0 z-50 w-80 glass-sidebar border-r border-slate-200 dark:border-slate-700 flex flex-col"
+            className="fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-0.75rem))] glass-sidebar border-r border-slate-200 dark:border-slate-700 flex flex-col"
           >
             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <h3 className="font-semibold text-slate-900 dark:text-white">

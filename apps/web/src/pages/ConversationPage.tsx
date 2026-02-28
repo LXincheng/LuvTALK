@@ -8,11 +8,13 @@ import ChatHistoryDrawer from '../components/chat/ChatHistoryDrawer';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
 import VoiceStyleSelector from '../components/chat/VoiceStyleSelector';
 import ConversationRecoveryBanner from '../components/chat/ConversationRecoveryBanner';
+import SessionSummaryCard from '../components/chat/SessionSummaryCard';
 import type { ConversationRecoveryState } from '../components/chat/ConversationRecoveryBanner';
 import ImmersiveMode from '../components/immersive/ImmersiveMode';
 import type { ChatMode } from '../components/chat/ChatModeSwitcher';
 import { API_BASE_URL } from '../services/apiClient';
 import {
+  fetchConversationSummary,
   fetchConversationById,
   fetchConversationHistory,
   resumeConversation,
@@ -22,6 +24,7 @@ import {
   uploadConversationVoice,
 } from '../services/conversationService';
 import { createFavorite } from '../services/favoritesService';
+import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
 import type { Annotation, Message } from '../types/chat';
@@ -29,6 +32,7 @@ import type {
   ConversationHistorySummary,
   ConversationSession,
   ConversationMessage,
+  SessionSummaryPayload,
   FavoriteType,
   LanguageCode,
 } from '../types/api';
@@ -175,6 +179,52 @@ const buildTutorLoadingMessage = (): Message => ({
   isOptimistic: true,
 });
 
+const buildLocalSessionSummary = (
+  currentSession: ConversationSession | null,
+): SessionSummaryPayload | null => {
+  if (!currentSession) {
+    return null;
+  }
+  const aiMessages = currentSession.messages.filter((message) => message.sender === 'ai');
+  const userMessages = currentSession.messages.filter((message) => message.sender === 'user');
+  // Ignore pure welcome-only sessions to avoid noisy empty cards.
+  if (userMessages.length < 1 || aiMessages.length < 2) {
+    return null;
+  }
+  const scored = aiMessages
+    .map((message) => message.meta?.score)
+    .filter((score): score is number => typeof score === 'number');
+  const averageScore = scored.length
+    ? Math.round(scored.reduce((sum, score) => sum + score, 0) / scored.length)
+    : null;
+  const latestScore = scored.length ? scored[scored.length - 1] : null;
+  const keyTerms = currentSession.messages
+    .flatMap((message) => message.meta?.keyTerms ?? [])
+    .map((term) => ({ term: term.term, definition: term.definition }))
+    .filter((item) => item.term && item.definition)
+    .slice(0, 6);
+
+  return {
+    conversationId: currentSession.id,
+    durationMinutes: Math.max(
+      1,
+      Math.round(
+        (new Date(currentSession.updatedAt).getTime() -
+          new Date(currentSession.createdAt).getTime()) /
+          60000,
+      ),
+    ),
+    userTurns: userMessages.length,
+    aiTurns: aiMessages.length,
+    averageScore,
+    latestScore,
+    strengths: ['保持了连续对话，输出节奏稳定。'],
+    improvements: ['可继续优化语法与发音细节。'],
+    recommendedNextActions: ['继续下一轮对话并复用本轮关键词。'],
+    keyTerms,
+  };
+};
+
 export default function ConversationPage() {
   const { t, locale } = useLocale();
   const [session, setSession] = useState<ConversationSession | null>(null);
@@ -226,6 +276,11 @@ export default function ConversationPage() {
   const ttsBaselineRef = useRef(0);
   const prevChatModeRef = useRef<ChatMode>(chatMode);
   const streamRecoveryTimerRef = useRef<number | null>(null);
+  const focusBufferRef = useRef(0);
+  const summaryFetchSeqRef = useRef(0);
+  const lastSummaryAiCountRef = useRef(0);
+  const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
 
   const clearStreamRecoveryTimer = useCallback(() => {
     if (streamRecoveryTimerRef.current !== null) {
@@ -340,6 +395,31 @@ export default function ConversationPage() {
     () => [...sessionMessages, ...optimisticMessages],
     [sessionMessages, optimisticMessages],
   );
+
+  const refreshSessionSummary = useCallback(async () => {
+    if (!session?.id) {
+      setSessionSummary(null);
+      return;
+    }
+    const seq = ++summaryFetchSeqRef.current;
+    setIsSummaryLoading(true);
+    try {
+      const payload = await fetchConversationSummary(session.id);
+      if (seq !== summaryFetchSeqRef.current) {
+        return;
+      }
+      setSessionSummary(payload);
+    } catch {
+      if (seq !== summaryFetchSeqRef.current) {
+        return;
+      }
+      setSessionSummary((prev) => prev ?? buildLocalSessionSummary(session));
+    } finally {
+      if (seq === summaryFetchSeqRef.current) {
+        setIsSummaryLoading(false);
+      }
+    }
+  }, [session]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -492,9 +572,58 @@ export default function ConversationPage() {
   }, [chatMode, session?.id]);
 
   useEffect(() => {
+    if (!session?.id || isInitializing) {
+      focusBufferRef.current = 0;
+      return;
+    }
+    let disposed = false;
+
+    const flushFocus = async () => {
+      const seconds = focusBufferRef.current;
+      if (seconds < 15 || disposed || !navigator.onLine) {
+        return;
+      }
+      focusBufferRef.current = 0;
+      try {
+        await reportLearningFocus(seconds);
+      } catch {
+        focusBufferRef.current += seconds;
+      }
+    };
+
+    const ticker = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      focusBufferRef.current += 15;
+      if (focusBufferRef.current >= 60) {
+        void flushFocus();
+      }
+    }, 15_000);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        void flushFocus();
+      }
+    };
+    window.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('beforeunload', onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(ticker);
+      window.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('beforeunload', onVisibilityChange);
+      void flushFocus();
+    };
+  }, [isInitializing, session?.id]);
+
+  useEffect(() => {
     if (!session?.id) {
       return;
     }
+    setSessionSummary((prev) => prev ?? buildLocalSessionSummary(session));
+    lastSummaryAiCountRef.current = 0;
     setTtsAudioMap({});
     ttsRequestsRef.current.clear();
     ttsBaselineRef.current = 0;
@@ -502,7 +631,24 @@ export default function ConversationPage() {
       URL.revokeObjectURL(voiceDraftUrlRef.current);
       voiceDraftUrlRef.current = null;
     }
-  }, [session?.id]);
+  }, [session, session?.id]);
+
+  useEffect(() => {
+    if (!session?.id || chatMode === 'immersive') {
+      return;
+    }
+    const aiCount = session.messages.filter((message) => message.sender === 'ai').length;
+    if (aiCount < 1 || aiCount === lastSummaryAiCountRef.current) {
+      return;
+    }
+    lastSummaryAiCountRef.current = aiCount;
+    const timer = window.setTimeout(() => {
+      void refreshSessionSummary();
+    }, 420);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [chatMode, refreshSessionSummary, session, session?.id, session?.messages]);
 
   const queueTtsForMessage = useCallback((message: ConversationMessage) => {
     if (!session) {
@@ -926,8 +1072,8 @@ export default function ConversationPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate min-w-0 flex-1">
               {session?.title || t('chatTitle')}
             </h2>
-            <div className="shrink-0 ml-auto">
-              <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
+            <div className="shrink-0 ml-auto max-w-[48%]">
+              <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} compact />
             </div>
           </div>
           <div className="flex items-center gap-1.5 px-2 pb-2 overflow-x-auto scrollbar-none min-w-0">
@@ -955,7 +1101,7 @@ export default function ConversationPage() {
               <>
                 <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
                 <div className="shrink-0">
-                  <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} />
+                  <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
                 </div>
               </>
             )}
@@ -963,7 +1109,7 @@ export default function ConversationPage() {
         </div>
 
         {/* Desktop */}
-        <div className="hidden md:flex md:items-center md:justify-between px-4 py-2.5">
+        <div className="hidden md:flex md:items-center md:justify-between md:gap-2 px-3 lg:px-4 py-2.5">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <button
               onClick={() => {
@@ -979,9 +1125,9 @@ export default function ConversationPage() {
               <h2 className="font-semibold text-slate-900 dark:text-white truncate">
                 {session?.title || t('chatTitle')}
               </h2>
-              <div className="flex items-center gap-1.5 mt-1">
+              <div className="flex items-center gap-1 mt-1 overflow-x-auto scrollbar-none">
                 <span className="text-xs text-slate-400 dark:text-slate-500 shrink-0">{t('learningLanguage')}</span>
-                <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60">
+                <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60 shrink-0">
                   {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
                     (language) => {
                       const isActive = targetLanguage === language;
@@ -989,7 +1135,7 @@ export default function ConversationPage() {
                         <button
                           key={language}
                           onClick={() => setTargetLanguage(language)}
-                          className={`px-2.5 py-0.5 rounded-md text-xs font-medium transition-all ${
+                          className={`px-2 py-0.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                             isActive
                               ? 'glass-button text-white'
                               : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -1004,11 +1150,11 @@ export default function ConversationPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 lg:gap-3 shrink-0 min-w-0">
             {chatMode !== 'text' && (
-              <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} />
+              <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
             )}
-            <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} />
+            <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} compact />
           </div>
         </div>
       </div>
@@ -1022,6 +1168,29 @@ export default function ConversationPage() {
           />
         )}
       </AnimatePresence>
+
+      <SessionSummaryCard
+        title={t('sessionSummaryTitle')}
+        subtitle={t('sessionSummarySubtitle')}
+        loadingText={t('sessionSummaryLoading')}
+        refreshText={t('commonRetry')}
+        strengthsTitle={t('sessionSummaryStrengths')}
+        improvementsTitle={t('sessionSummaryImprovements')}
+        nextActionsTitle={t('sessionSummaryNextActions')}
+        keyTermsTitle={t('sessionSummaryKeyTerms')}
+        emptyText={t('sessionSummaryEmpty')}
+        collapseText={t('sessionSummaryCollapse')}
+        expandText={t('sessionSummaryExpand')}
+        averageLabel={t('sessionSummaryMetricAverage')}
+        latestLabel={t('sessionSummaryMetricLatest')}
+        turnsLabel={t('sessionSummaryMetricTurns')}
+        minutesLabel={t('sessionSummaryMetricMinutes')}
+        summary={sessionSummary}
+        isLoading={isSummaryLoading}
+        onRefresh={() => {
+          void refreshSessionSummary();
+        }}
+      />
 
       {messageList}
       {inputArea}

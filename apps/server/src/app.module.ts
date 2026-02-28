@@ -12,6 +12,7 @@ import { AppCacheModule } from "./common/cache/cache.module";
 import { ReviewModule } from "./modules/review/review.module";
 import { AchievementModule } from "./modules/achievement/achievement.module";
 import { RealtimeModule } from "./modules/realtime/realtime.module";
+import { LearningGoalModule } from "./modules/learning-goal/learning-goal.module";
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { RealtimeModule } from "./modules/realtime/realtime.module";
     HealthModule,
     VoiceTutorModule,
     RealtimeModule,
+    LearningGoalModule,
   ],
 })
 export class AppModule {}

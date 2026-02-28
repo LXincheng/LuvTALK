@@ -120,3 +120,19 @@ export interface DailyReviewPayload {
   date: string;
   cards: ReviewCard[];
 }
+
+export interface SessionSummaryPayload {
+  conversationId: string;
+  durationMinutes: number;
+  userTurns: number;
+  aiTurns: number;
+  averageScore: number | null;
+  latestScore: number | null;
+  strengths: string[];
+  improvements: string[];
+  recommendedNextActions: string[];
+  keyTerms: Array<{
+    term: string;
+    definition: string;
+  }>;
+}

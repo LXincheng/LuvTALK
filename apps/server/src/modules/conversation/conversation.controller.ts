@@ -17,6 +17,7 @@ import { StartConversationDto } from "./dto/start-conversation.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { AuthService } from "../auth/auth.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { SessionSummaryPayload } from "./conversation-summary.types";
 
 @Controller("conversation")
 export class ConversationController {
@@ -81,6 +82,18 @@ export class ConversationController {
   @Get(":conversationId")
   getSession(@Param("conversationId") conversationId: string) {
     return this.conversationService.getSession(conversationId);
+  }
+
+  @Get(":conversationId/summary")
+  async getSummary(
+    @Param("conversationId") conversationId: string,
+    @Req() req: Request,
+  ): Promise<SessionSummaryPayload> {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.getSessionSummary(
+      conversationId,
+      profile?.id,
+    );
   }
 
   @Get(":conversationId/history")

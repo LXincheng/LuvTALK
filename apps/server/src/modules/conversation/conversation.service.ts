@@ -20,6 +20,10 @@ import { SessionCacheService } from "../../common/cache/session-cache.service";
 import { TranslationService } from "../translation/translation.service";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { StartConversationDto } from "./dto/start-conversation.dto";
+import {
+  buildSessionSummary,
+  SessionSummaryPayload,
+} from "./conversation-summary.types";
 
 const DEFAULT_MODEL = "deepseek-chat";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -508,10 +512,7 @@ export class ConversationService {
    * Generate a concise title (≤20 chars) from the first user message.
    * Strips punctuation, truncates intelligently at word/character boundaries.
    */
-  private summarizeTitle(
-    text: string,
-    nativeLanguage?: LanguageCode,
-  ): string {
+  private summarizeTitle(text: string, nativeLanguage?: LanguageCode): string {
     const cleaned = text
       .replace(/[\n\r]+/g, " ")
       .replace(/[^\p{L}\p{N}\s]/gu, "")
@@ -521,8 +522,9 @@ export class ConversationService {
     }
     // For CJK-heavy text, truncate by character count
     const cjkRatio =
-      (cleaned.match(/[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g)?.length ?? 0) /
-      cleaned.length;
+      (cleaned.match(
+        /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g,
+      )?.length ?? 0) / cleaned.length;
     if (cjkRatio > 0.3) {
       return cleaned.length > 15 ? cleaned.slice(0, 15) + "…" : cleaned;
     }
@@ -879,9 +881,7 @@ export class ConversationService {
         };
       })
       .filter((term): term is KeyTerm => term !== null)
-      .filter((term) =>
-        this.isTermInReply(reply, normalizedReply, term.term),
-      )
+      .filter((term) => this.isTermInReply(reply, normalizedReply, term.term))
       .filter((term) => {
         const key = term.term.toLowerCase();
         if (seen.has(key)) {
@@ -1124,6 +1124,22 @@ export class ConversationService {
       throw new NotFoundException("Conversation not found");
     }
     return session;
+  }
+
+  async getSessionSummary(
+    conversationId: string,
+    userId?: string,
+  ): Promise<SessionSummaryPayload> {
+    const session = await this.getSession(conversationId);
+    if (session.userId && userId && session.userId !== userId) {
+      throw new NotFoundException("Conversation not found");
+    }
+    return buildSessionSummary({
+      conversationId: session.id,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: session.messages,
+    });
   }
 
   private getOrCreateStream(

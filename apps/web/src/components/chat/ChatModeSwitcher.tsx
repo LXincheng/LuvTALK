@@ -6,11 +6,13 @@ export type ChatMode = 'voice' | 'text' | 'immersive';
 interface ChatModeSwitcherProps {
   mode: ChatMode;
   onChange: (mode: ChatMode) => void;
+  compact?: boolean;
 }
 
 export default function ChatModeSwitcher({
   mode,
   onChange,
+  compact = false,
 }: ChatModeSwitcherProps) {
   const { t } = useLocale();
 
@@ -32,7 +34,7 @@ export default function ChatModeSwitcher({
   ];
 
   return (
-    <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60">
+    <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60">
       {modes.map((m) => {
         const Icon = m.icon;
         const isActive = mode === m.id;
@@ -42,16 +44,22 @@ export default function ChatModeSwitcher({
             onClick={() => !m.disabled && onChange(m.id)}
             disabled={m.disabled}
             title={m.tooltip ?? m.label}
-            className={`flex items-center justify-center gap-1.5 rounded-md transition-all ${
+            className={`flex shrink-0 items-center justify-center gap-1 rounded-md transition-all ${
               isActive
                 ? 'glass-button text-white'
                 : m.disabled
                   ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50'
                   : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-            } px-2 py-1.5 md:px-3 md:py-1.5`}
+            } ${
+              compact
+                ? 'px-2 py-1.5'
+                : 'px-2 py-1.5 lg:px-3 lg:py-1.5'
+            }`}
           >
             <Icon className="w-4 h-4 shrink-0" />
-            <span className="hidden md:inline text-xs font-medium">{m.label}</span>
+            <span className={`${compact ? 'hidden' : 'hidden lg:inline'} text-xs font-medium`}>
+              {m.label}
+            </span>
           </button>
         );
       })}
