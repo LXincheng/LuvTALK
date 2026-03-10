@@ -13,7 +13,6 @@ export default function FavoritesPage() {
     'all',
   );
   const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage] = useState<string | null>(null);
 
   const copyLabel = t('favoritesCopy');
   const removeLabel = t('favoritesRemove');
@@ -34,8 +33,11 @@ export default function FavoritesPage() {
     const { cached, fresh } = fetchFavoritesCached();
 
     if (cached) {
-      setFavorites(cached);
-      setIsLoading(false);
+      void Promise.resolve().then(() => {
+        if (!isMounted) return;
+        setFavorites(cached);
+        setIsLoading(false);
+      });
     }
 
     fresh
@@ -122,12 +124,6 @@ export default function FavoritesPage() {
             </button>
           ))}
         </div>
-
-        {errorMessage && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {errorMessage}
-          </div>
-        )}
 
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">

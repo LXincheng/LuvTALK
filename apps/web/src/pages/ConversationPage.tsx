@@ -17,6 +17,7 @@ import {
   fetchConversationSummary,
   fetchConversationById,
   fetchConversationHistory,
+  fetchVoiceOperationStatus,
   resumeConversation,
   sendConversationMessage,
   startConversation,
@@ -27,7 +28,7 @@ import { createFavorite } from '../services/favoritesService';
 import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
-import type { Annotation, Message } from '../types/chat';
+import type { Annotation, Message, MessageStatusTone } from '../types/chat';
 import type {
   ConversationHistorySummary,
   ConversationSession,
@@ -36,6 +37,19 @@ import type {
   FavoriteType,
   LanguageCode,
 } from '../types/api';
+
+interface PendingTutorReply {
+  channel: 'text' | 'voice';
+  startedAiCount: number;
+  startedUserCount: number;
+  optimisticUserId?: string;
+  loadingMessageId: string;
+}
+
+interface ActiveVoiceOperation {
+  conversationId: string;
+  operationId: string;
+}
 
 const getInitialTargetLanguage = (): LanguageCode => {
   if (typeof window === 'undefined') {
@@ -161,11 +175,17 @@ const buildTempId = () => {
 const buildOptimisticUserMessage = (
   content: string,
   audioUrl?: string,
+  options?: {
+    statusText?: string;
+    statusTone?: MessageStatusTone;
+  },
 ): Message => ({
   id: buildTempId(),
   type: 'user',
   content,
   audioUrl,
+  statusText: options?.statusText,
+  statusTone: options?.statusTone,
   timestamp: new Date(),
   isOptimistic: true,
 });
@@ -178,6 +198,12 @@ const buildTutorLoadingMessage = (): Message => ({
   isLoading: true,
   isOptimistic: true,
 });
+
+const countSessionMessages = (messages: ConversationMessage[]) => {
+  const aiCount = messages.filter((message) => message.sender === 'ai').length;
+  const userCount = messages.filter((message) => message.sender === 'user').length;
+  return { aiCount, userCount };
+};
 
 const buildLocalSessionSummary = (
   currentSession: ConversationSession | null,
@@ -275,7 +301,13 @@ export default function ConversationPage() {
   const ttsVoiceRef = useRef(ttsVoice);
   const ttsBaselineRef = useRef(0);
   const prevChatModeRef = useRef<ChatMode>(chatMode);
+  const currentSessionIdRef = useRef<string | null>(null);
   const streamRecoveryTimerRef = useRef<number | null>(null);
+  const pendingVoiceStatusTimerRef = useRef<number | null>(null);
+  const voiceOperationPollTimerRef = useRef<number | null>(null);
+  const voiceCompletionSyncTimerRef = useRef<number | null>(null);
+  const activeVoiceOperationRef = useRef<ActiveVoiceOperation | null>(null);
+  const pendingTutorReplyRef = useRef<PendingTutorReply | null>(null);
   const focusBufferRef = useRef(0);
   const summaryFetchSeqRef = useRef(0);
   const lastSummaryAiCountRef = useRef(0);
@@ -287,6 +319,67 @@ export default function ConversationPage() {
       window.clearTimeout(streamRecoveryTimerRef.current);
       streamRecoveryTimerRef.current = null;
     }
+  }, []);
+
+  const clearPendingVoiceStatusTimer = useCallback(() => {
+    if (pendingVoiceStatusTimerRef.current !== null) {
+      window.clearInterval(pendingVoiceStatusTimerRef.current);
+      pendingVoiceStatusTimerRef.current = null;
+    }
+  }, []);
+
+  const clearVoiceOperationPoll = useCallback(() => {
+    if (voiceOperationPollTimerRef.current !== null) {
+      window.clearTimeout(voiceOperationPollTimerRef.current);
+      voiceOperationPollTimerRef.current = null;
+    }
+    activeVoiceOperationRef.current = null;
+  }, []);
+
+  const clearVoiceCompletionSync = useCallback(() => {
+    if (voiceCompletionSyncTimerRef.current !== null) {
+      window.clearTimeout(voiceCompletionSyncTimerRef.current);
+      voiceCompletionSyncTimerRef.current = null;
+    }
+  }, []);
+
+  const updateOptimisticVoiceStatus = useCallback(
+    (
+      statusText: string | null,
+      statusTone?: MessageStatusTone,
+      specificMessageId?: string,
+    ) => {
+      setOptimisticMessages((prev) => {
+        if (!prev.length) {
+          return prev;
+        }
+        const targetId =
+          specificMessageId ??
+          pendingTutorReplyRef.current?.optimisticUserId ??
+          [...prev].reverse().find((message) => message.type === 'user' && message.audioUrl)?.id;
+        if (!targetId) {
+          return prev;
+        }
+        const index = prev.findIndex((message) => message.id === targetId);
+        if (index < 0) {
+          return prev;
+        }
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          statusText: statusText ?? undefined,
+          statusTone: statusTone ?? next[index].statusTone,
+        };
+        return next;
+      });
+    },
+    [],
+  );
+
+  const removeOptimisticTutorLoading = useCallback(() => {
+    setOptimisticMessages((prev) =>
+      prev.filter((message) => !(message.type === 'ai' && message.isLoading)),
+    );
   }, []);
 
   const recoveryMessage = useMemo(() => {
@@ -313,6 +406,177 @@ export default function ConversationPage() {
     }
     return t('streamRecovering');
   }, [recoveryReason, recoveryState, t]);
+
+  const beginPendingTutorReply = useCallback(
+    (
+      channel: 'text' | 'voice',
+      optimisticUserId: string | undefined,
+      loadingMessageId: string,
+    ) => {
+      if (!session) {
+        return;
+      }
+      const { aiCount, userCount } = countSessionMessages(session.messages);
+      pendingTutorReplyRef.current = {
+        channel,
+        startedAiCount: aiCount,
+        startedUserCount: userCount,
+        optimisticUserId,
+        loadingMessageId,
+      };
+      if (channel === 'voice' && optimisticUserId) {
+        const startedAt = Date.now();
+        let hasTriggeredSnapshotPull = false;
+        clearPendingVoiceStatusTimer();
+        pendingVoiceStatusTimerRef.current = window.setInterval(() => {
+          const elapsedMs = Date.now() - startedAt;
+          if (elapsedMs < 2_000) {
+            updateOptimisticVoiceStatus(t('voiceSending'), 'sending', optimisticUserId);
+            return;
+          }
+          if (elapsedMs < 6_000) {
+            updateOptimisticVoiceStatus(t('voiceWaiting'), 'waiting', optimisticUserId);
+            return;
+          }
+          if (elapsedMs < 10_000) {
+            updateOptimisticVoiceStatus(t('voiceRoutingFast'), 'rerouting', optimisticUserId);
+            return;
+          }
+          updateOptimisticVoiceStatus(t('voiceStillWorking'), 'waiting', optimisticUserId);
+          if (!hasTriggeredSnapshotPull && elapsedMs >= 12_000 && session?.id) {
+            hasTriggeredSnapshotPull = true;
+            void fetchConversationById(session.id)
+              .then((latestSession) => {
+                setSession(latestSession);
+              })
+              .catch(() => {
+                // Best-effort pull; SSE remains primary source of truth.
+              });
+          }
+        }, 1_500);
+      }
+    },
+    [clearPendingVoiceStatusTimer, session, t, updateOptimisticVoiceStatus],
+  );
+
+  const clearPendingTutorReply = useCallback(() => {
+    clearPendingVoiceStatusTimer();
+    clearVoiceOperationPoll();
+    clearVoiceCompletionSync();
+    pendingTutorReplyRef.current = null;
+    removeOptimisticTutorLoading();
+  }, [
+    clearVoiceCompletionSync,
+    clearPendingVoiceStatusTimer,
+    clearVoiceOperationPoll,
+    removeOptimisticTutorLoading,
+  ]);
+
+  const syncSessionAfterVoiceCompleted = useCallback(
+    (conversationId: string, baseAiCount: number, attempt = 0) => {
+      clearVoiceCompletionSync();
+      void fetchConversationById(conversationId)
+        .then((latestSession) => {
+          if (latestSession.id !== currentSessionIdRef.current) {
+            return;
+          }
+          const aiCount = latestSession.messages.filter(
+            (message) => message.sender === 'ai',
+          ).length;
+          setSession(latestSession);
+          if (aiCount > baseAiCount) {
+            return;
+          }
+          if (attempt >= 8) {
+            return;
+          }
+          voiceCompletionSyncTimerRef.current = window.setTimeout(() => {
+            syncSessionAfterVoiceCompleted(conversationId, baseAiCount, attempt + 1);
+          }, 250);
+        })
+        .catch(() => {
+          if (attempt >= 8) {
+            return;
+          }
+          voiceCompletionSyncTimerRef.current = window.setTimeout(() => {
+            syncSessionAfterVoiceCompleted(conversationId, baseAiCount, attempt + 1);
+          }, 250);
+        });
+    },
+    [clearVoiceCompletionSync],
+  );
+
+  const startVoiceOperationPoll = useCallback(
+    (conversationId: string, operationId: string) => {
+      clearVoiceOperationPoll();
+      activeVoiceOperationRef.current = { conversationId, operationId };
+
+      const poll = async () => {
+        const active = activeVoiceOperationRef.current;
+        if (
+          !active ||
+          active.conversationId !== conversationId ||
+          active.operationId !== operationId
+        ) {
+          return;
+        }
+
+        try {
+          const snapshot = await fetchVoiceOperationStatus(conversationId, operationId);
+          const latestActive = activeVoiceOperationRef.current;
+          if (
+            !latestActive ||
+            latestActive.conversationId !== conversationId ||
+            latestActive.operationId !== operationId
+          ) {
+            return;
+          }
+
+          if (snapshot.status === 'received' || snapshot.status === 'transcribing') {
+            updateOptimisticVoiceStatus(t('voiceWaiting'), 'waiting');
+          } else if (snapshot.status === 'responding') {
+            updateOptimisticVoiceStatus(t('voiceRoutingFast'), 'rerouting');
+          } else if (snapshot.status === 'completed') {
+            const baseAiCount = pendingTutorReplyRef.current?.startedAiCount ?? 0;
+            clearVoiceOperationPoll();
+            clearPendingVoiceStatusTimer();
+            setIsSending(false);
+            updateOptimisticVoiceStatus(t('voiceStillWorking'), 'waiting');
+            syncSessionAfterVoiceCompleted(conversationId, baseAiCount);
+            return;
+          } else if (snapshot.status === 'failed') {
+            clearPendingTutorReply();
+            updateOptimisticVoiceStatus(t('voiceSendError'), 'error');
+            setIsSending(false);
+            setRecoveryState('error');
+            setRecoveryReason('voice_failed');
+            return;
+          }
+        } catch {
+          // Operation may not be visible immediately; keep polling.
+        }
+
+        if (
+          activeVoiceOperationRef.current?.conversationId === conversationId &&
+          activeVoiceOperationRef.current?.operationId === operationId
+        ) {
+          voiceOperationPollTimerRef.current = window.setTimeout(() => {
+            void poll();
+          }, 1200);
+        }
+      };
+
+      void poll();
+    },
+    [
+      clearPendingTutorReply,
+      clearPendingVoiceStatusTimer,
+      clearVoiceOperationPoll,
+      syncSessionAfterVoiceCompleted,
+      t,
+      updateOptimisticVoiceStatus,
+    ],
+  );
 
   const loadOrResumeSession = useCallback(async () => {
     setIsInitializing(true);
@@ -387,6 +651,10 @@ export default function ConversationPage() {
     ttsVoiceRef.current = ttsVoice;
   }, [ttsVoice]);
 
+  useEffect(() => {
+    currentSessionIdRef.current = session?.id ?? null;
+  }, [session?.id]);
+
   const sessionMessages = useMemo(
     () => (session ? mapSessionToMessages(session, ttsAudioMap) : []),
     [session, ttsAudioMap],
@@ -453,16 +721,41 @@ export default function ConversationPage() {
     }
     const nextCount = session.messages.length;
     const prevCount = lastSessionMessageCountRef.current;
-    if (nextCount > prevCount) {
-      setOptimisticMessages([]);
+    const pending = pendingTutorReplyRef.current;
+    const { aiCount, userCount } = countSessionMessages(session.messages);
+
+    if (pending) {
+      const tutorReplied = aiCount > pending.startedAiCount;
+      if (tutorReplied) {
+        clearPendingTutorReply();
+        setOptimisticMessages([]);
+        setIsSending(false);
+        if (voiceDraftUrlRef.current) {
+          URL.revokeObjectURL(voiceDraftUrlRef.current);
+          voiceDraftUrlRef.current = null;
+        }
+      } else if (pending.optimisticUserId && userCount > pending.startedUserCount) {
+        const optimisticUserId = pending.optimisticUserId;
+        pendingTutorReplyRef.current = {
+          ...pending,
+          optimisticUserId: undefined,
+        };
+        setOptimisticMessages((prev) =>
+          prev.filter((message) => message.id !== optimisticUserId),
+        );
+      }
+    } else if (nextCount > prevCount) {
       setIsSending(false);
+      setOptimisticMessages((prev) =>
+        prev.filter((message) => !(message.type === 'ai' && message.isLoading)),
+      );
       if (voiceDraftUrlRef.current) {
         URL.revokeObjectURL(voiceDraftUrlRef.current);
         voiceDraftUrlRef.current = null;
       }
     }
     lastSessionMessageCountRef.current = nextCount;
-  }, [session]);
+  }, [clearPendingTutorReply, session]);
 
   const handleRecoveryRetry = useCallback(async () => {
     clearStreamRecoveryTimer();
@@ -622,7 +915,8 @@ export default function ConversationPage() {
     if (!session?.id) {
       return;
     }
-    setSessionSummary((prev) => prev ?? buildLocalSessionSummary(session));
+    clearPendingTutorReply();
+    setIsSending(false);
     lastSummaryAiCountRef.current = 0;
     setTtsAudioMap({});
     ttsRequestsRef.current.clear();
@@ -631,7 +925,7 @@ export default function ConversationPage() {
       URL.revokeObjectURL(voiceDraftUrlRef.current);
       voiceDraftUrlRef.current = null;
     }
-  }, [session, session?.id]);
+  }, [clearPendingTutorReply, session?.id]);
 
   useEffect(() => {
     if (!session?.id || chatMode === 'immersive') {
@@ -720,6 +1014,7 @@ export default function ConversationPage() {
 
   useEffect(() => {
     return () => {
+      clearPendingTutorReply();
       clearStreamRecoveryTimer();
       if (mediaRecorderRef.current?.state === 'recording') {
         mediaRecorderRef.current.stop();
@@ -729,25 +1024,7 @@ export default function ConversationPage() {
         URL.revokeObjectURL(voiceDraftUrlRef.current);
       }
     };
-  }, [clearStreamRecoveryTimer]);
-
-  const updateOptimisticVoiceStatus = (statusText: string | null) => {
-    setOptimisticMessages((prev) => {
-      const reversedIndex = [...prev]
-        .reverse()
-        .findIndex((message) => message.type === 'user' && message.audioUrl);
-      if (reversedIndex < 0) {
-        return prev;
-      }
-      const targetIndex = prev.length - 1 - reversedIndex;
-      const next = [...prev];
-      next[targetIndex] = {
-        ...next[targetIndex],
-        statusText: statusText ?? undefined,
-      };
-      return next;
-    });
-  };
+  }, [clearPendingTutorReply, clearStreamRecoveryTimer]);
 
   const loadHistory = async () => {
     setIsLoadingHistory(true);
@@ -825,21 +1102,23 @@ export default function ConversationPage() {
     const messageText = inputValue.trim();
     setInputValue('');
     setIsSending(true);
-    setOptimisticMessages([
-      buildOptimisticUserMessage(messageText),
-      buildTutorLoadingMessage(),
-    ]);
+    const optimisticUser = buildOptimisticUserMessage(messageText);
+    const loadingMessage = buildTutorLoadingMessage();
+    setOptimisticMessages([optimisticUser, loadingMessage]);
+    beginPendingTutorReply('text', optimisticUser.id, loadingMessage.id);
 
     try {
       const nextSession = await sendConversationMessage(
         session.id,
         messageText,
       );
+      clearPendingTutorReply();
       setSession(nextSession);
       setOptimisticMessages([]);
       setRecoveryState(null);
       setRecoveryReason(undefined);
     } catch {
+      clearPendingTutorReply();
       toast.error(t('sendError'), { id: 'send' });
       setInputValue(messageText);
       setOptimisticMessages([]);
@@ -873,13 +1152,15 @@ export default function ConversationPage() {
     }
     // Reset TTS baseline so new AI replies get synthesized
     ttsBaselineRef.current = 0;
-    updateOptimisticVoiceStatus(t('voiceSending'));
+    updateOptimisticVoiceStatus(t('voiceSending'), 'sending');
     try {
-      await uploadConversationVoice(session.id, audio);
+      const uploadResult = await uploadConversationVoice(session.id, audio);
+      startVoiceOperationPoll(session.id, uploadResult.operationId);
       setRecoveryState(null);
       setRecoveryReason(undefined);
     } catch {
-      updateOptimisticVoiceStatus(t('voiceSendError'));
+      clearPendingTutorReply();
+      updateOptimisticVoiceStatus(t('voiceSendError'), 'error');
       setIsSending(false);
       setOptimisticMessages((prev) =>
         prev.filter((message) => !(message.type === 'ai' && message.isLoading)),
@@ -888,7 +1169,7 @@ export default function ConversationPage() {
       setRecoveryReason('voice_failed');
       return;
     }
-    updateOptimisticVoiceStatus(t('voiceWaiting'));
+    updateOptimisticVoiceStatus(t('voiceWaiting'), 'waiting');
   };
 
   const startRecording = async () => {
@@ -935,13 +1216,17 @@ export default function ConversationPage() {
         }
         voiceDraftUrlRef.current = previewUrl;
         setIsSending(true);
-        setOptimisticMessages([
+        const optimisticVoiceUser = buildOptimisticUserMessage(
+          t('voiceMessageLabel'),
+          previewUrl,
           {
-            ...buildOptimisticUserMessage(t('voiceMessageLabel'), previewUrl),
             statusText: t('voiceSending'),
+            statusTone: 'sending',
           },
-          buildTutorLoadingMessage(),
-        ]);
+        );
+        const loadingMessage = buildTutorLoadingMessage();
+        setOptimisticMessages([optimisticVoiceUser, loadingMessage]);
+        beginPendingTutorReply('voice', optimisticVoiceUser.id, loadingMessage.id);
         void handleVoiceUpload(blob);
       };
 

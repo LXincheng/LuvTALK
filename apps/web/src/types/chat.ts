@@ -1,4 +1,5 @@
 export type MessageType = 'user' | 'ai';
+export type MessageStatusTone = 'sending' | 'waiting' | 'rerouting' | 'error';
 
 export interface Annotation {
   word: string;
@@ -21,5 +22,6 @@ export interface Message {
   isLoading?: boolean;
   isOptimistic?: boolean;
   statusText?: string;
+  statusTone?: MessageStatusTone;
   timestamp: Date;
 }

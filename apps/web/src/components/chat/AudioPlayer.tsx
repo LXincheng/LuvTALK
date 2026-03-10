@@ -22,7 +22,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
   const [currentTime, setCurrentTime] = useState(0);
   const animFrameRef = useRef<number>(0);
 
-  const syncProgress = useCallback(() => {
+  const syncProgress = useCallback(function syncProgressFrame() {
     const audio = audioRef.current;
     if (!audio) return;
     setCurrentTime(audio.currentTime);
@@ -31,7 +31,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
       setProgress(audio.currentTime / dur);
     }
     if (!audio.paused) {
-      animFrameRef.current = requestAnimationFrame(syncProgress);
+      animFrameRef.current = requestAnimationFrame(syncProgressFrame);
     }
   }, []);
 

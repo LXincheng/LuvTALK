@@ -3,7 +3,10 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { Observable, Subject } from "rxjs";
 import { envConfig } from "../../common/config/env.config";
-import { buildConversationSystemPrompt } from "../../common/config/prompt.config";
+import {
+  buildConversationSystemPrompt,
+  TutorInteractionMode,
+} from "../../common/config/prompt.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import {
   ConversationCoachNote,
@@ -20,13 +23,18 @@ import { SessionCacheService } from "../../common/cache/session-cache.service";
 import { TranslationService } from "../translation/translation.service";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { StartConversationDto } from "./dto/start-conversation.dto";
+import { normalizeAiResponsePayload } from "./ai-response-normalizer";
 import {
   buildSessionSummary,
   SessionSummaryPayload,
 } from "./conversation-summary.types";
 
-const DEFAULT_MODEL = "deepseek-chat";
+const DEFAULT_MODEL = "deepseek-reasoner";
+const DEFAULT_FALLBACK_MODEL = "deepseek-chat";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
+const DEEPSEEK_PRIMARY_TIMEOUT_MS = 3_200;
+const DEEPSEEK_FALLBACK_TIMEOUT_MS = 1_800;
+const OPENAI_TUTOR_TIMEOUT_MS = 7_000;
 
 const buildAvatarDataUrl = (svg: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -342,14 +350,24 @@ export class ConversationService {
     // Early broadcast: user message appears instantly in the UI
     this.broadcastSession(session);
 
-    const aiPayload =
-      (await this.requestOpenAi(session, trimmed)) ??
-      (await this.requestDsAi(session, trimmed)) ??
+    const interactionMode = this.resolveInteractionMode(
+      options?.userMessageMeta,
+    );
+    const rawAiPayload =
+      (await this.requestOpenAi(session, trimmed, interactionMode)) ??
+      (await this.requestDsAi(session, trimmed, interactionMode)) ??
       this.composeAiResponse(
         trimmed,
         session.targetLanguage,
         session.scenarioId,
       );
+    const aiPayload = this.enrichPayloadForInteractionMode(
+      rawAiPayload,
+      interactionMode,
+      session.targetLanguage,
+      session.nativeLanguage ?? LanguageCode.Mandarin,
+      session.scenarioId,
+    );
 
     const normalizedKeyTerms = this.normalizeKeyTerms(
       aiPayload.reply,
@@ -586,11 +604,12 @@ export class ConversationService {
   private async requestOpenAi(
     session: ConversationSession,
     latestMessage: string,
+    interactionMode: TutorInteractionMode,
   ): Promise<AiResponse | null> {
     const { apiKey, tutorModel } = envConfig.openai;
     const endpoint = this.openAiEndpoint;
     if (!apiKey || !tutorModel || !endpoint) {
-      this.logger.warn("OpenAI tutor config missing; skipping Yunwu GPT-5.1.");
+      this.logger.warn("OpenAI tutor config missing; skipping Yunwu GPT-5.2.");
       return null;
     }
 
@@ -606,6 +625,7 @@ export class ConversationService {
         session.scenarioId,
         session.nativeLanguage,
       ),
+      interactionMode,
     });
 
     const payload = {
@@ -623,14 +643,18 @@ export class ConversationService {
     );
 
     try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+      const response = await this.fetchWithTimeout(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+        OPENAI_TUTOR_TIMEOUT_MS,
+      );
 
       if (!response.ok) {
         const detail = await response.text();
@@ -650,8 +674,18 @@ export class ConversationService {
         return null;
       }
 
-      return this.parseAiResponseContent(content, "Auto-evaluated by GPT-5.1");
+      return this.parseAiResponseContent(
+        content,
+        "Auto-evaluated by GPT-5.2",
+        session.targetLanguage,
+      );
     } catch (error) {
+      if (this.isAbortError(error)) {
+        this.logger.warn(
+          `OpenAI tutor timed out after ${OPENAI_TUTOR_TIMEOUT_MS}ms, switching to fallback source.`,
+        );
+        return null;
+      }
       this.logger.error(
         `OpenAI tutor call failed: ${(error as Error).message}`,
       );
@@ -662,6 +696,7 @@ export class ConversationService {
   private parseAiResponseContent(
     content: string,
     fallbackReason: string,
+    targetLanguage: LanguageCode,
   ): AiResponse | null {
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
@@ -674,32 +709,14 @@ export class ConversationService {
         string,
         unknown
       >;
-      if (!parsed.scoreReason) {
-        parsed.scoreReason = fallbackReason;
+      const normalized = normalizeAiResponsePayload(parsed, {
+        fallbackReason,
+        targetLanguage,
+      });
+      if (!normalized) {
+        this.logger.warn("AI response normalization failed.");
       }
-      if (parsed.key_terms && !parsed.keyTerms) {
-        parsed.keyTerms = parsed.key_terms;
-      }
-      if (Array.isArray(parsed.keyTerms)) {
-        parsed.keyTerms = parsed.keyTerms.map((entry) => {
-          const record = entry as Record<string, unknown>;
-          const examples = Array.isArray(record.examples)
-            ? record.examples.filter(
-                (example): example is string => typeof example === "string",
-              )
-            : [];
-          return {
-            term: typeof record.term === "string" ? record.term : "",
-            definition:
-              typeof record.definition === "string" ? record.definition : "",
-            type: typeof record.type === "string" ? record.type : undefined,
-            examples,
-          };
-        });
-      } else {
-        parsed.keyTerms = [];
-      }
-      return AiResponseSchema.parse(parsed);
+      return normalized;
     } catch (error) {
       this.logger.warn(
         `Failed to parse AI response JSON: ${(error as Error).message}`,
@@ -711,6 +728,7 @@ export class ConversationService {
   private async requestDsAi(
     session: ConversationSession,
     latestMessage: string,
+    interactionMode: TutorInteractionMode,
   ): Promise<AiResponse | null> {
     const apiKey =
       envConfig.deepseek.apiKey ||
@@ -726,66 +744,433 @@ export class ConversationService {
       content: entry.text,
     }));
 
-    const prompt = buildConversationSystemPrompt({
+    const prompt = this.buildDeepSeekFallbackPrompt({
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
       scenarioLabel: this.describeScenario(
         session.scenarioId,
         session.nativeLanguage,
       ),
+      interactionMode,
     });
 
-    const model =
-      envConfig.deepseek.model || process.env.DS_AI_MODEL || DEFAULT_MODEL;
+    const configuredPrimary =
+      (envConfig.deepseek.model || process.env.DS_AI_MODEL || "").trim();
+    const configuredFallback =
+      (
+        envConfig.deepseek.fallbackModel ||
+        process.env.DS_AI_FALLBACK_MODEL ||
+        ""
+      ).trim();
 
-    const payload = {
+    // Force backup order: deepseek-reasoner -> deepseek-chat, then configured extras.
+    const orderedModels = [
+      DEFAULT_MODEL,
+      DEFAULT_FALLBACK_MODEL,
+      configuredPrimary,
+      configuredFallback,
+    ].filter((model, index, list) => model && list.indexOf(model) === index);
+
+    const candidates = orderedModels.map((model, index) => ({
       model,
-      temperature: 0.6,
-      stream: false,
-      messages: [
-        { role: "system", content: prompt },
-        ...history,
-        { role: "user", content: latestMessage },
-      ],
-    };
+      timeoutMs:
+        index === 0 ? DEEPSEEK_PRIMARY_TIMEOUT_MS : DEEPSEEK_FALLBACK_TIMEOUT_MS,
+      label: index === 0 ? "primary" : index === 1 ? "fallback" : "extra",
+    }));
 
-    this.logger.log(
-      `DeepSeek request -> ${this.deepSeekEndpoint} | model=${model} | messages=${payload.messages.length}`,
-    );
+    for (const candidate of candidates) {
+      const payload = {
+        model: candidate.model,
+        temperature: 0.6,
+        stream: false,
+        messages: [
+          { role: "system", content: prompt },
+          ...history,
+          { role: "user", content: latestMessage },
+        ],
+      };
 
-    try {
-      const response = await fetch(this.deepSeekEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      this.logger.log(
+        `DeepSeek request (${candidate.label}) -> ${this.deepSeekEndpoint} | model=${candidate.model} | timeout=${candidate.timeoutMs}ms | messages=${payload.messages.length}`,
+      );
 
-      if (!response.ok) {
-        const detail = await response.text();
-        this.logger.warn(
-          `DeepSeek responded with ${response.status}: ${detail}`,
+      try {
+        const response = await this.fetchWithTimeout(
+          this.deepSeekEndpoint,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          },
+          candidate.timeoutMs,
         );
-        return null;
+
+        if (!response.ok) {
+          const detail = await response.text();
+          this.logger.warn(
+            `DeepSeek ${candidate.label} model responded with ${response.status}: ${detail}`,
+          );
+          continue;
+        }
+
+        const raw: unknown = await response.json();
+        const content = (
+          raw as { choices?: Array<{ message?: { content?: string } }> }
+        )?.choices?.[0]?.message?.content;
+
+        if (!content) {
+          this.logger.warn(
+            `DeepSeek ${candidate.label} model returned empty content.`,
+          );
+          continue;
+        }
+
+        const parsed = this.parseAiResponseContent(
+          content,
+          "Auto-evaluated by DeepSeek",
+          session.targetLanguage,
+        );
+        if (parsed) {
+          return this.enrichFallbackTeachingTips(
+            parsed,
+            session.targetLanguage,
+            session.nativeLanguage ?? LanguageCode.Mandarin,
+            interactionMode,
+            session.scenarioId,
+            latestMessage,
+          );
+        }
+
+        const plainFallback = this.buildAiResponseFromPlainText(
+          content,
+          session.targetLanguage,
+          session.nativeLanguage ?? LanguageCode.Mandarin,
+          interactionMode,
+          session.scenarioId,
+          latestMessage,
+        );
+        if (plainFallback) {
+          return plainFallback;
+        }
+
+        this.logger.warn(
+          `DeepSeek ${candidate.label} model returned invalid JSON payload.`,
+        );
+      } catch (error) {
+        if (this.isAbortError(error)) {
+          this.logger.warn(
+            `DeepSeek ${candidate.label} model timed out after ${candidate.timeoutMs}ms.`,
+          );
+          continue;
+        }
+        this.logger.error(
+          `DeepSeek ${candidate.label} model failed: ${(error as Error).message}`,
+        );
       }
+    }
 
-      const raw: unknown = await response.json();
-      const content = (
-        raw as { choices?: Array<{ message?: { content?: string } }> }
-      )?.choices?.[0]?.message?.content;
+    return null;
+  }
 
-      if (!content) {
-        this.logger.warn("DeepSeek returned empty content.");
-        return null;
-      }
+  private buildDeepSeekFallbackPrompt(input: {
+    targetLanguage: LanguageCode;
+    nativeLanguage: LanguageCode;
+    scenarioLabel: string;
+    interactionMode: TutorInteractionMode;
+  }): string {
+    const basePrompt = buildConversationSystemPrompt(input);
+    const nativeLabel = this.describeLanguage(
+      input.nativeLanguage,
+      input.nativeLanguage,
+    );
+    const targetLabel = this.describeLanguage(
+      input.targetLanguage,
+      input.nativeLanguage,
+    );
+    const modeSpecificRules: string[] =
+      input.interactionMode === "voice"
+        ? [
+            "- voice mode: keep reply to 1-2 short spoken sentences in target language.",
+            "- voice mode: include one concise coaching point; avoid textbook style.",
+          ]
+        : input.interactionMode === "text"
+          ? [
+              "- text mode: reply must include target-language conversational response, plus 1-2 numbered native-language study steps.",
+              "- text mode: study steps must be specific and immediately actionable.",
+            ]
+          : input.interactionMode === "review"
+            ? [
+                "- review mode: include one concise error recap and one replacement expression.",
+              ]
+            : [
+                "- immersive mode: keep response short, natural, and momentum-driven.",
+              ];
+    return [
+      basePrompt,
+      "",
+      "DEEPSEEK FALLBACK QUALITY GUARD:",
+      `- Learner native language: ${nativeLabel}; target language: ${targetLabel}.`,
+      `- Scenario focus: ${input.scenarioLabel}. Keep teaching tied to this scenario.`,
+      "- Return ONLY one valid JSON object.",
+      "- Keep reply practical and natural for this exact scenario, not generic.",
+      "- reply should include one scenario-fit expression and one forward-moving line.",
+      "- Always include at least one concrete correction and at least one pronunciation/grammar tip.",
+      "- pronunciationTip, rhythmTip, grammarTip must be short and actionable.",
+      "- cultureNote should explain one context-specific usage point in learner native language.",
+      "- associativePhrases must be scenario-relevant and reusable in the next turn.",
+      ...modeSpecificRules,
+      "- Avoid empty strings, avoid markdown, avoid extra commentary outside JSON.",
+    ].join("\n");
+  }
 
-      return this.parseAiResponseContent(content, "Auto-evaluated by DeepSeek");
-    } catch (error) {
-      this.logger.error(`DeepSeek call failed: ${(error as Error).message}`);
+  private enrichFallbackTeachingTips(
+    payload: AiResponse,
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+    interactionMode: TutorInteractionMode,
+    scenarioId: string,
+    latestMessage: string,
+  ): AiResponse {
+    const fallback = this.buildDefaultTeachingTips(
+      targetLanguage,
+      nativeLanguage,
+      interactionMode,
+      scenarioId,
+    );
+    return {
+      ...payload,
+      reply: this.ensureScenarioTeachingReply(
+        payload.reply,
+        targetLanguage,
+        scenarioId,
+        interactionMode,
+        latestMessage,
+      ),
+      correction: payload.correction?.trim() || fallback.correction,
+      cultureNote: payload.cultureNote?.trim() || fallback.cultureNote,
+      pronunciationTip:
+        payload.pronunciationTip?.trim() || fallback.pronunciationTip,
+      rhythmTip: payload.rhythmTip?.trim() || fallback.rhythmTip,
+      grammarTip: payload.grammarTip?.trim() || fallback.grammarTip,
+    };
+  }
+
+  private buildDefaultTeachingTips(
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+    interactionMode: TutorInteractionMode,
+    scenarioId: string,
+  ): {
+    correction: string;
+    cultureNote: string;
+    pronunciationTip: string;
+    rhythmTip: string;
+    grammarTip: string;
+  } {
+    const prefersEnglish = nativeLanguage === LanguageCode.English;
+    const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
+    const scenarioLabel = this.describeScenario(scenarioId, nativeLanguage);
+    if (prefersEnglish) {
+      return {
+        correction:
+          interactionMode === "voice"
+            ? `In ${scenarioLabel}, use one shorter ${targetLabel} sentence first, then add details in the next turn.`
+            : `For ${scenarioLabel}, polish one sentence in ${targetLabel} first, and keep the next sentence concise.`,
+        cultureNote:
+          interactionMode === "voice"
+            ? `In ${scenarioLabel}, start with one positive phrase before asking a question to sound natural.`
+            : `In ${scenarioLabel}, add one friendly acknowledgement before your request.`,
+        pronunciationTip:
+          "Slow down the stressed syllables and keep ending consonants clear.",
+        rhythmTip:
+          "Pause briefly after each clause instead of speaking in one long breath.",
+        grammarTip:
+          "Prefer one tense in one sentence; avoid mixing structures in the same turn.",
+      };
+    }
+    return {
+      correction:
+        interactionMode === "voice"
+          ? `在${scenarioLabel}场景中，先用一句更短的${targetLabel}表达核心意思，再补充细节。`
+          : `在${scenarioLabel}场景中，先把一句${targetLabel}核心表达说完整，再用下一句补充信息。`,
+      cultureNote:
+        interactionMode === "voice"
+          ? `在${scenarioLabel}里先肯定对方再提出问题，会更像真实口语互动。`
+          : `在${scenarioLabel}里先做简短回应再表达需求，更符合母语者交流习惯。`,
+      pronunciationTip: "重读关键词，句尾辅音收清楚，语气会更自然。",
+      rhythmTip: "按意群做短停顿，不要一口气读完整句。",
+      grammarTip: "一句话只保留一个主结构，避免时态和句式混用。",
+    };
+  }
+
+  private ensureScenarioTeachingReply(
+    reply: string,
+    targetLanguage: LanguageCode,
+    scenarioId: string,
+    interactionMode: TutorInteractionMode,
+    latestMessage: string,
+  ): string {
+    const trimmed = reply.trim();
+    if (trimmed.length >= 28) {
+      return trimmed;
+    }
+    const scenario = this.describeScenario(scenarioId, targetLanguage);
+    if (targetLanguage === LanguageCode.English) {
+      return `${trimmed} In this ${scenario} context, try: "${latestMessage}" with one clearer key phrase and a follow-up question.`;
+    }
+    if (targetLanguage === LanguageCode.Cantonese) {
+      return `${trimmed} 喺${scenario}呢个场景，你可以先讲重点，再加一句追问令对话更自然。`;
+    }
+    return `${trimmed} 在${scenario}场景里，你可以先说重点，再补一句追问，让表达更像母语者。`;
+  }
+
+  private buildAiResponseFromPlainText(
+    content: string,
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+    interactionMode: TutorInteractionMode,
+    scenarioId: string,
+    latestMessage: string,
+  ): AiResponse | null {
+    const plain = content.trim();
+    if (!plain) {
       return null;
     }
+    const fallbackTips = this.buildDefaultTeachingTips(
+      targetLanguage,
+      nativeLanguage,
+      interactionMode,
+      scenarioId,
+    );
+    return AiResponseSchema.parse({
+      reply: this.ensureScenarioTeachingReply(
+        plain,
+        targetLanguage,
+        scenarioId,
+        interactionMode,
+        latestMessage,
+      ),
+      correction: fallbackTips.correction,
+      cultureNote: fallbackTips.cultureNote,
+      associativePhrases: this.buildScenarioAssociativePhrases(
+        targetLanguage,
+        scenarioId,
+      ),
+      score: 72,
+      scoreReason:
+        nativeLanguage === LanguageCode.English
+          ? "Fallback scoring based on DeepSeek plain-text response."
+          : "DeepSeek 返回纯文本，已启用教学兜底评分。",
+      pronunciationTip: fallbackTips.pronunciationTip,
+      rhythmTip: fallbackTips.rhythmTip,
+      grammarTip: fallbackTips.grammarTip,
+      keyTerms: [],
+    });
+  }
+
+  private buildScenarioAssociativePhrases(
+    targetLanguage: LanguageCode,
+    scenarioId: string,
+  ): [string, string] {
+    if (targetLanguage === LanguageCode.English) {
+      switch (scenarioId) {
+        case "restaurant":
+          return [
+            "Could you recommend your signature dish?",
+            "I'd like something light but flavorful.",
+          ];
+        case "directions":
+          return [
+            "Could you show me the fastest route?",
+            "Is it within walking distance from here?",
+          ];
+        case "business":
+          return [
+            "Could we align on the next action today?",
+            "Let's confirm the timeline before we proceed.",
+          ];
+        default:
+          return [
+            "Could you tell me more about that?",
+            "That sounds great. What should I do next?",
+          ];
+      }
+    }
+    if (targetLanguage === LanguageCode.Cantonese) {
+      return ["可唔可以介绍一个最啱新手嘅讲法？", "我下一句可以点样讲得更自然？"];
+    }
+    return ["你可以给我一个更地道的说法吗？", "我下一句怎么接会更自然？"];
+  }
+
+  private enrichPayloadForInteractionMode(
+    payload: AiResponse,
+    interactionMode: TutorInteractionMode,
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+    scenarioId: string,
+  ): AiResponse {
+    if (interactionMode !== "text") {
+      return payload;
+    }
+    return {
+      ...payload,
+      reply: this.ensureStructuredTextTeachingReply(
+        payload,
+        targetLanguage,
+        nativeLanguage,
+        scenarioId,
+      ),
+    };
+  }
+
+  private ensureStructuredTextTeachingReply(
+    payload: AiResponse,
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+    scenarioId: string,
+  ): string {
+    const rawReply = payload.reply.trim();
+    const alreadyStructured =
+      /(\n|^)\s*(学习建议|Study Steps)[:：]/i.test(rawReply) ||
+      /(\n|^)\s*1[\).]/.test(rawReply);
+    if (alreadyStructured) {
+      return rawReply;
+    }
+
+    const fallbackTips = this.buildDefaultTeachingTips(
+      targetLanguage,
+      nativeLanguage,
+      "text",
+      scenarioId,
+    );
+    const stepCandidates = [
+      payload.correction,
+      payload.grammarTip,
+      payload.pronunciationTip,
+      payload.rhythmTip,
+      payload.cultureNote,
+      payload.scoreReason,
+      fallbackTips.correction,
+      fallbackTips.grammarTip,
+    ]
+      .map((item) => item?.trim())
+      .filter((item): item is string => Boolean(item))
+      .filter((item, index, list) => list.indexOf(item) === index);
+
+    const step1 = stepCandidates[0] ?? fallbackTips.correction;
+    const step2 = stepCandidates[1] ?? fallbackTips.cultureNote;
+    const sectionTitle =
+      nativeLanguage === LanguageCode.English ? "Study Steps" : "学习建议";
+    return [
+      rawReply,
+      "",
+      `${sectionTitle}:`,
+      `1. ${step1}`,
+      `2. ${step2}`,
+    ].join("\n");
   }
 
   private async translateForNativeLanguage(
@@ -822,22 +1207,31 @@ export class ConversationService {
       Math.min(98, 92 - Math.round(Math.min(polite.length, 120) / 6)),
     );
 
+    const tips = this.buildDefaultTeachingTips(
+      language,
+      LanguageCode.Mandarin,
+      "text",
+      scenarioId,
+    );
     return AiResponseSchema.parse({
-      reply: this.buildReply(polite, language, scenarioId),
-      correction:
-        polite.length > 28
-          ? "句子稍长，可以适当停顿让语气更自然。"
-          : "表达清晰，保持礼貌语气即可。",
-      cultureNote:
-        scenarioId === "restaurant"
-          ? "点餐前赞美餐厅或询问招牌菜，会让对话更友好。"
-          : "搭配表情或手势会让口语更真诚。",
-      associativePhrases: [
-        "可以帮我推荐一下招牌菜吗？",
-        "Could you recommend something locals enjoy?",
-      ],
+      reply: this.ensureScenarioTeachingReply(
+        this.buildReply(polite, language, scenarioId),
+        language,
+        scenarioId,
+        "text",
+        polite,
+      ),
+      correction: tips.correction,
+      cultureNote: tips.cultureNote,
+      associativePhrases: this.buildScenarioAssociativePhrases(
+        language,
+        scenarioId,
+      ),
       score,
-      scoreReason: "基于语气与礼貌度的快速估分",
+      scoreReason: "基于语气、场景贴合度与可理解性的兜底估分",
+      pronunciationTip: tips.pronunciationTip,
+      rhythmTip: tips.rhythmTip,
+      grammarTip: tips.grammarTip,
       keyTerms: [],
     });
   }
@@ -939,6 +1333,15 @@ export class ConversationService {
       associativePhrases: aiPayload.associativePhrases,
       overallScore: aiPayload.score,
     };
+  }
+
+  private resolveInteractionMode(
+    messageMeta?: ConversationMessage["meta"],
+  ): TutorInteractionMode {
+    if (messageMeta?.audioUrl || messageMeta?.source === "realtime") {
+      return "voice";
+    }
+    return "text";
   }
 
   private async persistSession(session: ConversationSession): Promise<void> {
@@ -1237,6 +1640,34 @@ export class ConversationService {
       return `${raw}/chat/completions`;
     }
     return `${raw}/v1/chat/completions`;
+  }
+
+  private async fetchWithTimeout(
+    input: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private isAbortError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      (error.name === "AbortError" ||
+        (typeof error.message === "string" &&
+          error.message.toLowerCase().includes("abort")))
+    );
   }
 }
 

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { exec } from "child_process";
 import { randomUUID } from "crypto";
 import { createReadStream } from "fs";
@@ -48,7 +49,8 @@ export class VoiceTutorService {
   }
 
   private validateOpenAiSetup(): void {
-    const { apiKey, apiUrl, audioApiUrl, transcribeModel, ttsModel } = envConfig.openai;
+    const { apiKey, apiUrl, audioApiUrl, transcribeModel, ttsModel } =
+      envConfig.openai;
     if (!apiKey) {
       this.logger.warn("Yunwu OpenAI API key missing; STT/TTS disabled.");
       return;
@@ -208,7 +210,7 @@ export class VoiceTutorService {
     const mp3FileName = upload.fileName.replace(/\.[^.]+$/, ".mp3");
 
     try {
-      const { path: ffmpegPath } = require("@ffmpeg-installer/ffmpeg");
+      const ffmpegPath = ffmpegInstaller.path;
       await new Promise<void>((resolve, reject) => {
         exec(
           `"${ffmpegPath}" -i "${upload.filePath}" -y -vn -ar 16000 -ac 1 -b:a 64k "${mp3Path}"`,
@@ -219,7 +221,12 @@ export class VoiceTutorService {
       // Remove original file
       await unlink(upload.filePath).catch(() => {});
       this.logger.debug(`Converted ${ext} -> mp3: ${mp3FileName}`);
-      return { ...upload, filePath: mp3Path, fileName: mp3FileName, mimeType: "audio/mpeg" };
+      return {
+        ...upload,
+        filePath: mp3Path,
+        fileName: mp3FileName,
+        mimeType: "audio/mpeg",
+      };
     } catch (error) {
       this.logger.warn(
         `ffmpeg conversion failed, sending original ${ext}: ${error instanceof Error ? error.message : String(error)}`,
@@ -372,6 +379,7 @@ export class VoiceTutorService {
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
     const resolvedVoice = voice ?? languageHint.ttsVoice;
     const directory = join(this.storageRoot, conversationId);
+    const speechInput = this.normalizeTtsInput(text);
 
     // Reuse existing synthesized audio from the same session/text/voice to avoid duplicate API calls.
     const reusable = await this.findReusableTtsAudio(
@@ -387,21 +395,18 @@ export class VoiceTutorService {
       return reusable;
     }
     try {
-      const response = await fetch(
-        `${audioApiUrl.replace(/\/$/, "")}/speech`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: ttsModel,
-            input: text,
-            voice: resolvedVoice,
-          }),
+      const response = await fetch(`${audioApiUrl.replace(/\/$/, "")}/speech`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          model: ttsModel,
+          input: speechInput,
+          voice: resolvedVoice,
+        }),
+      });
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error(
@@ -453,6 +458,34 @@ export class VoiceTutorService {
     }
   }
 
+  /**
+   * Make TTS output sound more like spoken tutoring:
+   * - strip markdown-like symbols
+   * - collapse noisy whitespace
+   * - preserve sentence punctuation for natural pauses
+   */
+  private normalizeTtsInput(text: string): string {
+    const cleaned = text
+      .replace(/[`*_#>|~]/g, " ")
+      .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!cleaned) {
+      return text.trim();
+    }
+
+    const punctuated = cleaned
+      .replace(/([,，;；:：])(?=\S)/g, "$1 ")
+      .replace(/([。！？!?])(?=\S)/g, "$1 ");
+
+    const maxLength = 320;
+    if (punctuated.length <= maxLength) {
+      return punctuated;
+    }
+    return `${punctuated.slice(0, maxLength).trimEnd()}...`;
+  }
+
   private async findReusableTtsAudio(
     session: Awaited<ReturnType<ConversationService["getSession"]>>,
     conversationId: string,
@@ -463,24 +496,22 @@ export class VoiceTutorService {
     if (!target) {
       return undefined;
     }
-    const candidate = [...session.messages]
-      .reverse()
-      .find((message) => {
-        if (message.sender !== "ai") {
-          return false;
-        }
-        if (message.text.trim() !== target) {
-          return false;
-        }
-        if (!message.meta?.audioUrl) {
-          return false;
-        }
-        // Backward compatible: old records may not have ttsVoice.
-        if (!message.meta.ttsVoice) {
-          return true;
-        }
-        return message.meta.ttsVoice === voice;
-      });
+    const candidate = [...session.messages].reverse().find((message) => {
+      if (message.sender !== "ai") {
+        return false;
+      }
+      if (message.text.trim() !== target) {
+        return false;
+      }
+      if (!message.meta?.audioUrl) {
+        return false;
+      }
+      // Backward compatible: old records may not have ttsVoice.
+      if (!message.meta.ttsVoice) {
+        return true;
+      }
+      return message.meta.ttsVoice === voice;
+    });
     if (!candidate?.meta?.audioUrl) {
       return undefined;
     }

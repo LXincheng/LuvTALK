@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronRight, Lock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLocale } from '../providers/LocaleContext';
+import type { LocaleKey } from '../providers/LocaleContext';
 import { RARITY_GLOW } from '../constants/ui';
 import {
   fetchAchievementsCached,
@@ -34,7 +35,13 @@ interface Level {
   minXP: number;
   unlocked: boolean;
 }
-const ACHIEVEMENT_I18N: Record<string, { titleKey: string; descKey: string }> = {
+
+type TranslateFn = (key: LocaleKey) => string;
+
+const ACHIEVEMENT_I18N: Record<
+  string,
+  { titleKey: LocaleKey; descKey: LocaleKey }
+> = {
   first_steps: { titleKey: 'achievementFirstStepsTitle', descKey: 'achievementFirstStepsDesc' },
   week_warrior: { titleKey: 'achievementWeekWarriorTitle', descKey: 'achievementWeekWarriorDesc' },
   vocab_master: { titleKey: 'achievementVocabMasterTitle', descKey: 'achievementVocabMasterDesc' },
@@ -45,28 +52,28 @@ const ACHIEVEMENT_I18N: Record<string, { titleKey: string; descKey: string }> = 
   diamond_streak: { titleKey: 'achievementDiamondStreakTitle', descKey: 'achievementDiamondStreakDesc' },
 };
 
-const LEVEL_I18N: Record<number, string> = {
+const LEVEL_I18N: Record<number, LocaleKey> = {
   1: 'levelBeginner', 2: 'levelNovice', 3: 'levelLearner', 4: 'levelIntermediate',
   5: 'levelAdvanced', 6: 'levelExpert', 7: 'levelMaster', 8: 'levelLegend',
 };
 
-const mapApiAchievement = (raw: AchievementWithProgress, t: (key: string) => string): Achievement => {
+const mapApiAchievement = (raw: AchievementWithProgress, t: TranslateFn): Achievement => {
   const i18n = ACHIEVEMENT_I18N[raw.code];
   return {
     id: raw.id,
-    title: i18n ? t(i18n.titleKey as any) : raw.title,
-    description: i18n ? t(i18n.descKey as any) : raw.description,
+    title: i18n ? t(i18n.titleKey) : raw.title,
+    description: i18n ? t(i18n.descKey) : raw.description,
     icon: raw.icon, color: raw.color,
     progress: raw.progress, total: raw.targetValue,
     unlocked: raw.unlocked, rarity: raw.rarity,
   };
 };
 
-const mapApiLevel = (raw: LevelWithProgress, t: (key: string) => string): Level => {
+const mapApiLevel = (raw: LevelWithProgress, t: TranslateFn): Level => {
   const titleKey = LEVEL_I18N[raw.level];
   return {
     level: raw.level,
-    title: titleKey ? t(titleKey as any) : raw.title,
+    title: titleKey ? t(titleKey) : raw.title,
     icon: raw.icon, color: raw.color,
     minXP: raw.minXp, unlocked: raw.unlocked,
   };
@@ -86,22 +93,21 @@ export default function AchievementHallPage() {
     const { cached: cachedL, fresh: freshL } = fetchLevelsCached();
     const { cached: cachedS, fresh: freshS } = fetchAchievementSummaryCached();
 
-    // Show cached data immediately if available
     if (cachedA && cachedL && cachedS) {
-      setAchievements(cachedA.map((a: AchievementWithProgress) => mapApiAchievement(a, t as any)));
-      setLevels(cachedL.map((l: LevelWithProgress) => mapApiLevel(l, t as any)));
-      setSummary(cachedS);
-      setIsLoading(false);
-    } else {
-      setIsLoading(true);
+      void Promise.resolve().then(() => {
+        if (!mounted) return;
+        setAchievements(cachedA.map((a) => mapApiAchievement(a, t)));
+        setLevels(cachedL.map((l) => mapApiLevel(l, t)));
+        setSummary(cachedS);
+        setIsLoading(false);
+      });
     }
 
-    // Refresh with fresh data in background
     Promise.all([freshA, freshL, freshS])
       .then(([rawAchievements, rawLevels, rawSummary]) => {
         if (!mounted) return;
-        setAchievements(rawAchievements.map((a: AchievementWithProgress) => mapApiAchievement(a, t as any)));
-        setLevels(rawLevels.map((l: LevelWithProgress) => mapApiLevel(l, t as any)));
+        setAchievements(rawAchievements.map((a) => mapApiAchievement(a, t)));
+        setLevels(rawLevels.map((l) => mapApiLevel(l, t)));
         setSummary(rawSummary);
       })
       .catch(() => {})
@@ -110,8 +116,13 @@ export default function AchievementHallPage() {
   }, [t]);
 
   const getRarityTranslation = (rarity: 'common' | 'rare' | 'epic' | 'legendary') => {
-    const keys = { common: 'achievementRarityCommon', rare: 'achievementRarityRare', epic: 'achievementRarityEpic', legendary: 'achievementRarityLegendary' };
-    return t(keys[rarity] as any);
+    const keys: Record<typeof rarity, LocaleKey> = {
+      common: 'achievementRarityCommon',
+      rare: 'achievementRarityRare',
+      epic: 'achievementRarityEpic',
+      legendary: 'achievementRarityLegendary',
+    };
+    return t(keys[rarity]);
   };
 
   const currentXP = summary?.totalXp ?? 0;
@@ -182,7 +193,7 @@ export default function AchievementHallPage() {
             {activeTab === 'achievements' && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                 {achievements.map((achievement, index) => (
-                  <AchievementCard key={achievement.id} achievement={achievement} t={t as any} getRarityTranslation={getRarityTranslation} delay={index * 0.05} />
+                  <AchievementCard key={achievement.id} achievement={achievement} t={t} getRarityTranslation={getRarityTranslation} delay={index * 0.05} />
                 ))}
               </motion.div>
             )}
@@ -190,7 +201,7 @@ export default function AchievementHallPage() {
             {activeTab === 'levels' && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-3 md:space-y-4">
                 {levels.map((level, index) => (
-                  <LevelCard key={level.level} level={level} levels={levels} currentXP={currentXP} t={t as any} delay={index * 0.05} />
+                  <LevelCard key={level.level} level={level} levels={levels} currentXP={currentXP} t={t} delay={index * 0.05} />
                 ))}
               </motion.div>
             )}
@@ -202,7 +213,7 @@ export default function AchievementHallPage() {
 }
 
 function AchievementCard({ achievement, t, getRarityTranslation, delay }: {
-  achievement: Achievement; t: (key: string) => string;
+  achievement: Achievement; t: TranslateFn;
   getRarityTranslation: (rarity: 'common' | 'rare' | 'epic' | 'legendary') => string; delay: number;
 }) {
   const progress = Math.min((achievement.progress / achievement.total) * 100, 100);
@@ -236,7 +247,7 @@ function AchievementCard({ achievement, t, getRarityTranslation, delay }: {
 }
 
 function LevelCard({ level, levels, currentXP, t, delay }: {
-  level: Level; levels: Level[]; currentXP: number; t: (key: string) => string; delay: number;
+  level: Level; levels: Level[]; currentXP: number; t: TranslateFn; delay: number;
 }) {
   const nextLevel = levels.find((item) => item.level === level.level + 1);
   const xpNeeded = nextLevel ? nextLevel.minXP - level.minXP : 1000;
