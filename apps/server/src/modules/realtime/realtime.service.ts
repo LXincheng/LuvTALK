@@ -61,7 +61,8 @@ export class RealtimeService {
     dto: CreateRealtimeOfferDto,
     userId?: string,
   ): Promise<RealtimeOfferResult> {
-    const { apiKey, realtimeApiUrl, realtimeModel } = envConfig.openai;
+    const { apiKey, realtimeApiUrl } = envConfig.openai;
+    const realtimeModel = envConfig.modelRouting.realtimeModel;
     if (!apiKey || !realtimeApiUrl || !realtimeModel) {
       throw new ServiceUnavailableException("Realtime service unavailable");
     }

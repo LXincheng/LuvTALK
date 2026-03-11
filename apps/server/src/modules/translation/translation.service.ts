@@ -6,15 +6,12 @@ import { TranslationRecord } from "../../common/types/conversation.types";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { CreateTranslationDto } from "./dto/create-translation.dto";
 
-const DEFAULT_MODEL = "deepseek-chat";
-const DEFAULT_BASE_URL = "https://api.deepseek.com";
-
 @Injectable()
 export class TranslationService {
   private readonly logger = new Logger(TranslationService.name);
   private readonly history: TranslationRecord[] = [];
   private readonly dictionary = this.buildDictionary();
-  private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
+  private readonly fallbackEndpoint = this.resolveFallbackEndpoint();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -196,17 +193,17 @@ export class TranslationService {
     sourceLanguage: LanguageCode,
     targetLanguage: LanguageCode,
   ): Promise<string | undefined> {
-    const apiKey =
-      envConfig.deepseek.apiKey ||
-      process.env.DEEPSEEK_API_KEY ||
-      process.env.DS_AI_API_KEY;
-    if (!apiKey) {
+    const apiKey = envConfig.deepseek.apiKey;
+    const endpoint = this.fallbackEndpoint;
+    if (!apiKey || !endpoint) {
       return undefined;
     }
 
     const body = {
       model:
-        envConfig.deepseek.model || process.env.DS_AI_MODEL || DEFAULT_MODEL,
+        envConfig.modelRouting.translationModel ||
+        envConfig.modelRouting.thirdModel ||
+        envConfig.modelRouting.secondaryModel,
       messages: [
         {
           role: "system",
@@ -221,8 +218,11 @@ export class TranslationService {
       temperature: 0.2,
       stream: false,
     };
+    if (!body.model) {
+      return undefined;
+    }
 
-    const response = await fetch(this.deepSeekEndpoint, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -233,7 +233,7 @@ export class TranslationService {
 
     if (!response.ok) {
       this.logger.warn(
-        `DeepSeek translation request failed (${response.status})`,
+        `Secondary provider translation request failed (${response.status})`,
       );
       return undefined;
     }
@@ -257,11 +257,11 @@ export class TranslationService {
     }
   }
 
-  private resolveDeepSeekEndpoint(): string {
-    const raw =
-      envConfig.deepseek.apiUrl ||
-      process.env.DS_AI_API_URL ||
-      DEFAULT_BASE_URL;
+  private resolveFallbackEndpoint(): string | null {
+    const raw = envConfig.deepseek.apiUrl;
+    if (!raw) {
+      return null;
+    }
     const normalized = raw.replace(/\/$/, "");
     if (normalized.endsWith("/chat/completions")) {
       return normalized;

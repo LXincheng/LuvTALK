@@ -23,18 +23,23 @@ import { SessionCacheService } from "../../common/cache/session-cache.service";
 import { TranslationService } from "../translation/translation.service";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { StartConversationDto } from "./dto/start-conversation.dto";
+import { UpdateConversationPreferencesDto } from "./dto/update-conversation-preferences.dto";
 import { normalizeAiResponsePayload } from "./ai-response-normalizer";
 import {
   buildSessionSummary,
   SessionSummaryPayload,
 } from "./conversation-summary.types";
-
-const DEFAULT_MODEL = "deepseek-reasoner";
-const DEFAULT_FALLBACK_MODEL = "deepseek-chat";
-const DEFAULT_BASE_URL = "https://api.deepseek.com";
-const DEEPSEEK_PRIMARY_TIMEOUT_MS = 3_200;
-const DEEPSEEK_FALLBACK_TIMEOUT_MS = 1_800;
-const OPENAI_TUTOR_TIMEOUT_MS = 7_000;
+import {
+  buildWelcomeCopy,
+  FALLBACK_SCORE_REASON,
+  resolveSpeakerName,
+} from "./conversation.copy";
+import {
+  CONVERSATION_DEFAULTS,
+  CONVERSATION_LOG_COPY,
+} from "./conversation.constants";
+import { ensureVoiceTipSet } from "./voice-tip-templater";
+import { buildConversationMemoryPack } from "./conversation-memory-pack";
 
 const buildAvatarDataUrl = (svg: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -114,7 +119,7 @@ export class ConversationService {
     ai: TUTOR_AVATAR,
     user: LEARNER_AVATAR,
   };
-  private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
+  private readonly fallbackEndpoint = this.resolveFallbackEndpoint();
   private readonly openAiEndpoint = this.resolveOpenAiEndpoint();
 
   constructor(
@@ -128,7 +133,7 @@ export class ConversationService {
     userId?: string,
   ): Promise<ConversationSession> {
     const now = new Date().toISOString();
-    const scenarioId = dto.scenarioId ?? "daily";
+    const scenarioId = dto.scenarioId ?? CONVERSATION_DEFAULTS.scenarioId;
     const nativeLanguage = dto.nativeLanguage ?? LanguageCode.Mandarin;
 
     // Archive previous active conversation for this user + language
@@ -161,6 +166,7 @@ export class ConversationService {
       scenarioId,
       targetLanguage: dto.targetLanguage,
       nativeLanguage,
+      memoryEnabled: true,
       userId,
       title: this.describeScenario(scenarioId, nativeLanguage),
       status: "active",
@@ -304,6 +310,24 @@ export class ConversationService {
     await this.persistSession(session);
   }
 
+  async updateSessionPreferences(
+    conversationId: string,
+    dto: UpdateConversationPreferencesDto,
+    userId?: string,
+  ): Promise<ConversationSession> {
+    const session = await this.getSession(conversationId);
+    if (session.userId && userId && session.userId !== userId) {
+      throw new NotFoundException("Conversation not found");
+    }
+    if (typeof dto.memoryEnabled === "boolean") {
+      session.memoryEnabled = dto.memoryEnabled;
+    }
+    session.updatedAt = new Date().toISOString();
+    await this.persistSession(session);
+    this.broadcastSession(session);
+    return session;
+  }
+
   /** Public wrapper for persisting session (used by VoiceTutorService for TTS URL writeback) */
   async persistSessionPublic(session: ConversationSession): Promise<void> {
     await this.persistSession(session);
@@ -425,11 +449,17 @@ export class ConversationService {
   async getSession(conversationId: string): Promise<ConversationSession> {
     const cached = this.sessions.get(conversationId);
     if (cached) {
+      if (typeof cached.memoryEnabled !== "boolean") {
+        cached.memoryEnabled = true;
+      }
       return cached;
     }
 
     const cachedSnapshot = await this.sessionCache.getSession(conversationId);
     if (cachedSnapshot) {
+      if (typeof cachedSnapshot.memoryEnabled !== "boolean") {
+        cachedSnapshot.memoryEnabled = true;
+      }
       this.sessions.set(cachedSnapshot.id, cachedSnapshot);
       return cachedSnapshot;
     }
@@ -475,6 +505,7 @@ export class ConversationService {
           status: record.status ?? "active",
           createdAt: record.createdAt.toISOString(),
           updatedAt: record.updatedAt.toISOString(),
+          memoryEnabled: true,
           messages: persistedMessages,
           coach: record.score
             ? {
@@ -511,10 +542,12 @@ export class ConversationService {
     const title = this.describeScenario(scenarioId, nativeLanguage);
     const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
     const nativeLabel = this.describeLanguage(nativeLanguage, nativeLanguage);
-    const prefersEnglish = nativeLanguage === LanguageCode.English;
-    const welcomeText = prefersEnglish
-      ? `👋 Welcome to the ${title} scenario.\nI'll coach you in ${targetLabel} and share tips in ${nativeLabel}. Let's warm up with a friendly greeting.`
-      : `👋 欢迎来到${title}练习场景。\n我会用${targetLabel}陪你练习，并用${nativeLabel}提供提示。先来一句轻松的寒暄吧。`;
+    const welcomeText = buildWelcomeCopy({
+      title,
+      targetLabel,
+      nativeLabel,
+      nativeLanguage,
+    });
     return this.buildMessage(
       "ai",
       welcomeText,
@@ -606,17 +639,20 @@ export class ConversationService {
     latestMessage: string,
     interactionMode: TutorInteractionMode,
   ): Promise<AiResponse | null> {
-    const { apiKey, tutorModel } = envConfig.openai;
+    const { apiKey } = envConfig.openai;
+    const tutorModel = envConfig.modelRouting.primaryModel;
     const endpoint = this.openAiEndpoint;
     if (!apiKey || !tutorModel || !endpoint) {
-      this.logger.warn("OpenAI tutor config missing; skipping Yunwu GPT-5.2.");
+      this.logger.warn(CONVERSATION_LOG_COPY.missingPrimaryConfig);
       return null;
     }
 
-    const history = session.messages.slice(-6).map((entry) => ({
-      role: entry.sender === "ai" ? "assistant" : "user",
-      content: entry.text,
-    }));
+    const history = session.messages
+      .slice(-CONVERSATION_DEFAULTS.historyWindow)
+      .map((entry) => ({
+        role: entry.sender === "ai" ? "assistant" : "user",
+        content: entry.text,
+      }));
 
     const prompt = buildConversationSystemPrompt({
       targetLanguage: session.targetLanguage,
@@ -627,19 +663,24 @@ export class ConversationService {
       ),
       interactionMode,
     });
+    const promptWithMemory = this.appendMemoryPackToPrompt(
+      prompt,
+      session,
+      interactionMode,
+    );
 
     const payload = {
       model: tutorModel,
-      temperature: 0.65,
+      temperature: CONVERSATION_DEFAULTS.openAiTemperature,
       messages: [
-        { role: "system", content: prompt },
+        { role: "system", content: promptWithMemory },
         ...history,
         { role: "user", content: latestMessage },
       ],
     };
 
     this.logger.log(
-      `Yunwu tutor request -> ${endpoint} | model=${tutorModel} | messages=${payload.messages.length}`,
+      `Primary tutor request -> ${endpoint} | model=${tutorModel} | messages=${payload.messages.length}`,
     );
 
     try {
@@ -653,13 +694,13 @@ export class ConversationService {
           },
           body: JSON.stringify(payload),
         },
-        OPENAI_TUTOR_TIMEOUT_MS,
+        envConfig.modelTimeoutMs.primary,
       );
 
       if (!response.ok) {
         const detail = await response.text();
         this.logger.warn(
-          `OpenAI tutor responded with ${response.status}: ${detail}`,
+          `Primary tutor responded with ${response.status}: ${detail}`,
         );
         return null;
       }
@@ -670,24 +711,24 @@ export class ConversationService {
       )?.choices?.[0]?.message?.content;
 
       if (!content) {
-        this.logger.warn("OpenAI tutor returned empty content.");
+        this.logger.warn(CONVERSATION_LOG_COPY.primaryEmptyResponse);
         return null;
       }
 
       return this.parseAiResponseContent(
         content,
-        "Auto-evaluated by GPT-5.2",
+        CONVERSATION_LOG_COPY.primaryFallbackReason,
         session.targetLanguage,
       );
     } catch (error) {
       if (this.isAbortError(error)) {
         this.logger.warn(
-          `OpenAI tutor timed out after ${OPENAI_TUTOR_TIMEOUT_MS}ms, switching to fallback source.`,
+          `Primary tutor timed out after ${envConfig.modelTimeoutMs.primary}ms, switching to fallback source.`,
         );
         return null;
       }
       this.logger.error(
-        `OpenAI tutor call failed: ${(error as Error).message}`,
+        `Primary tutor call failed: ${(error as Error).message}`,
       );
       return null;
     }
@@ -701,7 +742,7 @@ export class ConversationService {
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
     if (start === -1 || end === -1 || end <= start) {
-      this.logger.warn("AI response missing JSON payload.");
+      this.logger.warn(CONVERSATION_LOG_COPY.fallbackPayloadMissingJson);
       return null;
     }
     try {
@@ -714,7 +755,7 @@ export class ConversationService {
         targetLanguage,
       });
       if (!normalized) {
-        this.logger.warn("AI response normalization failed.");
+        this.logger.warn(CONVERSATION_LOG_COPY.fallbackPayloadNormalizeFailed);
       }
       return normalized;
     } catch (error) {
@@ -730,21 +771,21 @@ export class ConversationService {
     latestMessage: string,
     interactionMode: TutorInteractionMode,
   ): Promise<AiResponse | null> {
-    const apiKey =
-      envConfig.deepseek.apiKey ||
-      process.env.DEEPSEEK_API_KEY ||
-      process.env.DS_AI_API_KEY;
-    if (!apiKey) {
-      this.logger.warn("DeepSeek API key missing; using fallback payload.");
+    const apiKey = envConfig.deepseek.apiKey;
+    const endpoint = this.fallbackEndpoint;
+    if (!apiKey || !endpoint) {
+      this.logger.warn("Fallback provider config missing; using fallback payload.");
       return null;
     }
 
-    const history = session.messages.slice(-6).map((entry) => ({
-      role: entry.sender === "ai" ? "assistant" : "user",
-      content: entry.text,
-    }));
+    const history = session.messages
+      .slice(-CONVERSATION_DEFAULTS.historyWindow)
+      .map((entry) => ({
+        role: entry.sender === "ai" ? "assistant" : "user",
+        content: entry.text,
+      }));
 
-    const prompt = this.buildDeepSeekFallbackPrompt({
+    const prompt = this.buildFallbackProviderPrompt({
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
       scenarioLabel: this.describeScenario(
@@ -753,29 +794,30 @@ export class ConversationService {
       ),
       interactionMode,
     });
+    const promptWithMemory = this.appendMemoryPackToPrompt(
+      prompt,
+      session,
+      interactionMode,
+    );
 
-    const configuredPrimary =
-      (envConfig.deepseek.model || process.env.DS_AI_MODEL || "").trim();
-    const configuredFallback =
-      (
-        envConfig.deepseek.fallbackModel ||
-        process.env.DS_AI_FALLBACK_MODEL ||
-        ""
-      ).trim();
+    const configuredSecondary = envConfig.modelRouting.secondaryModel.trim();
+    const configuredThird = envConfig.modelRouting.thirdModel.trim();
 
-    // Force backup order: deepseek-reasoner -> deepseek-chat, then configured extras.
-    const orderedModels = [
-      DEFAULT_MODEL,
-      DEFAULT_FALLBACK_MODEL,
-      configuredPrimary,
-      configuredFallback,
-    ].filter((model, index, list) => model && list.indexOf(model) === index);
+    const orderedModels = [configuredSecondary, configuredThird].filter(
+      (model, index, list) => model && list.indexOf(model) === index,
+    );
+    if (!orderedModels.length) {
+      this.logger.warn(CONVERSATION_LOG_COPY.missingSecondaryConfig);
+      return null;
+    }
 
     const candidates = orderedModels.map((model, index) => ({
       model,
       timeoutMs:
-        index === 0 ? DEEPSEEK_PRIMARY_TIMEOUT_MS : DEEPSEEK_FALLBACK_TIMEOUT_MS,
-      label: index === 0 ? "primary" : index === 1 ? "fallback" : "extra",
+        index === 0
+          ? envConfig.modelTimeoutMs.secondary
+          : envConfig.modelTimeoutMs.third,
+      label: index === 0 ? "secondary" : index === 1 ? "third" : "extra",
     }));
 
     for (const candidate of candidates) {
@@ -784,19 +826,19 @@ export class ConversationService {
         temperature: 0.6,
         stream: false,
         messages: [
-          { role: "system", content: prompt },
+          { role: "system", content: promptWithMemory },
           ...history,
           { role: "user", content: latestMessage },
         ],
       };
 
       this.logger.log(
-        `DeepSeek request (${candidate.label}) -> ${this.deepSeekEndpoint} | model=${candidate.model} | timeout=${candidate.timeoutMs}ms | messages=${payload.messages.length}`,
+        `Fallback request (${candidate.label}) -> ${endpoint} | model=${candidate.model} | timeout=${candidate.timeoutMs}ms | messages=${payload.messages.length}`,
       );
 
       try {
         const response = await this.fetchWithTimeout(
-          this.deepSeekEndpoint,
+          endpoint,
           {
             method: "POST",
             headers: {
@@ -811,7 +853,7 @@ export class ConversationService {
         if (!response.ok) {
           const detail = await response.text();
           this.logger.warn(
-            `DeepSeek ${candidate.label} model responded with ${response.status}: ${detail}`,
+            `Fallback ${candidate.label} model responded with ${response.status}: ${detail}`,
           );
           continue;
         }
@@ -823,14 +865,14 @@ export class ConversationService {
 
         if (!content) {
           this.logger.warn(
-            `DeepSeek ${candidate.label} model returned empty content.`,
+            `Fallback ${candidate.label} model returned empty content.`,
           );
           continue;
         }
 
         const parsed = this.parseAiResponseContent(
           content,
-          "Auto-evaluated by DeepSeek",
+          CONVERSATION_LOG_COPY.fallbackReason,
           session.targetLanguage,
         );
         if (parsed) {
@@ -857,17 +899,17 @@ export class ConversationService {
         }
 
         this.logger.warn(
-          `DeepSeek ${candidate.label} model returned invalid JSON payload.`,
+          `Fallback ${candidate.label} model returned invalid JSON payload.`,
         );
       } catch (error) {
         if (this.isAbortError(error)) {
           this.logger.warn(
-            `DeepSeek ${candidate.label} model timed out after ${candidate.timeoutMs}ms.`,
+            `Fallback ${candidate.label} model timed out after ${candidate.timeoutMs}ms.`,
           );
           continue;
         }
         this.logger.error(
-          `DeepSeek ${candidate.label} model failed: ${(error as Error).message}`,
+          `Fallback ${candidate.label} model failed: ${(error as Error).message}`,
         );
       }
     }
@@ -875,7 +917,7 @@ export class ConversationService {
     return null;
   }
 
-  private buildDeepSeekFallbackPrompt(input: {
+  private buildFallbackProviderPrompt(input: {
     targetLanguage: LanguageCode;
     nativeLanguage: LanguageCode;
     scenarioLabel: string;
@@ -1059,11 +1101,11 @@ export class ConversationService {
         targetLanguage,
         scenarioId,
       ),
-      score: 72,
+      score: CONVERSATION_DEFAULTS.fallbackScore,
       scoreReason:
         nativeLanguage === LanguageCode.English
-          ? "Fallback scoring based on DeepSeek plain-text response."
-          : "DeepSeek 返回纯文本，已启用教学兜底评分。",
+          ? FALLBACK_SCORE_REASON.en
+          : FALLBACK_SCORE_REASON.zh,
       pronunciationTip: fallbackTips.pronunciationTip,
       rhythmTip: fallbackTips.rhythmTip,
       grammarTip: fallbackTips.grammarTip,
@@ -1112,6 +1154,35 @@ export class ConversationService {
     nativeLanguage: LanguageCode,
     scenarioId: string,
   ): AiResponse {
+    if (interactionMode === "voice") {
+      const fallbackTips = this.buildDefaultTeachingTips(
+        targetLanguage,
+        nativeLanguage,
+        "voice",
+        scenarioId,
+      );
+      const voiceTips = ensureVoiceTipSet(
+        {
+          pronunciationTip: payload.pronunciationTip,
+          rhythmTip: payload.rhythmTip,
+          grammarTip: payload.grammarTip,
+        },
+        {
+          pronunciationTip: fallbackTips.pronunciationTip,
+          rhythmTip: fallbackTips.rhythmTip,
+          grammarTip: fallbackTips.grammarTip,
+        },
+        nativeLanguage,
+        {
+          scenarioId,
+        },
+      );
+      return {
+        ...payload,
+        ...voiceTips,
+      };
+    }
+
     if (interactionMode !== "text") {
       return payload;
     }
@@ -1124,6 +1195,26 @@ export class ConversationService {
         scenarioId,
       ),
     };
+  }
+
+  private appendMemoryPackToPrompt(
+    basePrompt: string,
+    session: ConversationSession,
+    interactionMode: TutorInteractionMode,
+  ): string {
+    if (session.memoryEnabled === false) {
+      return basePrompt;
+    }
+    const memoryPack = buildConversationMemoryPack({
+      session,
+      interactionMode,
+      scenarioLabel: this.describeScenario(session.scenarioId, session.nativeLanguage),
+      nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+    });
+    if (!memoryPack.trim()) {
+      return basePrompt;
+    }
+    return `${basePrompt}\n\n${memoryPack}`;
   }
 
   private ensureStructuredTextTeachingReply(
@@ -1311,16 +1402,13 @@ export class ConversationService {
     nativeLanguage?: LanguageCode,
     extra?: Partial<ConversationMessage>,
   ): ConversationMessage {
-    const prefersEnglish = nativeLanguage === LanguageCode.English;
-    const aiName = prefersEnglish ? "LuvTALK Tutor" : "LuvTALK 导师";
-    const userName = prefersEnglish ? "You" : "我";
     return {
       id: randomUUID(),
       sender,
       text,
       language,
       createdAt: extra?.createdAt ?? new Date().toISOString(),
-      senderName: sender === "ai" ? aiName : userName,
+      senderName: resolveSpeakerName(sender, nativeLanguage),
       avatar: sender === "ai" ? this.avatars.ai : this.avatars.user,
       meta: extra?.meta,
     };
@@ -1613,11 +1701,11 @@ export class ConversationService {
     );
   }
 
-  private resolveDeepSeekEndpoint(): string {
-    const raw =
-      envConfig.deepseek.apiUrl ||
-      process.env.DS_AI_API_URL ||
-      DEFAULT_BASE_URL;
+  private resolveFallbackEndpoint(): string | null {
+    const raw = envConfig.deepseek.apiUrl;
+    if (!raw) {
+      return null;
+    }
     const normalized = raw.replace(/\/$/, "");
     if (normalized.endsWith("/chat/completions")) {
       return normalized;

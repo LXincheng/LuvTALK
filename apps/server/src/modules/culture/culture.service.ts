@@ -24,7 +24,7 @@ export class CultureService {
       );
     } catch (error) {
       this.logger.warn(
-        `DeepSeek cultural cards fallback: ${(error as Error).message}`,
+        `Secondary provider cultural cards fallback: ${(error as Error).message}`,
       );
       return this.buildFallback(params.targetLanguage);
     }
@@ -34,10 +34,11 @@ export class CultureService {
     targetLanguage: LanguageCode,
     nativeLanguage: LanguageCode,
   ): Promise<CulturePopup[]> {
-    const { apiKey, apiUrl, model } = envConfig.deepseek;
-    if (!apiKey) {
+    const { apiKey, apiUrl } = envConfig.deepseek;
+    const model = envConfig.modelRouting.secondaryModel;
+    if (!apiKey || !apiUrl || !model) {
       throw new ServiceUnavailableException(
-        "DeepSeek API key missing for cultural cards",
+        "Secondary provider config missing for cultural cards",
       );
     }
 
@@ -64,7 +65,7 @@ export class CultureService {
 
     if (!response.ok) {
       throw new ServiceUnavailableException(
-        `DeepSeek cultural cards failed (${response.status})`,
+        `Secondary provider cultural cards failed (${response.status})`,
       );
     }
 
@@ -72,7 +73,7 @@ export class CultureService {
       await response.json();
     const rawCards = payload.cards;
     if (!rawCards?.length) {
-      throw new ServiceUnavailableException("DeepSeek cards empty");
+      throw new ServiceUnavailableException("Secondary provider cards empty");
     }
 
     return rawCards.slice(0, 4).map((card) => ({

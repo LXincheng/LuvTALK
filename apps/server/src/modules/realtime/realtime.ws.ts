@@ -136,8 +136,9 @@ export class RealtimeWsProxy {
       }
       this.cooldown.set(cooldownKey, now);
 
-      const { apiKey, realtimeApiUrl, realtimeModel, transcribeModel } =
-        envConfig.openai;
+      const { apiKey, realtimeApiUrl } = envConfig.openai;
+      const realtimeModel = envConfig.modelRouting.realtimeModel;
+      const transcribeModel = envConfig.modelRouting.sttModel;
       if (!apiKey || !realtimeApiUrl || !realtimeModel) {
         this.closeWithMetric({
           client,

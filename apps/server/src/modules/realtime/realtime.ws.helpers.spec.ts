@@ -41,7 +41,7 @@ describe("realtime.ws.helpers", () => {
         instructions: "test",
         voice: "alloy",
         turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
-        transcribeModel: "gpt-4o-mini-transcribe",
+        transcribeModel: "custom-transcribe-v1",
       });
       expect(payload.session.input_audio_transcription.model).toBe("whisper-1");
     });

@@ -45,6 +45,11 @@
   --text-lg: 1.125rem;
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
+  --status-glass-bg: rgba(255, 255, 255, 0.64);
+  --status-glass-border: rgba(255, 255, 255, 0.65);
+  --status-track: rgba(148, 163, 184, 0.22);
+  --status-accent: rgba(99, 102, 241, 0.58);
+  --status-accent-soft: rgba(99, 102, 241, 0.28);
 }
 
 .dark {
@@ -82,6 +87,11 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --status-glass-bg: rgba(30, 41, 59, 0.52);
+  --status-glass-border: rgba(148, 163, 184, 0.28);
+  --status-track: rgba(100, 116, 139, 0.34);
+  --status-accent: rgba(148, 163, 184, 0.62);
+  --status-accent-soft: rgba(148, 163, 184, 0.28);
 }
 
 @layer base {
@@ -218,12 +228,162 @@ html {
   .slide-in-from-bottom-4 {
     --tw-enter-translate-y: 1rem;
   }
+
+  .glass-status {
+    background: var(--status-glass-bg);
+    border: 1px solid var(--status-glass-border);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+
+  .status-track {
+    background: var(--status-track);
+  }
+
+  .status-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--status-accent-soft) 44%,
+      transparent 100%
+    );
+    animation: statusShimmer 3.2s linear infinite;
+  }
+
+  .status-dot {
+    background: var(--status-accent);
+    animation: statusBreathe 2.2s ease-in-out infinite;
+  }
+
+  .record-bars > span {
+    width: 3px;
+    border-radius: 999px;
+    background: var(--status-accent);
+    animation: recordBar 1.2s ease-in-out infinite;
+    transform-origin: center bottom;
+  }
+
+  .record-bars > span:nth-child(2) {
+    animation-delay: 0.12s;
+  }
+
+  .record-bars > span:nth-child(3) {
+    animation-delay: 0.24s;
+  }
+
+  .record-bars > span:nth-child(4) {
+    animation-delay: 0.36s;
+  }
+
+  .record-bars > span:nth-child(5) {
+    animation-delay: 0.48s;
+  }
+
+  .status-orbit {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(100, 116, 139, 0.32);
+    background: rgba(255, 255, 255, 0.38);
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .status-orbit::before {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    border-radius: 999px;
+    border: 1px solid rgba(100, 116, 139, 0.34);
+    animation: statusOrbit 2.8s linear infinite;
+  }
+
+  .status-orbit::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 999px;
+    background: var(--status-accent);
+    animation: statusBreathe 2.2s ease-in-out infinite;
+  }
+
+  .status-orbit-rerouting::after {
+    background: rgba(71, 85, 105, 0.72);
+  }
+
+  .status-orbit-error::before {
+    animation: none;
+  }
+
+  .status-orbit-error::after {
+    background: rgba(239, 68, 68, 0.9);
+    animation: none;
+  }
+
+  .dark .status-orbit {
+    border-color: rgba(148, 163, 184, 0.34);
+    background: rgba(51, 65, 85, 0.42);
+  }
+
+  .dark .status-orbit::before {
+    border-color: rgba(148, 163, 184, 0.38);
+  }
 }
 
 @keyframes enter {
   from {
     opacity: var(--tw-enter-opacity, 1);
     transform: translate3d(0, var(--tw-enter-translate-y, 0), 0);
+  }
+}
+
+@keyframes statusShimmer {
+  0% {
+    transform: translateX(-28%);
+  }
+  100% {
+    transform: translateX(208%);
+  }
+}
+
+@keyframes statusBreathe {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0.45;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes statusOrbit {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes recordBar {
+  0% {
+    transform: scaleY(0.45);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scaleY(0.45);
+    opacity: 0.55;
   }
 }
 
@@ -252,6 +412,14 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-orb-pulse {
+    animation: none;
+  }
+
+  .status-shimmer,
+  .status-dot,
+  .record-bars > span,
+  .status-orbit::before,
+  .status-orbit::after {
     animation: none;
   }
 }

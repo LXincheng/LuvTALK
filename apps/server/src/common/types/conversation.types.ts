@@ -38,6 +38,7 @@ export interface ConversationSession {
   scenarioId: string;
   targetLanguage: LanguageCode;
   nativeLanguage?: LanguageCode;
+  memoryEnabled?: boolean;
   userId?: string;
   title?: string;
   status?: string;

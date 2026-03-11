@@ -65,6 +65,16 @@ export function sendConversationMessage(conversationId: string, message: string)
   );
 }
 
+export function updateConversationPreferences(
+  conversationId: string,
+  payload: { memoryEnabled?: boolean },
+) {
+  return apiClient.post<ConversationSession, { memoryEnabled?: boolean }>(
+    `/conversation/${conversationId}/preferences`,
+    payload,
+  );
+}
+
 export function uploadConversationVoice(conversationId: string, audio: Blob) {
   const mimeType = audio.type.split(';')[0].toLowerCase();
   const fileName = (() => {

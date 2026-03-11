@@ -22,6 +22,7 @@ import {
   sendConversationMessage,
   startConversation,
   synthesizeConversationSpeech,
+  updateConversationPreferences,
   uploadConversationVoice,
 } from '../services/conversationService';
 import { createFavorite } from '../services/favoritesService';
@@ -78,6 +79,7 @@ const getStoredConversationIds = (): string[] => {
 };
 
 const GUEST_MAX_HISTORY = 5;
+const MEMORY_PREFERENCE_PREFIX = 'conversationMemoryEnabled:';
 
 /** Add a conversation ID to the persisted list (deduped, most-recent first). */
 const trackConversationId = (id: string) => {
@@ -89,6 +91,32 @@ const trackConversationId = (id: string) => {
     'conversationIds',
     JSON.stringify(ids.slice(0, GUEST_MAX_HISTORY)),
   );
+};
+
+const getMemoryPreferenceKey = (conversationId: string) =>
+  `${MEMORY_PREFERENCE_PREFIX}${conversationId}`;
+
+const readStoredMemoryPreference = (
+  conversationId: string,
+): boolean | undefined => {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  const raw = window.localStorage.getItem(getMemoryPreferenceKey(conversationId));
+  if (raw === 'true') {
+    return true;
+  }
+  if (raw === 'false') {
+    return false;
+  }
+  return undefined;
+};
+
+const storeMemoryPreference = (conversationId: string, value: boolean) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(getMemoryPreferenceKey(conversationId), String(value));
 };
 
 const mapAnnotationTypeToFavoriteType = (
@@ -313,6 +341,7 @@ export default function ConversationPage() {
   const lastSummaryAiCountRef = useRef(0);
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [isMemorySaving, setIsMemorySaving] = useState(false);
 
   const clearStreamRecoveryTimer = useCallback(() => {
     if (streamRecoveryTimerRef.current !== null) {
@@ -928,6 +957,33 @@ export default function ConversationPage() {
   }, [clearPendingTutorReply, session?.id]);
 
   useEffect(() => {
+    if (!session?.id) {
+      return;
+    }
+    const conversationId = session.id;
+    const serverValue = session.memoryEnabled !== false;
+    const localValue = readStoredMemoryPreference(conversationId);
+    if (localValue === undefined) {
+      storeMemoryPreference(conversationId, serverValue);
+      return;
+    }
+    if (localValue === serverValue) {
+      return;
+    }
+    void updateConversationPreferences(conversationId, {
+      memoryEnabled: localValue,
+    })
+      .then((updatedSession) => {
+        if (updatedSession.id === currentSessionIdRef.current) {
+          setSession(updatedSession);
+        }
+      })
+      .catch(() => {
+        storeMemoryPreference(conversationId, serverValue);
+      });
+  }, [session?.id, session?.memoryEnabled]);
+
+  useEffect(() => {
     if (!session?.id || chatMode === 'immersive') {
       return;
     }
@@ -1092,6 +1148,40 @@ export default function ConversationPage() {
     }
     setChatMode(nextMode);
   };
+
+  const handleToggleMemory = useCallback(async () => {
+    if (!session || isMemorySaving) {
+      return;
+    }
+    const conversationId = session.id;
+    const previousValue = session.memoryEnabled !== false;
+    const nextValue = !previousValue;
+    setIsMemorySaving(true);
+    setSession((prev) =>
+      prev && prev.id === conversationId
+        ? { ...prev, memoryEnabled: nextValue }
+        : prev,
+    );
+    storeMemoryPreference(conversationId, nextValue);
+    try {
+      const updatedSession = await updateConversationPreferences(conversationId, {
+        memoryEnabled: nextValue,
+      });
+      setSession((prev) =>
+        prev && prev.id === updatedSession.id ? updatedSession : prev,
+      );
+    } catch {
+      setSession((prev) =>
+        prev && prev.id === conversationId
+          ? { ...prev, memoryEnabled: previousValue }
+          : prev,
+      );
+      storeMemoryPreference(conversationId, previousValue);
+      toast.error(t('memorySaveError'), { id: 'memory-preferences' });
+    } finally {
+      setIsMemorySaving(false);
+    }
+  }, [isMemorySaving, session, t]);
 
   const handleSend = async () => {
     if (!inputValue.trim() || !session || isSending) {
@@ -1300,6 +1390,40 @@ export default function ConversationPage() {
     />
   );
 
+  const memoryEnabled = session?.memoryEnabled !== false;
+  const memoryStatusText = memoryEnabled ? t('memoryOn') : t('memoryOff');
+  const memoryToggleControl = (
+    <button
+      type="button"
+      onClick={() => {
+        void handleToggleMemory();
+      }}
+      disabled={!session || isInitializing || isMemorySaving}
+      className="glass-status inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      title={t('memoryToggle')}
+      aria-label={`${t('memoryToggle')} ${memoryStatusText}`}
+      aria-pressed={memoryEnabled}
+    >
+      <span
+        className={`relative h-5 w-9 rounded-full border transition-colors ${
+          memoryEnabled
+            ? 'border-slate-500/60 bg-slate-700/75'
+            : 'border-slate-300/80 bg-slate-200/70 dark:border-slate-600/70 dark:bg-slate-700/60'
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-[0_1px_8px_rgba(15,23,42,0.18)] transition-transform ${
+            memoryEnabled ? 'translate-x-4' : ''
+          }`}
+        />
+      </span>
+      <span className="font-medium">{t('memoryToggle')}</span>
+      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+        {memoryStatusText}
+      </span>
+    </button>
+  );
+
   if (chatMode === 'immersive') {
     if (!session?.id) {
       return (
@@ -1390,6 +1514,8 @@ export default function ConversationPage() {
                 </div>
               </>
             )}
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+            <div className="shrink-0">{memoryToggleControl}</div>
           </div>
         </div>
 
@@ -1436,6 +1562,7 @@ export default function ConversationPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 lg:gap-3 shrink-0 min-w-0">
+            {memoryToggleControl}
             {chatMode !== 'text' && (
               <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
             )}

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { motion } from 'motion/react';
 import AnnotatedMessage from './AnnotatedMessage';
 import AudioPlayer from './AudioPlayer';
@@ -15,16 +15,9 @@ export default function MessageBubble({
   message,
   onSaveVocabulary,
 }: MessageBubbleProps) {
-  const { t, locale } = useLocale();
+  const { t } = useLocale();
   const [translationExpanded, setTranslationExpanded] = useState(false);
   const [tipsExpanded, setTipsExpanded] = useState(false);
-  const loadingHint = useMemo(
-    () =>
-      locale === 'zh'
-        ? '正在组织更清晰的学习建议...'
-        : 'Structuring clearer coaching guidance...',
-    [locale],
-  );
 
   const translationBlock = message.translation ? (
     <div className="px-2">
@@ -61,10 +54,10 @@ export default function MessageBubble({
         : 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300';
 
   const tips = [
-    message.pronunciationTip && { icon: '🗣', label: t('pronunciation'), text: message.pronunciationTip, border: 'border-l-blue-400' },
-    message.rhythmTip && { icon: '🎵', label: t('rhythm'), text: message.rhythmTip, border: 'border-l-purple-400' },
-    message.grammarTip && { icon: '✏️', label: t('grammar'), text: message.grammarTip, border: 'border-l-amber-400' },
-  ].filter(Boolean) as { icon: string; label: string; text: string; border: string }[];
+    message.pronunciationTip && { label: t('pronunciation'), text: message.pronunciationTip, border: 'border-l-blue-400' },
+    message.rhythmTip && { label: t('rhythm'), text: message.rhythmTip, border: 'border-l-violet-400' },
+    message.grammarTip && { label: t('grammar'), text: message.grammarTip, border: 'border-l-amber-400' },
+  ].filter(Boolean) as { label: string; text: string; border: string }[];
 
   const scoreBlock =
     message.pronunciationScore !== undefined ? (
@@ -99,7 +92,7 @@ export default function MessageBubble({
                   className={`border-l-2 ${tip.border} pl-2.5 py-0.5`}
                 >
                   <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                    {tip.icon} {tip.label}
+                    {tip.label}
                   </span>
                   <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-0.5">
                     {tip.text}
@@ -120,40 +113,20 @@ export default function MessageBubble({
 
   const loadingBlock =
     message.type === 'ai' && message.isLoading ? (
-      <div className="relative overflow-hidden rounded-2xl border border-white/60 bg-white/55 p-3 backdrop-blur-2xl dark:border-slate-700/80 dark:bg-slate-900/45">
-        <motion.div
-          className="pointer-events-none absolute inset-0 opacity-70"
-          animate={{ opacity: [0.45, 0.72, 0.45] }}
-          transition={{ repeat: Infinity, duration: 3.2, ease: 'easeInOut' }}
-          style={{
-            background:
-              'linear-gradient(110deg, transparent 0%, rgba(148,163,184,0.14) 48%, transparent 100%)',
-          }}
-        />
-        <div className="relative space-y-2.5">
-          <div className="flex items-center gap-3">
-            <motion.div
-              className="relative h-5 w-5 rounded-full border border-slate-400/60 bg-white/35 dark:border-slate-400/50 dark:bg-slate-700/30"
-              animate={{ scale: [1, 1.04, 1] }}
-              transition={{ repeat: Infinity, duration: 2.2, ease: 'easeInOut' }}
-            >
-              <motion.div
-                className="absolute inset-[5px] rounded-full bg-slate-400/60 dark:bg-slate-300/60"
-                animate={{ opacity: [0.5, 0.95, 0.5] }}
-                transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
-              />
-            </motion.div>
-            <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
+      <div className="relative overflow-hidden rounded-2xl glass-status p-3.5">
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-2/5 status-shimmer" />
+        <div className="relative space-y-2">
+          <div className="flex items-center gap-2.5">
+            <div className="status-orbit" />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
               {t('tutorThinking')}
             </span>
           </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{loadingHint}</p>
-          <div className="relative h-1.5 overflow-hidden rounded-full bg-slate-300/45 dark:bg-slate-700/55">
-            <motion.div
-              className="absolute inset-y-0 w-1/3 rounded-full bg-gradient-to-r from-slate-400/70 via-slate-200/90 to-slate-400/70 dark:from-slate-400/60 dark:via-slate-200/80 dark:to-slate-400/60"
-              animate={{ x: ['-30%', '210%'] }}
-              transition={{ repeat: Infinity, duration: 3.1, ease: 'linear' }}
-            />
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {t('tutorThinkingHint')}
+          </p>
+          <div className="relative h-1.5 overflow-hidden rounded-full status-track">
+            <div className="absolute inset-y-0 left-0 w-2/5 status-shimmer" />
           </div>
         </div>
       </div>
@@ -161,33 +134,19 @@ export default function MessageBubble({
 
   const userStatusBlock = message.statusText ? (
     <div className="px-1">
-      <div className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-white/70 backdrop-blur-sm dark:border-slate-700/80 dark:bg-slate-800/50 min-h-[2.25rem]">
-        <motion.div
-          className="pointer-events-none absolute inset-0 opacity-70"
-          animate={{ x: ['-30%', '30%'] }}
-          transition={{ repeat: Infinity, duration: 2.4, ease: 'linear' }}
-          style={{
-            background:
-              message.statusTone === 'error'
-                ? 'linear-gradient(90deg, transparent 0%, rgba(248,113,113,0.16) 50%, transparent 100%)'
-                : message.statusTone === 'rerouting'
-                  ? 'linear-gradient(90deg, transparent 0%, rgba(192,132,252,0.16) 50%, transparent 100%)'
-                  : 'linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.14) 50%, transparent 100%)',
-          }}
-        />
+      <div className="relative overflow-hidden rounded-xl glass-status min-h-[2.35rem]">
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-2/5 status-shimmer" />
         <div className="relative flex min-h-[2.25rem] items-center gap-2.5 px-3">
-          {message.statusTone === 'error' ? (
-            <AlertTriangle className="h-4 w-4 text-red-500 dark:text-red-400" />
-          ) : message.statusTone === 'rerouting' ? (
-            <Sparkles className="h-4 w-4 text-violet-500 dark:text-violet-300" />
-          ) : message.statusTone === 'waiting' ? (
-            <Loader2 className="h-4 w-4 animate-spin text-indigo-500 dark:text-indigo-300" />
-          ) : message.statusTone === 'sending' ? (
-            <Loader2 className="h-4 w-4 animate-spin text-sky-500 dark:text-sky-300" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 dark:text-emerald-300" />
-          )}
-          <span className="text-xs text-slate-600 dark:text-slate-300 leading-tight">
+          <span
+            className={`status-orbit ${
+              message.statusTone === 'error'
+                ? 'status-orbit-error'
+                : message.statusTone === 'rerouting'
+                    ? 'status-orbit-rerouting'
+                    : ''
+            }`}
+          />
+          <span className="text-xs text-slate-700 dark:text-slate-200 leading-tight">
             {message.statusText}
           </span>
         </div>

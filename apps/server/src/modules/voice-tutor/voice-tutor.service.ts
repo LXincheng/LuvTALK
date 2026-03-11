@@ -13,6 +13,7 @@ import {
 } from "../../common/cache/voice-operation-cache.service";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { ConversationService } from "../conversation/conversation.service";
+import { buildProsodyReadyTtsInput } from "./tts-prosody";
 
 const DEFAULT_STORAGE_ROOT = join(process.cwd(), "tmp", "voice-uploads");
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -49,14 +50,15 @@ export class VoiceTutorService {
   }
 
   private validateOpenAiSetup(): void {
-    const { apiKey, apiUrl, audioApiUrl, transcribeModel, ttsModel } =
-      envConfig.openai;
+    const { apiKey, apiUrl, audioApiUrl } = envConfig.openai;
+    const transcribeModel = envConfig.modelRouting.sttModel;
+    const ttsModel = envConfig.modelRouting.ttsModel;
     if (!apiKey) {
-      this.logger.warn("Yunwu OpenAI API key missing; STT/TTS disabled.");
+      this.logger.warn("Primary provider API key missing; STT/TTS disabled.");
       return;
     }
     this.logger.log(
-      `Yunwu OpenAI ready | base=${apiUrl ?? "default"} | audio=${audioApiUrl ?? "default"} | stt=${transcribeModel} | tts=${ttsModel}`,
+      `Primary provider ready | base=${apiUrl || "unset"} | audio=${audioApiUrl || "unset"} | stt=${transcribeModel || "unset"} | tts=${ttsModel || "unset"}`,
     );
   }
 
@@ -310,9 +312,10 @@ export class VoiceTutorService {
     upload: VoiceUploadResult,
     languageHint: LanguageHint,
   ): Promise<string | undefined> {
-    const { apiKey, audioApiUrl, transcribeModel } = envConfig.openai;
+    const { apiKey, audioApiUrl } = envConfig.openai;
+    const transcribeModel = envConfig.modelRouting.sttModel;
     if (!apiKey || !transcribeModel || !audioApiUrl) {
-      this.logger.warn("Yunwu OpenAI 配置缺失，无法执行语音识别");
+      this.logger.warn("Primary provider STT 配置缺失，无法执行语音识别");
       return undefined;
     }
     try {
@@ -340,7 +343,7 @@ export class VoiceTutorService {
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error(
-          `Yunwu transcription failed (${response.status}): ${errorText}`,
+          `Primary provider transcription failed (${response.status}): ${errorText}`,
         );
         return undefined;
       }
@@ -358,7 +361,7 @@ export class VoiceTutorService {
       }
     } catch (error) {
       this.logger.error(
-        `Yunwu transcription exception for ${upload.operationId}`,
+        `Primary provider transcription exception for ${upload.operationId}`,
         error instanceof Error ? error.stack : String(error),
       );
       return undefined;
@@ -370,16 +373,21 @@ export class VoiceTutorService {
     text: string,
     voice?: string,
   ): Promise<{ audioUrl: string; fileName: string } | undefined> {
-    const { apiKey, audioApiUrl, ttsModel } = envConfig.openai;
+    const { apiKey, audioApiUrl } = envConfig.openai;
+    const ttsModel = envConfig.modelRouting.ttsModel;
     if (!apiKey || !ttsModel || !audioApiUrl) {
-      this.logger.warn("Yunwu OpenAI 配置缺失，无法执行语音合成");
+      this.logger.warn("Primary provider TTS 配置缺失，无法执行语音合成");
       return undefined;
     }
     const session = await this.conversationService.getSession(conversationId);
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
     const resolvedVoice = voice ?? languageHint.ttsVoice;
     const directory = join(this.storageRoot, conversationId);
-    const speechInput = this.normalizeTtsInput(text);
+    const speechInput = buildProsodyReadyTtsInput(
+      text,
+      session.targetLanguage,
+      session.scenarioId,
+    );
 
     // Reuse existing synthesized audio from the same session/text/voice to avoid duplicate API calls.
     const reusable = await this.findReusableTtsAudio(
@@ -410,7 +418,7 @@ export class VoiceTutorService {
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error(
-          `Yunwu speech synthesis failed (${response.status}): ${errorText}`,
+          `Primary provider speech synthesis failed (${response.status}): ${errorText}`,
         );
         return undefined;
       }
@@ -451,39 +459,11 @@ export class VoiceTutorService {
       return { fileName, audioUrl };
     } catch (error) {
       this.logger.error(
-        `Yunwu speech synthesis exception for conversation ${conversationId}`,
+        `Primary provider speech synthesis exception for conversation ${conversationId}`,
         error instanceof Error ? error.stack : String(error),
       );
       return undefined;
     }
-  }
-
-  /**
-   * Make TTS output sound more like spoken tutoring:
-   * - strip markdown-like symbols
-   * - collapse noisy whitespace
-   * - preserve sentence punctuation for natural pauses
-   */
-  private normalizeTtsInput(text: string): string {
-    const cleaned = text
-      .replace(/[`*_#>|~]/g, " ")
-      .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (!cleaned) {
-      return text.trim();
-    }
-
-    const punctuated = cleaned
-      .replace(/([,，;；:：])(?=\S)/g, "$1 ")
-      .replace(/([。！？!?])(?=\S)/g, "$1 ");
-
-    const maxLength = 320;
-    if (punctuated.length <= maxLength) {
-      return punctuated;
-    }
-    return `${punctuated.slice(0, maxLength).trimEnd()}...`;
   }
 
   private async findReusableTtsAudio(

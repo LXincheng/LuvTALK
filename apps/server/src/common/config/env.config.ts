@@ -2,29 +2,62 @@ import { ensureEnvLoaded } from "./load-env";
 
 ensureEnvLoaded();
 
+const readTrimmed = (...values: Array<string | undefined>): string => {
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+};
+
+const readNumber = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
+};
+
 export const envConfig = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
+  modelRouting: {
+    primaryModel: readTrimmed(process.env.PRIMARY_MODEL),
+    secondaryModel: readTrimmed(process.env.SECONDARY_MODEL),
+    thirdModel: readTrimmed(process.env.THIRD_MODEL),
+    realtimeModel: readTrimmed(process.env.REALTIME_MODEL),
+    sttModel: readTrimmed(process.env.STT_MODEL),
+    ttsModel: readTrimmed(process.env.TTS_MODEL),
+    translationModel: readTrimmed(process.env.TRANSLATION_MODEL),
+  },
+  modelTimeoutMs: {
+    primary: readNumber(process.env.PRIMARY_MODEL_TIMEOUT_MS, 7000),
+    secondary: readNumber(process.env.SECONDARY_MODEL_TIMEOUT_MS, 3200),
+    third: readNumber(process.env.THIRD_MODEL_TIMEOUT_MS, 1800),
+  },
   deepseek: {
-    apiKey: (process.env.DS_AI_API_KEY ?? "").trim(),
-    apiUrl: process.env.DS_AI_API_URL ?? "https://api.deepseek.com/v1",
-    model: process.env.DS_AI_MODEL ?? "deepseek-reasoner",
-    fallbackModel: process.env.DS_AI_FALLBACK_MODEL ?? "deepseek-chat",
+    apiKey: readTrimmed(process.env.SECONDARY_API_KEY),
+    apiUrl: readTrimmed(process.env.SECONDARY_API_URL),
   },
   openai: {
-    apiKey: (process.env.OPENAI_API_KEY ?? "").trim(),
-    apiUrl: process.env.OPENAI_API_URL ?? "https://yunwu.ai/v1",
+    apiKey: readTrimmed(process.env.PRIMARY_API_KEY),
+    apiUrl: readTrimmed(process.env.PRIMARY_API_URL),
     realtimeApiUrl:
-      process.env.OPENAI_REALTIME_API_URL ?? "ws://yunwu.ai/v1/realtime",
+      readTrimmed(
+        process.env.PRIMARY_REALTIME_API_URL,
+        process.env.PRIMARY_API_URL
+          ? `${process.env.PRIMARY_API_URL.replace(/\/$/, "")}/realtime`
+          : "",
+      ),
     audioApiUrl:
-      process.env.OPENAI_AUDIO_API_URL ??
-      `${process.env.OPENAI_API_URL ?? "https://yunwu.ai/v1"}/audio`,
-    transcribeModel:
-      process.env.OPENAI_TRANSCRIBE_MODEL ?? "gpt-4o-mini-transcribe",
-    tutorModel: process.env.OPENAI_TUTOR_MODEL ?? "gpt-5.2",
-    ttsModel: process.env.OPENAI_TTS_MODEL ?? "gpt-4o-mini-tts",
-    realtimeModel:
-      process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview",
+      readTrimmed(
+        process.env.PRIMARY_AUDIO_API_URL,
+        process.env.PRIMARY_API_URL
+          ? `${process.env.PRIMARY_API_URL.replace(/\/$/, "")}/audio`
+          : "",
+      ),
   },
 };
 

@@ -15,6 +15,7 @@ import { map } from "rxjs/operators";
 import { ConversationService } from "./conversation.service";
 import { StartConversationDto } from "./dto/start-conversation.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
+import { UpdateConversationPreferencesDto } from "./dto/update-conversation-preferences.dto";
 import { AuthService } from "../auth/auth.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { SessionSummaryPayload } from "./conversation-summary.types";
@@ -49,6 +50,20 @@ export class ConversationController {
       profile?.id,
     );
     return { status: "archived" };
+  }
+
+  @Post(":conversationId/preferences")
+  async updatePreferences(
+    @Param("conversationId") conversationId: string,
+    @Body() dto: UpdateConversationPreferencesDto,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.updateSessionPreferences(
+      conversationId,
+      dto,
+      profile?.id,
+    );
   }
 
   @Post(":conversationId/message")
