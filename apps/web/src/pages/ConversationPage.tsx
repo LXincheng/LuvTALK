@@ -80,6 +80,53 @@ const getStoredConversationIds = (): string[] => {
 
 const GUEST_MAX_HISTORY = 5;
 const MEMORY_PREFERENCE_PREFIX = 'conversationMemoryEnabled:';
+const ACTIVE_CONVERSATION_BY_LANGUAGE_KEY = 'activeConversationIdByLanguage';
+const MEANINGFUL_HISTORY_MIN_MESSAGES = 2;
+
+let startupSessionPromise: Promise<ConversationSession> | null = null;
+
+type ActiveConversationByLanguage = Partial<Record<LanguageCode, string>>;
+
+const isLanguageCode = (value: unknown): value is LanguageCode =>
+  value === 'cantonese' || value === 'mandarin' || value === 'english';
+
+const getStoredActiveConversationByLanguage = (): ActiveConversationByLanguage => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_CONVERSATION_BY_LANGUAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const next: ActiveConversationByLanguage = {};
+    for (const [language, conversationId] of Object.entries(parsed)) {
+      if (isLanguageCode(language) && typeof conversationId === 'string' && conversationId.trim()) {
+        next[language] = conversationId;
+      }
+    }
+    return next;
+  } catch {
+    return {};
+  }
+};
+
+const getStoredActiveConversationIdByLanguage = (
+  language: LanguageCode,
+): string | undefined => getStoredActiveConversationByLanguage()[language];
+
+const storeActiveConversationIdByLanguage = (
+  language: LanguageCode,
+  conversationId: string,
+) => {
+  if (typeof window === 'undefined' || !conversationId.trim()) {
+    return;
+  }
+  const next = getStoredActiveConversationByLanguage();
+  next[language] = conversationId;
+  window.localStorage.setItem(
+    ACTIVE_CONVERSATION_BY_LANGUAGE_KEY,
+    JSON.stringify(next),
+  );
+};
 
 /** Add a conversation ID to the persisted list (deduped, most-recent first). */
 const trackConversationId = (id: string) => {
@@ -233,6 +280,29 @@ const countSessionMessages = (messages: ConversationMessage[]) => {
   return { aiCount, userCount };
 };
 
+const isFreshSession = (currentSession: ConversationSession | null): boolean =>
+  Boolean(currentSession && currentSession.messages.every((message) => message.sender !== 'user'));
+
+const isMeaningfulHistoryItem = (item: ConversationHistorySummary): boolean =>
+  (item.messageCount ?? MEANINGFUL_HISTORY_MIN_MESSAGES) >= MEANINGFUL_HISTORY_MIN_MESSAGES;
+
+const normalizeHistoryList = (
+  history: ConversationHistorySummary[],
+  activeConversationId?: string,
+): ConversationHistorySummary[] => {
+  const seen = new Set<string>();
+  return history.filter((item) => {
+    if (seen.has(item.id)) {
+      return false;
+    }
+    seen.add(item.id);
+    if (item.id === activeConversationId) {
+      return true;
+    }
+    return isMeaningfulHistoryItem(item);
+  });
+};
+
 const buildLocalSessionSummary = (
   currentSession: ConversationSession | null,
 ): SessionSummaryPayload | null => {
@@ -342,6 +412,18 @@ export default function ConversationPage() {
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [isMemorySaving, setIsMemorySaving] = useState(false);
+  const targetLanguageRef = useRef<LanguageCode>(targetLanguage);
+  const nativeLanguageRef = useRef<LanguageCode>(nativeLanguage);
+
+  const syncActiveSession = useCallback((nextSession: ConversationSession) => {
+    setSession(nextSession);
+    setTargetLanguage(nextSession.targetLanguage);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('activeConversationId', nextSession.id);
+      storeActiveConversationIdByLanguage(nextSession.targetLanguage, nextSession.id);
+      trackConversationId(nextSession.id);
+    }
+  }, []);
 
   const clearStreamRecoveryTimer = useCallback(() => {
     if (streamRecoveryTimerRef.current !== null) {
@@ -612,23 +694,46 @@ export default function ConversationPage() {
     setRecoveryState('initializing');
     setRecoveryReason(undefined);
     clearStreamRecoveryTimer();
-    const savedConversationId =
-      typeof window !== 'undefined'
-        ? window.localStorage.getItem('activeConversationId')
-        : null;
     try {
-      const nextSession = await resumeConversation({
-        targetLanguage,
-        nativeLanguage,
-        conversationId: savedConversationId ?? undefined,
-      });
+      const runBootstrap = async (): Promise<ConversationSession> => {
+        const ids = getStoredConversationIds();
+        const history = await fetchConversationHistory(ids).catch(
+          () => [] as ConversationHistorySummary[],
+        );
+        const normalizedHistory = normalizeHistoryList(history);
+        setConversationHistory(normalizedHistory);
+
+        if (history.length > 0) {
+          const preferredLanguageId = getStoredActiveConversationIdByLanguage(
+            targetLanguageRef.current,
+          );
+          const activeConversationId =
+            typeof window !== 'undefined'
+              ? window.localStorage.getItem('activeConversationId')
+              : null;
+          const preferred =
+            history.find((item) => item.id === preferredLanguageId) ??
+            history.find((item) => item.id === activeConversationId) ??
+            history.find(isMeaningfulHistoryItem) ??
+            history[0];
+          return fetchConversationById(preferred.id);
+        }
+
+        return resumeConversation({
+          targetLanguage: targetLanguageRef.current,
+          nativeLanguage: nativeLanguageRef.current,
+        });
+      };
+
+      const inFlight =
+        startupSessionPromise ??
+        (startupSessionPromise = runBootstrap().finally(() => {
+          startupSessionPromise = null;
+        }));
+      const nextSession = await inFlight;
       toast.dismiss('session-init');
       toast.dismiss('stream');
-      setSession(nextSession);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('activeConversationId', nextSession.id);
-        trackConversationId(nextSession.id);
-      }
+      syncActiveSession(nextSession);
       setRecoveryState(null);
       setRecoveryReason(undefined);
       return nextSession;
@@ -639,7 +744,7 @@ export default function ConversationPage() {
     } finally {
       setIsInitializing(false);
     }
-  }, [clearStreamRecoveryTimer, nativeLanguage, targetLanguage]);
+  }, [clearStreamRecoveryTimer, syncActiveSession]);
 
   const targetLanguageLabels = useMemo(
     () => ({
@@ -653,6 +758,14 @@ export default function ConversationPage() {
   useEffect(() => {
     setNativeLanguage(locale === 'zh' ? 'mandarin' : 'english');
   }, [locale]);
+
+  useEffect(() => {
+    targetLanguageRef.current = targetLanguage;
+  }, [targetLanguage]);
+
+  useEffect(() => {
+    nativeLanguageRef.current = nativeLanguage;
+  }, [nativeLanguage]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -949,7 +1062,7 @@ export default function ConversationPage() {
     lastSummaryAiCountRef.current = 0;
     setTtsAudioMap({});
     ttsRequestsRef.current.clear();
-    ttsBaselineRef.current = 0;
+    ttsBaselineRef.current = session.messages.length;
     if (voiceDraftUrlRef.current) {
       URL.revokeObjectURL(voiceDraftUrlRef.current);
       voiceDraftUrlRef.current = null;
@@ -1087,14 +1200,14 @@ export default function ConversationPage() {
     try {
       const ids = getStoredConversationIds();
       const history = await fetchConversationHistory(ids);
-      setConversationHistory(history);
+      setConversationHistory(normalizeHistoryList(history, session?.id));
     } catch {
       // Retry once after a short delay for transient failures
       try {
         await new Promise((r) => setTimeout(r, 800));
         const ids = getStoredConversationIds();
         const history = await fetchConversationHistory(ids);
-        setConversationHistory(history);
+        setConversationHistory(normalizeHistoryList(history, session?.id));
       } catch {
         // History is non-critical, keep previous data if any
       }
@@ -1108,11 +1221,7 @@ export default function ConversationPage() {
     setHistoryDrawerOpen(false);
     try {
       const nextSession = await fetchConversationById(conversationId);
-      setSession(nextSession);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('activeConversationId', nextSession.id);
-        trackConversationId(nextSession.id);
-      }
+      syncActiveSession(nextSession);
     } catch {
       toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
@@ -1122,19 +1231,63 @@ export default function ConversationPage() {
 
   const handleNewChat = async () => {
     setHistoryDrawerOpen(false);
+    if (isFreshSession(session)) {
+      return;
+    }
     setIsInitializing(true);
     try {
       const newSession = await startConversation({
         targetLanguage,
         nativeLanguage,
       });
-      setSession(newSession);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('activeConversationId', newSession.id);
-        trackConversationId(newSession.id);
-      }
+      syncActiveSession(newSession);
       void loadHistory();
     } catch {
+      toast.error(t('sessionInitError'), { id: 'session-init' });
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  const handleTargetLanguageChange = async (language: LanguageCode) => {
+    if (!session || language === session.targetLanguage) {
+      setTargetLanguage(language);
+      return;
+    }
+    setIsInitializing(true);
+    try {
+      const cachedMatch = conversationHistory.find(
+        (item) => item.targetLanguage === language,
+      );
+      const ids = getStoredConversationIds();
+      const history =
+        cachedMatch
+          ? conversationHistory
+          : await fetchConversationHistory(ids).catch(
+              () => [] as ConversationHistorySummary[],
+            );
+      const normalizedHistory = normalizeHistoryList(history, session.id);
+      setConversationHistory(normalizedHistory);
+      const matchedHistory =
+        normalizedHistory.find((item) => item.targetLanguage === language) ??
+        history.find((item) => item.targetLanguage === language);
+      let nextSession: ConversationSession;
+      if (matchedHistory) {
+        nextSession = await fetchConversationById(matchedHistory.id);
+      } else {
+        const preferredConversationId = getStoredActiveConversationIdByLanguage(
+          language,
+        );
+        nextSession = await resumeConversation({
+          targetLanguage: language,
+          nativeLanguage: nativeLanguageRef.current,
+          conversationId: preferredConversationId,
+        });
+      }
+      syncActiveSession(nextSession);
+      void loadHistory();
+    } catch {
+      setTargetLanguage(session.targetLanguage);
       toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
       setIsInitializing(false);
@@ -1187,8 +1340,8 @@ export default function ConversationPage() {
     if (!inputValue.trim() || !session || isSending) {
       return;
     }
-    // Reset TTS baseline so new AI replies get synthesized
-    ttsBaselineRef.current = 0;
+    // Only synthesize replies appended after this send action.
+    ttsBaselineRef.current = session.messages.length;
     const messageText = inputValue.trim();
     setInputValue('');
     setIsSending(true);
@@ -1240,8 +1393,8 @@ export default function ConversationPage() {
     if (!session) {
       return;
     }
-    // Reset TTS baseline so new AI replies get synthesized
-    ttsBaselineRef.current = 0;
+    // Only synthesize replies appended after this voice upload.
+    ttsBaselineRef.current = session.messages.length;
     updateOptimisticVoiceStatus(t('voiceSending'), 'sending');
     try {
       const uploadResult = await uploadConversationVoice(session.id, audio);
@@ -1493,7 +1646,9 @@ export default function ConversationPage() {
                   return (
                     <button
                       key={language}
-                      onClick={() => setTargetLanguage(language)}
+                      onClick={() => {
+                        void handleTargetLanguageChange(language);
+                      }}
                       className={`px-2 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                         isActive
                           ? 'glass-button text-white'
@@ -1545,7 +1700,9 @@ export default function ConversationPage() {
                       return (
                         <button
                           key={language}
-                          onClick={() => setTargetLanguage(language)}
+                          onClick={() => {
+                            void handleTargetLanguageChange(language);
+                          }}
                           className={`px-2 py-0.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                             isActive
                               ? 'glass-button text-white'

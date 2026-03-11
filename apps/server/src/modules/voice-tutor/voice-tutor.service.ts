@@ -17,6 +17,7 @@ import { buildProsodyReadyTtsInput } from "./tts-prosody";
 
 const DEFAULT_STORAGE_ROOT = join(process.cwd(), "tmp", "voice-uploads");
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const CONVERTIBLE_AUDIO_EXTENSIONS = new Set([".webm", ".wav", ".m4a", ".mp4", ".bin"]);
 
 interface LanguageHint {
   languageCode: string;
@@ -96,7 +97,6 @@ export class VoiceTutorService {
       mimeType: file.mimetype,
     };
 
-    result = await this.ensureMp3(result);
     await this.updateOperationStatus(conversationId, result, {
       status: "received",
     });
@@ -144,52 +144,74 @@ export class VoiceTutorService {
     upload: VoiceUploadResult,
     languageHint: LanguageHint,
   ): Promise<void> {
-    await this.updateOperationStatus(conversationId, upload, {
+    const startedAt = Date.now();
+    let activeUpload = upload;
+    await this.updateOperationStatus(conversationId, activeUpload, {
       status: "transcribing",
     });
     try {
-      const transcript = await this.transcribeWithOpenAi(upload, languageHint);
+      let transcript = await this.transcribeWithOpenAi(activeUpload, languageHint);
+      const transcribeElapsedMs = Date.now() - startedAt;
+      this.logger.debug(
+        `Voice ${activeUpload.operationId} transcription stage took ${transcribeElapsedMs}ms`,
+      );
+      if (!transcript && this.shouldAttemptMp3Fallback(activeUpload)) {
+        const converted = await this.ensureMp3(activeUpload);
+        if (converted.filePath !== activeUpload.filePath) {
+          activeUpload = converted;
+          await this.updateOperationStatus(conversationId, activeUpload, {
+            status: "transcribing",
+          });
+          transcript = await this.transcribeWithOpenAi(activeUpload, languageHint);
+          this.logger.debug(
+            `Voice ${activeUpload.operationId} retried transcription after mp3 conversion`,
+          );
+        }
+      }
       if (!transcript) {
-        await this.updateOperationStatus(conversationId, upload, {
+        await this.updateOperationStatus(conversationId, activeUpload, {
           status: "failed",
           error: "TRANSCRIPTION_FAILED",
         });
         await this.respondWithFallbackMessage(
           conversationId,
-          upload,
+          activeUpload,
           languageHint,
           "TRANSCRIPTION_FAILED",
         );
         return;
       }
-      await this.updateOperationStatus(conversationId, upload, {
+      await this.updateOperationStatus(conversationId, activeUpload, {
         status: "responding",
         transcript,
       });
-      await this.forwardTranscript(conversationId, upload, transcript);
-      await this.updateOperationStatus(conversationId, upload, {
+      await this.forwardTranscript(conversationId, activeUpload, transcript);
+      await this.updateOperationStatus(conversationId, activeUpload, {
         status: "completed",
         transcript,
       });
+      this.logger.debug(
+        `Voice ${activeUpload.operationId} finished in ${Date.now() - startedAt}ms`,
+      );
     } catch (error) {
       this.logger.error(
-        `Voice upload processing failed for ${upload.operationId}`,
+        `Voice upload processing failed for ${activeUpload.operationId}`,
         error instanceof Error ? error.stack : String(error),
       );
-      await this.updateOperationStatus(conversationId, upload, {
+      await this.updateOperationStatus(conversationId, activeUpload, {
         status: "failed",
         error: "PROCESSING_ERROR",
       });
       try {
         await this.respondWithFallbackMessage(
           conversationId,
-          upload,
+          activeUpload,
           languageHint,
           "PROCESSING_ERROR",
         );
       } catch (fallbackError) {
         this.logger.error(
-          `Fallback handling failed for ${upload.operationId}`,
+          `Fallback handling failed for ${activeUpload.operationId}`,
           fallbackError instanceof Error
             ? fallbackError.stack
             : String(fallbackError),
@@ -206,7 +228,7 @@ export class VoiceTutorService {
     upload: VoiceUploadResult,
   ): Promise<VoiceUploadResult> {
     const ext = extname(upload.filePath).toLowerCase();
-    if (ext === ".mp3") return upload;
+    if (ext === ".mp3" || !CONVERTIBLE_AUDIO_EXTENSIONS.has(ext)) return upload;
 
     const mp3Path = upload.filePath.replace(/\.[^.]+$/, ".mp3");
     const mp3FileName = upload.fileName.replace(/\.[^.]+$/, ".mp3");
@@ -366,6 +388,11 @@ export class VoiceTutorService {
       );
       return undefined;
     }
+  }
+
+  private shouldAttemptMp3Fallback(upload: VoiceUploadResult): boolean {
+    const ext = extname(upload.filePath).toLowerCase();
+    return ext !== ".mp3" && CONVERTIBLE_AUDIO_EXTENSIONS.has(ext);
   }
 
   async synthesizeSpeech(

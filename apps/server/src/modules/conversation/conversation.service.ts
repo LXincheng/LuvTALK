@@ -31,11 +31,17 @@ import {
 } from "./conversation-summary.types";
 import {
   buildWelcomeCopy,
+  buildFallbackReplyCopy,
   FALLBACK_SCORE_REASON,
+  FALLBACK_PLAIN_REPLY_SCORE_REASON,
+  resolveFallbackAssociativePhrases,
+  resolveLanguageLabel,
+  resolveScenarioTitle,
   resolveSpeakerName,
 } from "./conversation.copy";
 import {
   CONVERSATION_DEFAULTS,
+  CONVERSATION_ENDPOINTS,
   CONVERSATION_LOG_COPY,
 } from "./conversation.constants";
 import { ensureVoiceTipSet } from "./voice-tip-templater";
@@ -168,7 +174,11 @@ export class ConversationService {
       nativeLanguage,
       memoryEnabled: true,
       userId,
-      title: this.describeScenario(scenarioId, nativeLanguage),
+      title: this.buildConversationTitle(
+        this.describeScenario(scenarioId, nativeLanguage),
+        dto.targetLanguage,
+        nativeLanguage,
+      ),
       status: "active",
       createdAt: now,
       updatedAt: now,
@@ -233,7 +243,9 @@ export class ConversationService {
       if (firstUser) {
         session.title = this.summarizeTitle(
           firstUser.text,
+          session.targetLanguage,
           session.nativeLanguage,
+          session.scenarioId,
         );
       }
     }
@@ -368,7 +380,12 @@ export class ConversationService {
     ).length;
     if (userMessageCount === 1) {
       // Set a temporary title immediately; refine asynchronously after AI responds
-      session.title = this.summarizeTitle(trimmed, session.nativeLanguage);
+      session.title = this.summarizeTitle(
+        trimmed,
+        session.targetLanguage,
+        session.nativeLanguage,
+        session.scenarioId,
+      );
     }
 
     // Early broadcast: user message appears instantly in the UI
@@ -560,78 +577,114 @@ export class ConversationService {
   }
 
   /**
-   * Generate a concise title (≤20 chars) from the first user message.
-   * Strips punctuation, truncates intelligently at word/character boundaries.
+   * Generate a concise title from the first user message snippet, prefixed with target language.
    */
-  private summarizeTitle(text: string, nativeLanguage?: LanguageCode): string {
-    const cleaned = text
-      .replace(/[\n\r]+/g, " ")
+  private summarizeTitle(
+    text: string,
+    targetLanguage?: LanguageCode,
+    nativeLanguage?: LanguageCode,
+    scenarioId = "daily",
+  ): string {
+    const snippet = this.extractTitleSnippet(text);
+    if (!snippet) {
+      return this.buildConversationTitle(
+        this.describeScenario(scenarioId, nativeLanguage),
+        targetLanguage,
+        nativeLanguage,
+      );
+    }
+    const truncated = this.truncateTitleSnippet(
+      snippet,
+      targetLanguage ? 10 : 15,
+      targetLanguage ? 20 : 30,
+    );
+    return this.buildConversationTitle(
+      truncated,
+      targetLanguage,
+      nativeLanguage,
+    );
+  }
+
+  private extractTitleSnippet(text: string): string {
+    const normalized = text.replace(/[\n\r]+/g, " ").replace(/\s+/g, " ").trim();
+    if (!normalized) {
+      return "";
+    }
+    const firstSegment =
+      normalized
+        .split(/[。！？!?；;，,]/)
+        .map((segment) => segment.trim())
+        .find((segment) => segment.length > 0) ?? normalized;
+    return firstSegment
       .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .replace(/\s+/g, " ")
       .trim();
-    if (!cleaned) {
-      return this.describeScenario("daily", nativeLanguage);
+  }
+
+  private truncateTitleSnippet(
+    snippet: string,
+    cjkLimit: number,
+    latinLimit: number,
+  ): string {
+    if (!snippet) {
+      return snippet;
     }
-    // For CJK-heavy text, truncate by character count
     const cjkRatio =
-      (cleaned.match(
+      (snippet.match(
         /[\u4e00-\u9fff\u3400-\u4dbf\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g,
-      )?.length ?? 0) / cleaned.length;
+      )?.length ?? 0) / snippet.length;
     if (cjkRatio > 0.3) {
-      return cleaned.length > 15 ? cleaned.slice(0, 15) + "…" : cleaned;
+      return snippet.length > cjkLimit
+        ? `${snippet.slice(0, cjkLimit)}…`
+        : snippet;
     }
-    // For alphabetic text, truncate at word boundary
-    if (cleaned.length <= 30) {
-      return cleaned;
+    if (snippet.length <= latinLimit) {
+      return snippet;
     }
-    const words = cleaned.split(/\s+/);
+    const words = snippet.split(/\s+/);
     let result = "";
     for (const word of words) {
-      if ((result + " " + word).trim().length > 28) break;
-      result = (result + " " + word).trim();
+      const next = `${result} ${word}`.trim();
+      if (next.length > latinLimit - 1) {
+        break;
+      }
+      result = next;
     }
-    return result ? result + "…" : cleaned.slice(0, 28) + "…";
+    return result ? `${result}…` : `${snippet.slice(0, latinLimit - 1)}…`;
+  }
+
+  private buildConversationTitle(
+    title: string,
+    targetLanguage?: LanguageCode,
+    nativeLanguage?: LanguageCode,
+  ): string {
+    if (!title) {
+      return title;
+    }
+    if (!targetLanguage) {
+      return title;
+    }
+    const resolvedNative = nativeLanguage ?? LanguageCode.Mandarin;
+    const languageLabel = this.describeLanguage(targetLanguage, resolvedNative);
+    const separator = resolvedNative === LanguageCode.English ? ": " : "｜";
+    if (title.startsWith(`${languageLabel}${separator}`)) {
+      return title;
+    }
+    return `${languageLabel}${separator}${title}`;
   }
 
   private describeScenario(
     scenarioId: string,
     nativeLanguage?: LanguageCode,
   ): string {
-    const zhMap: Record<string, string> = {
-      restaurant: "餐厅点单",
-      shopping: "商店交流",
-      directions: "问路指引",
-      business: "商务寒暄",
-      daily: "日常聊天",
-    };
-    const enMap: Record<string, string> = {
-      restaurant: "Dining etiquette",
-      shopping: "Shopping chat",
-      directions: "Asking for directions",
-      business: "Business meetup",
-      daily: "Daily small talk",
-    };
-    const prefersEnglish = nativeLanguage === LanguageCode.English;
-    const map = prefersEnglish ? enMap : zhMap;
-    return (
-      map[scenarioId] ?? (prefersEnglish ? "Conversation practice" : "沉浸对话")
-    );
+    return resolveScenarioTitle(scenarioId, nativeLanguage);
   }
 
   private describeLanguage(
     language: LanguageCode,
     nativeLanguage: LanguageCode,
   ): string {
-    const prefersEnglish = nativeLanguage === LanguageCode.English;
-    switch (language) {
-      case LanguageCode.Cantonese:
-        return prefersEnglish ? "Cantonese" : "粤语";
-      case LanguageCode.Mandarin:
-        return prefersEnglish ? "Mandarin" : "普通话";
-      case LanguageCode.English:
-        return prefersEnglish ? "English" : "英语";
-      default:
-        return language;
-    }
+    return resolveLanguageLabel(language, nativeLanguage);
   }
 
   private async requestOpenAi(
@@ -669,6 +722,7 @@ export class ConversationService {
       interactionMode,
     );
 
+    const timeoutMs = envConfig.modelTimeoutMs.primary;
     const payload = {
       model: tutorModel,
       temperature: CONVERSATION_DEFAULTS.openAiTemperature,
@@ -694,7 +748,7 @@ export class ConversationService {
           },
           body: JSON.stringify(payload),
         },
-        envConfig.modelTimeoutMs.primary,
+        timeoutMs,
       );
 
       if (!response.ok) {
@@ -723,7 +777,7 @@ export class ConversationService {
     } catch (error) {
       if (this.isAbortError(error)) {
         this.logger.warn(
-          `Primary tutor timed out after ${envConfig.modelTimeoutMs.primary}ms, switching to fallback source.`,
+          `Primary tutor timed out after ${timeoutMs}ms, switching to fallback source.`,
         );
         return null;
       }
@@ -811,14 +865,19 @@ export class ConversationService {
       return null;
     }
 
-    const candidates = orderedModels.map((model, index) => ({
-      model,
-      timeoutMs:
-        index === 0
-          ? envConfig.modelTimeoutMs.secondary
-          : envConfig.modelTimeoutMs.third,
-      label: index === 0 ? "secondary" : index === 1 ? "third" : "extra",
-    }));
+    const candidates = orderedModels.map((model, index) => {
+      const isThird = model === configuredThird;
+      const baseTimeout = isThird
+        ? envConfig.modelTimeoutMs.third
+        : envConfig.modelTimeoutMs.secondary;
+      const timeoutMs = baseTimeout;
+      const label = isThird
+        ? "third"
+        : model === configuredSecondary
+          ? "secondary"
+          : `fallback-${index + 1}`;
+      return { model, timeoutMs, label };
+    });
 
     for (const candidate of candidates) {
       const payload = {
@@ -1117,34 +1176,7 @@ export class ConversationService {
     targetLanguage: LanguageCode,
     scenarioId: string,
   ): [string, string] {
-    if (targetLanguage === LanguageCode.English) {
-      switch (scenarioId) {
-        case "restaurant":
-          return [
-            "Could you recommend your signature dish?",
-            "I'd like something light but flavorful.",
-          ];
-        case "directions":
-          return [
-            "Could you show me the fastest route?",
-            "Is it within walking distance from here?",
-          ];
-        case "business":
-          return [
-            "Could we align on the next action today?",
-            "Let's confirm the timeline before we proceed.",
-          ];
-        default:
-          return [
-            "Could you tell me more about that?",
-            "That sounds great. What should I do next?",
-          ];
-      }
-    }
-    if (targetLanguage === LanguageCode.Cantonese) {
-      return ["可唔可以介绍一个最啱新手嘅讲法？", "我下一句可以点样讲得更自然？"];
-    }
-    return ["你可以给我一个更地道的说法吗？", "我下一句怎么接会更自然？"];
+    return resolveFallbackAssociativePhrases(targetLanguage, scenarioId);
   }
 
   private enrichPayloadForInteractionMode(
@@ -1319,7 +1351,7 @@ export class ConversationService {
         scenarioId,
       ),
       score,
-      scoreReason: "基于语气、场景贴合度与可理解性的兜底估分",
+      scoreReason: FALLBACK_PLAIN_REPLY_SCORE_REASON,
       pronunciationTip: tips.pronunciationTip,
       rhythmTip: tips.rhythmTip,
       grammarTip: tips.grammarTip,
@@ -1332,13 +1364,7 @@ export class ConversationService {
     language: LanguageCode,
     scenarioId: string,
   ): string {
-    if (language === LanguageCode.English) {
-      return `I heard "${message}". Here is a natural ${scenarioId} response to keep things flowing.`;
-    }
-    if (language === LanguageCode.Cantonese) {
-      return `我聽到你講：「${message}」。等我用地道講法繼續对话。`;
-    }
-    return `我听到你说：“${message}”。我来示范一个自然的续写方式。`;
+    return buildFallbackReplyCopy(message, language, scenarioId);
   }
 
   private normalizeKeyTerms(reply: string, keyTerms: KeyTerm[]): KeyTerm[] {
@@ -1707,13 +1733,13 @@ export class ConversationService {
       return null;
     }
     const normalized = raw.replace(/\/$/, "");
-    if (normalized.endsWith("/chat/completions")) {
+    if (normalized.endsWith(CONVERSATION_ENDPOINTS.chatCompletionsPath)) {
       return normalized;
     }
-    if (normalized.endsWith("/v1")) {
-      return `${normalized}/chat/completions`;
+    if (normalized.endsWith(CONVERSATION_ENDPOINTS.apiVersionPath)) {
+      return `${normalized}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
     }
-    return `${normalized}/v1/chat/completions`;
+    return `${normalized}${CONVERSATION_ENDPOINTS.apiVersionPath}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
   }
 
   private resolveOpenAiEndpoint(): string | null {
@@ -1721,13 +1747,13 @@ export class ConversationService {
     if (!raw) {
       return null;
     }
-    if (raw.endsWith("/chat/completions")) {
+    if (raw.endsWith(CONVERSATION_ENDPOINTS.chatCompletionsPath)) {
       return raw;
     }
-    if (raw.endsWith("/v1")) {
-      return `${raw}/chat/completions`;
+    if (raw.endsWith(CONVERSATION_ENDPOINTS.apiVersionPath)) {
+      return `${raw}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
     }
-    return `${raw}/v1/chat/completions`;
+    return `${raw}${CONVERSATION_ENDPOINTS.apiVersionPath}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
   }
 
   private async fetchWithTimeout(

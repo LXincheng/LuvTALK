@@ -6,6 +6,11 @@ export const CONVERSATION_DEFAULTS = {
   fallbackScore: 72,
 } as const;
 
+export const CONVERSATION_ENDPOINTS = {
+  apiVersionPath: "/v1",
+  chatCompletionsPath: "/chat/completions",
+} as const;
+
 export const CONVERSATION_LOG_COPY = {
   missingPrimaryConfig:
     "Primary tutor model config missing; skip primary route.",
