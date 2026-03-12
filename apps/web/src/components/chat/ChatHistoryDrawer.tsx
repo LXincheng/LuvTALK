@@ -60,17 +60,17 @@ export default function ChatHistoryDrawer({
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-0.75rem))] glass-sidebar border-r border-slate-200 dark:border-slate-700 flex flex-col"
+            className="fixed inset-y-0 left-0 z-50 w-[min(20rem,calc(100vw-0.75rem))] glass-sidebar border-r border-separator flex flex-col"
           >
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <h3 className="font-semibold text-slate-900 dark:text-white">
+            <div className="p-4 border-b border-separator flex items-center justify-between">
+              <h3 className="font-semibold text-label">
                 {t('chatHistory')}
               </h3>
               <button
                 onClick={onClose}
-                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-lg hover:bg-fill-secondary transition-colors"
               >
-                <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+                <X className="w-5 h-5 text-label-tertiary" />
               </button>
             </div>
 
@@ -84,18 +84,18 @@ export default function ChatHistoryDrawer({
 
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {isLoading && (
-                <div className="text-center py-8 text-sm text-slate-400 dark:text-slate-500">
-                  <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                <div className="text-center py-8 text-sm text-label-tertiary">
+                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                 </div>
               )}
 
               {!isLoading && conversations.length === 0 && (
                 <div className="text-center py-12">
-                  <MessageCircle className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                  <MessageCircle className="w-10 h-10 text-label-tertiary mx-auto mb-3" />
+                  <p className="text-sm text-label-secondary">
                     {t('noHistory')}
                   </p>
-                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  <p className="text-xs text-label-tertiary mt-1">
                     {t('noHistoryHint')}
                   </p>
                 </div>
@@ -109,27 +109,27 @@ export default function ChatHistoryDrawer({
                     onClick={() => onSelectConversation(conv.id)}
                     className={`w-full text-left glass-card border rounded-xl p-3 transition-all ${
                       isActive
-                        ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/30'
-                        : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                        ? 'border-primary bg-primary/10'
+                        : 'border-separator hover:bg-fill-secondary'
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <p className="font-medium text-sm text-slate-900 dark:text-white truncate flex-1">
+                      <p className="font-medium text-sm text-label truncate flex-1">
                         {conv.title || conv.scenarioId}
                       </p>
                       {conv.status === 'active' && (
                         <span className="ml-2 w-2 h-2 bg-green-500 rounded-full flex-shrink-0" />
                       )}
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-1">
+                    <p className="text-xs text-label-secondary truncate mt-1">
                       {conv.lastMessage}
                     </p>
                     <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-xs text-slate-400 dark:text-slate-500">
+                      <span className="text-xs text-label-tertiary">
                         {formatRelativeTime(conv.updatedAt, locale)}
                       </span>
                       {conv.messageCount != null && (
-                        <span className="text-xs text-slate-400 dark:text-slate-500">
+                        <span className="text-xs text-label-tertiary">
                           {conv.messageCount} {locale === 'zh' ? '条' : 'msgs'}
                         </span>
                       )}

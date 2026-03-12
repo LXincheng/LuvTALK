@@ -34,7 +34,7 @@ export default function ChatModeSwitcher({
   ];
 
   return (
-    <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60">
+    <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none border border-separator rounded-lg p-0.5 glass-card">
       {modes.map((m) => {
         const Icon = m.icon;
         const isActive = mode === m.id;
@@ -44,12 +44,12 @@ export default function ChatModeSwitcher({
             onClick={() => !m.disabled && onChange(m.id)}
             disabled={m.disabled}
             title={m.tooltip ?? m.label}
-            className={`flex shrink-0 items-center justify-center gap-1 rounded-md transition-all ${
+            className={`press-scale flex shrink-0 items-center justify-center gap-1 rounded-md transition-all duration-200 ${
               isActive
-                ? 'glass-button text-white'
+                ? 'glass-button text-white shadow-sm'
                 : m.disabled
-                  ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed opacity-50'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  ? 'text-label-tertiary cursor-not-allowed opacity-50'
+                  : 'text-label-secondary hover:bg-fill-secondary'
             } ${
               compact
                 ? 'px-2 py-1.5'

@@ -22,43 +22,40 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   const initials = displayName.slice(0, 2).toUpperCase();
 
   return (
-    <aside className="w-64 h-full glass-sidebar border-r border-slate-200 dark:border-slate-700 flex flex-col">
-      <div className="p-6 border-b border-slate-200 dark:border-slate-700">
-        <h1 className="text-2xl font-semibold text-indigo-600 dark:text-indigo-400">
+    <aside className="w-64 lg:w-72 h-full glass-sidebar border-r border-separator flex flex-col">
+      <div className="p-6 border-b border-separator">
+        <h1 className="text-2xl font-semibold text-primary">
           {t('appName')}
         </h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+        <p className="text-sm text-label-secondary mt-1">
           {t('appSubtitle')}
         </p>
       </div>
 
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-none">
         {navItems.map((item) => {
           const Icon = item.icon;
-
           return (
             <NavLink
               key={item.id}
               to={item.path}
               onClick={onNavigate}
               className={({ isActive }) =>
-                `w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                `w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                   isActive
-                    ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-300'
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                    ? 'bg-[var(--color-primary-soft)] text-primary'
+                    : 'text-label-secondary hover:bg-fill-secondary'
                 }`
               }
             >
               {({ isActive }) => (
                 <>
                   <Icon
-                    className={`w-5 h-5 ${
-                      isActive
-                        ? 'text-indigo-600 dark:text-indigo-300'
-                        : 'text-slate-500 dark:text-slate-400'
+                    className={`w-5 h-5 flex-shrink-0 ${
+                      isActive ? 'text-primary' : 'text-label-tertiary'
                     }`}
                   />
-                  <span className="font-medium">{t(item.labelKey)}</span>
+                  <span className="font-medium truncate">{t(item.labelKey)}</span>
                 </>
               )}
             </NavLink>
@@ -66,9 +63,9 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
         })}
       </nav>
 
-      <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
-        <div className="glass-card border border-slate-200 dark:border-slate-700 rounded-xl p-3 space-y-2">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+      <div className="p-4 border-t border-separator space-y-3">
+        <div className="glass-card rounded-xl p-3 space-y-2">
+          <p className="text-xs text-label-tertiary">
             {t('interfaceLanguage')}
           </p>
           <div className="flex items-center gap-2">
@@ -77,7 +74,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
               className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                 locale === 'zh'
                   ? 'glass-button text-white'
-                  : 'bg-white/60 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'bg-fill-secondary text-label-secondary hover:bg-fill'
               }`}
             >
               中文
@@ -87,7 +84,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
               className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                 locale === 'en'
                   ? 'glass-button text-white'
-                  : 'bg-white/60 dark:bg-slate-900/60 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'bg-fill-secondary text-label-secondary hover:bg-fill'
               }`}
             >
               English
@@ -97,7 +94,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
 
         <button
           onClick={toggleTheme}
-          className="w-full glass-card border border-slate-200 dark:border-slate-700 rounded-xl p-3 flex items-center justify-between text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors"
+          className="w-full glass-card rounded-xl p-3 flex items-center justify-between text-label-secondary hover:bg-fill-secondary transition-colors"
         >
           <span className="text-sm font-medium">
             {theme === 'dark' ? t('themeDark') : t('themeLight')}
@@ -112,16 +109,16 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
         <NavLink
           to="/profile"
           onClick={onNavigate}
-          className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors"
+          className="flex items-center gap-3 p-3 rounded-xl hover:bg-fill-secondary transition-colors"
         >
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white font-semibold">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-primary)] to-[#5856D6] flex items-center justify-center text-white font-semibold flex-shrink-0">
             {initials}
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-medium text-slate-900 dark:text-white">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-label truncate">
               {displayName}
             </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-label-tertiary truncate">
               {isGuest ? t('profileGuestMode') : t('profileLearningStatus')}
             </p>
           </div>

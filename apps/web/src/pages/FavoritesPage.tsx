@@ -98,13 +98,13 @@ export default function FavoritesPage() {
   };
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
+    <div className="h-full overflow-y-auto bg-surface">
       <div className="max-w-6xl mx-auto px-4 py-6 md:py-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-semibold text-slate-900 dark:text-white mb-2">
+          <h1 className="text-3xl font-semibold text-label mb-2">
             {t('favoritesTitle')}
           </h1>
-          <p className="text-slate-600 dark:text-slate-400">
+          <p className="text-label-secondary">
             {t('favoritesSubtitle')}
           </p>
         </div>
@@ -117,7 +117,7 @@ export default function FavoritesPage() {
               className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-all ${
                 selectedCategory === category.id
                   ? 'glass-button text-white'
-                  : 'glass-card text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'glass-card text-label-secondary hover:bg-fill'
               }`}
             >
               {category.label}
@@ -128,23 +128,23 @@ export default function FavoritesPage() {
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
             {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="glass-card border border-slate-200 dark:border-slate-700 rounded-xl p-4">
-                <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-20 mb-3" />
-                <div className="h-5 bg-slate-200 dark:bg-slate-700 rounded w-3/4 mb-2" />
-                <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-full mb-4" />
-                <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-24 mt-3 pt-3" />
+              <div key={i} className="glass-card rounded-xl p-4">
+                <div className="h-5 bg-fill rounded w-20 mb-3" />
+                <div className="h-5 bg-fill rounded w-3/4 mb-2" />
+                <div className="h-4 bg-fill rounded w-full mb-4" />
+                <div className="h-3 bg-fill rounded w-24 mt-3 pt-3" />
               </div>
             ))}
           </div>
         ) : filteredFavorites.length === 0 ? (
           <div className="text-center py-16">
-            <div className="w-16 h-16 bg-slate-200 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Star className="w-8 h-8 text-slate-400 dark:text-slate-600" />
+            <div className="w-16 h-16 bg-fill rounded-full flex items-center justify-center mx-auto mb-4">
+              <Star className="w-8 h-8 text-label-tertiary" />
             </div>
-            <p className="text-slate-600 dark:text-slate-400">
+            <p className="text-label-secondary">
               {t('favoritesEmptyTitle')}
             </p>
-            <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">
+            <p className="text-sm text-label-tertiary mt-1">
               {t('favoritesEmptyHint')}
             </p>
           </div>
@@ -198,45 +198,45 @@ function FavoriteCard({
   createdAtLabel,
 }: FavoriteCardProps) {
   return (
-    <div className="glass-card border border-slate-200 dark:border-slate-700 rounded-xl p-4 hover:shadow-md transition-shadow group">
+    <div className="glass-card rounded-xl p-4 hover:shadow-md transition-shadow group">
       <div className="flex items-start justify-between mb-3">
-        <span className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-xs font-medium rounded-md">
-          <Star className="w-3 h-3 fill-indigo-700 dark:fill-indigo-300" />
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-[var(--color-primary-soft)] text-primary text-xs font-medium rounded-md">
+          <Star className="w-3 h-3 fill-[var(--color-primary)]" />
           {categoryLabel}
         </span>
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => onCopy(favorite.content, favorite.id)}
-            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-fill rounded-lg transition-colors"
             title={copyLabel}
           >
             {isCopied ? (
-              <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+              <Check className="w-4 h-4 text-success" />
             ) : (
-              <Copy className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <Copy className="w-4 h-4 text-label-tertiary" />
             )}
           </button>
           <button
             onClick={() => onDelete(favorite.id)}
-            className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-destructive/10 rounded-lg transition-colors"
             title={removeLabel}
           >
-            <Trash2 className="w-4 h-4 text-red-500 dark:text-red-400" />
+            <Trash2 className="w-4 h-4 text-destructive" />
           </button>
         </div>
       </div>
 
       <div className="space-y-2">
-        <p className="text-lg font-medium text-slate-900 dark:text-white">
+        <p className="text-lg font-medium text-label">
           {favorite.title}
         </p>
-        <p className="text-sm text-slate-600 dark:text-slate-400">
+        <p className="text-sm text-label-secondary">
           {favorite.content}
         </p>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-        <p className="text-xs text-slate-500 dark:text-slate-500">
+      <div className="mt-3 pt-3 border-t border-separator">
+        <p className="text-xs text-label-tertiary">
           {addedLabel} {createdAtLabel}
         </p>
       </div>

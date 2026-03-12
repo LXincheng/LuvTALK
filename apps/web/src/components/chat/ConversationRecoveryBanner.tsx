@@ -24,10 +24,10 @@ export default function ConversationRecoveryBanner({
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="mx-4 mt-3 rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2.5 backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/70"
+      className="mx-4 mt-3 rounded-2xl border border-separator glass-card px-3 py-2.5"
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 text-xs text-slate-600 dark:text-slate-300">
+        <div className="flex items-center gap-2.5 text-xs text-label-secondary">
           {isLoading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-500" />
           ) : (
@@ -39,7 +39,7 @@ export default function ConversationRecoveryBanner({
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex items-center gap-1 rounded-full border border-slate-300/80 bg-white/70 px-2.5 py-1 text-[11px] text-slate-700 transition-colors hover:bg-white dark:border-slate-600 dark:bg-slate-800/70 dark:text-slate-100"
+            className="inline-flex items-center gap-1 rounded-full border border-separator glass-card px-2.5 py-1 text-[11px] text-label transition-colors hover:bg-fill-secondary"
           >
             <RotateCcw className="h-3 w-3" />
             {t('commonRetry')}

@@ -1552,26 +1552,26 @@ export default function ConversationPage() {
         void handleToggleMemory();
       }}
       disabled={!session || isInitializing || isMemorySaving}
-      className="glass-status inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      className="press-scale inline-flex items-center gap-2 rounded-lg border border-separator glass-card px-2.5 py-1.5 text-xs text-label-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       title={t('memoryToggle')}
       aria-label={`${t('memoryToggle')} ${memoryStatusText}`}
       aria-pressed={memoryEnabled}
     >
       <span
-        className={`relative h-5 w-9 rounded-full border transition-colors ${
+        className={`relative h-5 w-9 rounded-full transition-colors ${
           memoryEnabled
-            ? 'border-slate-500/60 bg-slate-700/75'
-            : 'border-slate-300/80 bg-slate-200/70 dark:border-slate-600/70 dark:bg-slate-700/60'
+            ? 'bg-success'
+            : 'bg-fill'
         }`}
       >
         <span
-          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-[0_1px_8px_rgba(15,23,42,0.18)] transition-transform ${
+          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
             memoryEnabled ? 'translate-x-4' : ''
           }`}
         />
       </span>
       <span className="font-medium">{t('memoryToggle')}</span>
-      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+      <span className="text-[11px] text-label-tertiary">
         {memoryStatusText}
       </span>
     </button>
@@ -1580,8 +1580,8 @@ export default function ConversationPage() {
   if (chatMode === 'immersive') {
     if (!session?.id) {
       return (
-        <div className="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center">
-          <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-slate-200">
+        <div className="fixed inset-0 z-50 bg-surface flex items-center justify-center">
+          <div className="rounded-xl glass-card px-4 py-3 text-sm text-label-secondary">
             {t('sessionInit')}
           </div>
         </div>
@@ -1606,7 +1606,7 @@ export default function ConversationPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
+    <div className="h-full flex flex-col bg-surface">
       <ChatHistoryDrawer
         isOpen={historyDrawerOpen}
         onClose={() => setHistoryDrawerOpen(false)}
@@ -1617,7 +1617,7 @@ export default function ConversationPage() {
         isLoading={isLoadingHistory}
       />
 
-      <div className="border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm">
+      <div className="border-b border-separator glass-card">
         {/* Mobile */}
         <div className="flex flex-col md:hidden">
           <div className="flex items-center gap-1.5 px-2 py-2 min-w-0">
@@ -1626,12 +1626,12 @@ export default function ConversationPage() {
                 setHistoryDrawerOpen(true);
                 void loadHistory();
               }}
-              className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              className="press-scale p-1.5 rounded-lg hover:bg-fill-secondary transition-colors shrink-0"
               title={t('chatHistory')}
             >
-              <History className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+              <History className="w-5 h-5 text-label-tertiary" />
             </button>
-            <h2 className="text-sm font-semibold text-slate-900 dark:text-white truncate min-w-0 flex-1">
+            <h2 className="text-sm font-semibold text-label truncate min-w-0 flex-1">
               {session?.title || t('chatTitle')}
             </h2>
             <div className="shrink-0 ml-auto max-w-[48%]">
@@ -1639,7 +1639,7 @@ export default function ConversationPage() {
             </div>
           </div>
           <div className="flex items-center gap-1.5 px-2 pb-2 overflow-x-auto scrollbar-none min-w-0">
-            <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60 shrink-0">
+            <div className="inline-flex items-center gap-0.5 border border-separator rounded-lg p-0.5 glass-card shrink-0">
               {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
                 (language) => {
                   const isActive = targetLanguage === language;
@@ -1649,10 +1649,10 @@ export default function ConversationPage() {
                       onClick={() => {
                         void handleTargetLanguageChange(language);
                       }}
-                      className={`px-2 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
+                      className={`press-scale px-2 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                         isActive
                           ? 'glass-button text-white'
-                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          : 'text-label-secondary hover:bg-fill-secondary'
                       }`}
                     >
                       {targetLanguageLabels[language]}
@@ -1663,13 +1663,13 @@ export default function ConversationPage() {
             </div>
             {chatMode !== 'text' && (
               <>
-                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                <div className="w-px h-5 bg-separator shrink-0" />
                 <div className="shrink-0">
                   <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
                 </div>
               </>
             )}
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+            <div className="w-px h-5 bg-separator shrink-0" />
             <div className="shrink-0">{memoryToggleControl}</div>
           </div>
         </div>
@@ -1682,18 +1682,18 @@ export default function ConversationPage() {
                 setHistoryDrawerOpen(true);
                 void loadHistory();
               }}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+              className="press-scale p-2 rounded-lg hover:bg-fill-secondary transition-colors shrink-0"
               title={t('chatHistory')}
             >
-              <History className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+              <History className="w-5 h-5 text-label-secondary" />
             </button>
             <div className="min-w-0 flex-1">
-              <h2 className="font-semibold text-slate-900 dark:text-white truncate">
+              <h2 className="font-semibold text-label truncate">
                 {session?.title || t('chatTitle')}
               </h2>
               <div className="flex items-center gap-1 mt-1 overflow-x-auto scrollbar-none">
-                <span className="text-xs text-slate-400 dark:text-slate-500 shrink-0">{t('learningLanguage')}</span>
-                <div className="inline-flex items-center gap-0.5 border border-slate-200 dark:border-slate-700 rounded-lg p-0.5 bg-white/60 dark:bg-slate-900/60 shrink-0">
+                <span className="text-xs text-label-tertiary shrink-0">{t('learningLanguage')}</span>
+                <div className="inline-flex items-center gap-0.5 border border-separator rounded-lg p-0.5 glass-card shrink-0">
                   {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
                     (language) => {
                       const isActive = targetLanguage === language;
@@ -1703,10 +1703,10 @@ export default function ConversationPage() {
                           onClick={() => {
                             void handleTargetLanguageChange(language);
                           }}
-                          className={`px-2 py-0.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
+                          className={`press-scale px-2 py-0.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                             isActive
                               ? 'glass-button text-white'
-                              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              : 'text-label-secondary hover:bg-fill-secondary'
                           }`}
                         >
                           {targetLanguageLabels[language]}

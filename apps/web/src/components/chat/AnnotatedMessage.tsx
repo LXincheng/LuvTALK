@@ -20,7 +20,7 @@ export default function AnnotatedMessage({
 }: AnnotatedMessageProps) {
   if (annotations.length === 0) {
     return (
-      <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-words">
+      <p className="text-label whitespace-pre-wrap break-words">
         {content}
       </p>
     );
@@ -84,7 +84,7 @@ export default function AnnotatedMessage({
   };
 
   return (
-    <p className="text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-words">
+    <p className="text-label whitespace-pre-wrap break-words">
       {renderContent()}
     </p>
   );

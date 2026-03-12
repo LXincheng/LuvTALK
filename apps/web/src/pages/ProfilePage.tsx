@@ -164,26 +164,26 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
+    <div className="h-full overflow-y-auto bg-surface">
       <div className="max-w-4xl mx-auto px-4 py-6 md:py-8">
-        <div className="glass-card rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 md:p-8 mb-6">
+        <div className="glass-card rounded-2xl shadow-sm p-6 md:p-8 mb-6">
           <div className="flex flex-col md:flex-row items-center gap-6">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white text-3xl font-bold">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[var(--color-primary)] to-[#5856D6] flex items-center justify-center text-white text-3xl font-bold">
               {displayName.slice(0, 2).toUpperCase()}
             </div>
             <div className="flex-1 text-center md:text-left">
-              <h1 className="text-2xl font-semibold text-slate-900 dark:text-white mb-1">
+              <h1 className="text-2xl font-semibold text-label mb-1">
                 {displayName}
               </h1>
-              <p className="text-slate-600 dark:text-slate-400 mb-3">
+              <p className="text-label-secondary mb-3">
                 {isGuest ? t('profileGuestMode') : t('profileLearningStatus')}
               </p>
               <div className="flex flex-wrap gap-2 justify-center md:justify-start">
-                <span className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 text-sm font-medium rounded-full">
+                <span className="px-3 py-1 bg-[var(--color-primary-soft)] text-primary text-sm font-medium rounded-full">
                   {isGuest ? t('profileGuestSession') : t('profileMemberSince')}
                 </span>
                 {!isGuest && (
-                  <span className="px-3 py-1 bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-300 text-sm font-medium rounded-full">
+                  <span className="px-3 py-1 bg-success/10 text-success text-sm font-medium rounded-full">
                     {t('profileActiveLearner')}
                   </span>
                 )}
@@ -192,7 +192,7 @@ export default function ProfilePage() {
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => navigate('/achievements')}
-                className="px-6 py-2 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white rounded-xl font-medium transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+                className="px-6 py-2 bg-warning text-white rounded-xl font-medium transition-all shadow-md hover:shadow-lg flex items-center gap-2"
               >
                 <Trophy className="w-4 h-4" />
                 {t('profileAchievementHall')}
@@ -200,7 +200,7 @@ export default function ProfilePage() {
               {user ? (
                 <button
                   onClick={async () => { await signOut(); }}
-                  className="px-6 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium transition-all flex items-center gap-2"
+                  className="px-6 py-2 bg-fill hover:bg-fill text-label-secondary rounded-xl font-medium transition-all flex items-center gap-2"
                 >
                   <LogOut className="w-4 h-4" />
                   {t('profileLogout')}
@@ -223,17 +223,17 @@ export default function ProfilePage() {
             return (
               <div
                 key={stat.labelKey}
-                className="glass-card rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 md:p-6"
+                className="glass-card rounded-xl shadow-sm p-4 md:p-6"
               >
                 <div
                   className={`w-10 h-10 ${STAT_COLOR_CLASSES[stat.color]} rounded-lg flex items-center justify-center mb-3`}
                 >
                   <Icon className="w-5 h-5" />
                 </div>
-                <p className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mb-1">
+                <p className="text-2xl md:text-3xl font-bold text-label mb-1">
                   {stat.value}
                 </p>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
+                <p className="text-sm text-label-secondary">
                   {t(stat.labelKey)}
                 </p>
               </div>
@@ -241,22 +241,22 @@ export default function ProfilePage() {
           })}
         </div>
 
-        <div className="glass-card rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 mb-6">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
+        <div className="glass-card rounded-2xl shadow-sm p-6 mb-6">
+          <h2 className="text-xl font-semibold text-label mb-4">
             {t('profileProgress')}
           </h2>
           <div className="space-y-4">
             {progressBars.map((bar) => (
               <div key={bar.labelKey}>
                 <div className="flex justify-between text-sm mb-2">
-                  <span className="text-slate-700 dark:text-slate-300 font-medium">
+                  <span className="text-label-secondary font-medium">
                     {t(bar.labelKey)}
                   </span>
-                  <span className="text-slate-600 dark:text-slate-400">
+                  <span className="text-label-secondary">
                     {t(bar.progressKey)}
                   </span>
                 </div>
-                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-3">
+                <div className="w-full bg-fill rounded-full h-3">
                   <div
                     className={`${bar.color} h-3 rounded-full transition-all`}
                     style={{ width: bar.width }}
@@ -267,23 +267,23 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="glass-card rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6 mb-6">
+        <div className="glass-card rounded-2xl shadow-sm p-6 mb-6">
           <div className="flex items-start justify-between gap-4 mb-5">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
+              <h2 className="text-xl font-semibold text-label">
                 {t('profileLearningGoalTitle')}
               </h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+              <p className="text-sm text-label-secondary mt-1">
                 {t('profileLearningGoalSubtitle')}
               </p>
             </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+            <div className="text-xs text-label-tertiary whitespace-nowrap">
               {t('profileGoalUpdatedAt')} {goalUpdatedText}
             </div>
           </div>
 
           {goalData && (
-            <div className="mb-5 rounded-xl border border-white/45 bg-white/35 dark:bg-slate-900/40 backdrop-blur-xl p-4">
+            <div className="mb-5 rounded-xl glass-card backdrop-blur-xl p-4">
               <div className="flex items-center gap-4">
                 <motion.div
                   animate={{ scale: [1, 1.03, 1] }}
@@ -293,20 +293,20 @@ export default function ProfilePage() {
                   <div
                     className="absolute inset-0 rounded-full"
                     style={{
-                      background: `conic-gradient(#4f46e5 ${goalData.completion.overall}%, rgba(148,163,184,0.2) 0%)`,
+                      background: `conic-gradient(var(--color-primary) ${goalData.completion.overall}%, rgba(148,163,184,0.2) 0%)`,
                     }}
                   />
-                  <div className="absolute inset-2 rounded-full bg-white/80 dark:bg-slate-900/80 border border-white/60 dark:border-slate-700/70 flex items-center justify-center">
-                    <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  <div className="absolute inset-2 rounded-full bg-surface-elevated border border-separator flex items-center justify-center">
+                    <span className="text-sm font-semibold text-label">
                       {goalData.completion.overall}%
                     </span>
                   </div>
                 </motion.div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <p className="text-sm font-medium text-label-secondary">
                     {t('profileGoalProgress')}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <p className="mt-1 text-xs text-label-tertiary flex items-center gap-1.5">
                     <Timer className={`w-3.5 h-3.5 ${isGoalRefreshing ? 'animate-spin' : ''}`} />
                     {t('profileGoalOverall')} {goalData.completion.overall}% · {t('profileGoalUpdatedAt')} {goalUpdatedText}
                   </p>
@@ -316,8 +316,8 @@ export default function ProfilePage() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-            <label className="rounded-xl border border-white/40 bg-white/30 dark:bg-slate-900/40 backdrop-blur-md p-4">
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">{t('profileGoalDailyMinutes')}</p>
+            <label className="rounded-xl glass-card backdrop-blur-md p-4">
+              <p className="text-sm text-label-secondary mb-2">{t('profileGoalDailyMinutes')}</p>
               <input
                 type="number"
                 min={5}
@@ -329,11 +329,11 @@ export default function ProfilePage() {
                     dailyMinutes: Number(event.target.value),
                   }))
                 }
-                className="w-full min-w-0 rounded-lg bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-900 dark:text-white"
+                className="w-full min-w-0 rounded-lg glass-input border border-separator px-3 py-2 text-label"
               />
             </label>
-            <label className="rounded-xl border border-white/40 bg-white/30 dark:bg-slate-900/40 backdrop-blur-md p-4">
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">{t('profileGoalWeeklyWords')}</p>
+            <label className="rounded-xl glass-card backdrop-blur-md p-4">
+              <p className="text-sm text-label-secondary mb-2">{t('profileGoalWeeklyWords')}</p>
               <input
                 type="number"
                 min={5}
@@ -345,11 +345,11 @@ export default function ProfilePage() {
                     weeklyWords: Number(event.target.value),
                   }))
                 }
-                className="w-full min-w-0 rounded-lg bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-900 dark:text-white"
+                className="w-full min-w-0 rounded-lg glass-input border border-separator px-3 py-2 text-label"
               />
             </label>
-            <label className="rounded-xl border border-white/40 bg-white/30 dark:bg-slate-900/40 backdrop-blur-md p-4">
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">{t('profileGoalWeeklySpeaking')}</p>
+            <label className="rounded-xl glass-card backdrop-blur-md p-4">
+              <p className="text-sm text-label-secondary mb-2">{t('profileGoalWeeklySpeaking')}</p>
               <input
                 type="number"
                 min={1}
@@ -361,7 +361,7 @@ export default function ProfilePage() {
                     weeklySpeaking: Number(event.target.value),
                   }))
                 }
-                className="w-full min-w-0 rounded-lg bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-900 dark:text-white"
+                className="w-full min-w-0 rounded-lg glass-input border border-separator px-3 py-2 text-label"
               />
             </label>
           </div>
@@ -369,16 +369,16 @@ export default function ProfilePage() {
           <button
             onClick={handleSaveGoal}
             disabled={isSavingGoal}
-            className="px-5 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-500 text-white font-medium shadow-sm hover:opacity-90 disabled:opacity-60"
+            className="px-5 py-2 rounded-xl bg-primary text-white font-medium shadow-sm hover:opacity-90 disabled:opacity-60"
           >
             {isSavingGoal ? t('profileGoalSaving') : t('profileGoalSave')}
           </button>
 
           {goalData && (
-            <div className="mt-6 rounded-xl border border-white/40 bg-white/30 dark:bg-slate-900/40 backdrop-blur-md p-4">
+            <div className="mt-6 rounded-xl glass-card backdrop-blur-md p-4">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('profileGoalProgress')}</p>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
+                <p className="text-sm font-medium text-label-secondary">{t('profileGoalProgress')}</p>
+                <p className="text-sm text-label-secondary">
                   {t('profileGoalOverall')} {goalData.completion.overall}%
                 </p>
               </div>
@@ -410,28 +410,28 @@ export default function ProfilePage() {
           )}
         </div>
 
-        <div className="glass-card rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-white mb-4">
+        <div className="glass-card rounded-2xl shadow-sm p-6">
+          <h2 className="text-xl font-semibold text-label mb-4">
             {t('profileAchievements')}
           </h2>
           <div className="space-y-3">
             {recentUnlocked.length > 0 ? recentUnlocked.map((achievement) => (
               <div
                 key={achievement.id}
-                className="flex items-start gap-4 p-4 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
+                className="flex items-start gap-4 p-4 rounded-xl hover:bg-fill-secondary transition-colors"
               >
                 <div className="text-3xl">{achievement.icon}</div>
                 <div className="flex-1">
-                  <h3 className="font-medium text-slate-900 dark:text-white">
+                  <h3 className="font-medium text-label">
                     {achievement.title}
                   </h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                  <p className="text-sm text-label-secondary">
                     {achievement.description}
                   </p>
                 </div>
               </div>
             )) : (
-              <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-4">
+              <p className="text-sm text-label-tertiary text-center py-4">
                 {t('profileNoAchievements')}
               </p>
             )}
@@ -453,11 +453,11 @@ interface GoalProgressRowProps {
 function GoalProgressRow({ label, value, target, percent, barClass }: GoalProgressRowProps) {
   return (
     <div>
-      <div className="flex items-center justify-between mb-1 text-slate-700 dark:text-slate-300">
+      <div className="flex items-center justify-between mb-1 text-label-secondary">
         <span>{label}</span>
         <span>{value} / {target}</span>
       </div>
-      <div className="h-2.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+      <div className="h-2.5 w-full rounded-full bg-fill overflow-hidden">
         <motion.div
           className={`h-full bg-gradient-to-r ${barClass}`}
           animate={{ width: `${Math.min(100, Math.max(0, percent))}%` }}

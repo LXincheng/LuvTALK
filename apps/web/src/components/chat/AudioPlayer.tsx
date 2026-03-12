@@ -103,7 +103,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
 
   return (
     <div
-      className={`flex items-center gap-2 rounded-xl border border-white/20 dark:border-white/10 bg-white/40 dark:bg-white/5 backdrop-blur-md px-3 ${compact ? 'py-1.5' : 'py-2'}`}
+      className={`flex items-center gap-2 rounded-xl glass-card px-3 ${compact ? 'py-1.5' : 'py-2'}`}
     >
       <audio
         ref={audioRef}
@@ -116,7 +116,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
       />
       <button
         onClick={togglePlay}
-        className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-indigo-500/80 dark:bg-indigo-400/80 text-white hover:bg-indigo-600/90 dark:hover:bg-indigo-500/90 transition-colors"
+        className="press-scale flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-primary/80 text-white hover:bg-primary/90 transition-colors"
       >
         {isPlaying ? (
           <Pause className="w-3.5 h-3.5" />
@@ -125,15 +125,19 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
         )}
       </button>
       <div
-        className="flex-1 h-1.5 rounded-full bg-slate-200/60 dark:bg-slate-700/60 cursor-pointer relative overflow-hidden"
+        className="flex-1 h-1.5 rounded-full bg-fill cursor-pointer relative overflow-hidden group"
         onClick={handleSeek}
       >
         <div
-          className="absolute inset-y-0 left-0 rounded-full bg-indigo-500/80 dark:bg-indigo-400/70 transition-[width] duration-75"
+          className="absolute inset-y-0 left-0 rounded-full bg-primary/80 transition-[width] duration-75"
           style={{ width: `${progress * 100}%` }}
         />
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-primary shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ left: `calc(${progress * 100}% - 6px)` }}
+        />
       </div>
-      <span className="text-[10px] tabular-nums text-slate-500 dark:text-slate-400 flex-shrink-0 min-w-[3.2rem] text-right">
+      <span className="text-[10px] tabular-nums text-label-tertiary flex-shrink-0 min-w-[3.2rem] text-right">
         {timeLabel}
       </span>
     </div>

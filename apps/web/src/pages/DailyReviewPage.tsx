@@ -182,18 +182,18 @@ export default function DailyReviewPage() {
 
   if (isLoading) {
     return (
-      <div className="h-full flex flex-col items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
+      <div className="h-full flex flex-col items-center justify-center px-4 bg-surface">
         <div className="w-full max-w-lg space-y-6 animate-pulse">
           <div className="flex items-center justify-between">
-            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-24" />
-            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-32" />
+            <div className="h-4 bg-fill rounded w-24" />
+            <div className="h-4 bg-fill rounded w-32" />
           </div>
-          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2" />
-          <div className="glass-card rounded-2xl border border-slate-200 dark:border-slate-700 p-8 min-h-[420px] flex flex-col items-center justify-center space-y-6">
-            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-20" />
-            <div className="h-10 bg-slate-200 dark:bg-slate-700 rounded w-48" />
-            <div className="h-8 bg-slate-200 dark:bg-slate-700 rounded-xl w-28" />
-            <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-24" />
+          <div className="w-full bg-fill rounded-full h-2" />
+          <div className="glass-card rounded-2xl p-8 min-h-[420px] flex flex-col items-center justify-center space-y-6">
+            <div className="h-4 bg-fill rounded w-20" />
+            <div className="h-10 bg-fill rounded w-48" />
+            <div className="h-8 bg-fill rounded-xl w-28" />
+            <div className="h-4 bg-fill rounded w-24" />
           </div>
         </div>
       </div>
@@ -202,12 +202,12 @@ export default function DailyReviewPage() {
 
   if (!isLoading && cards.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
-        <div className="glass-card rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-8 max-w-md w-full text-center space-y-4">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
+      <div className="h-full flex items-center justify-center px-4 bg-surface">
+        <div className="glass-card rounded-2xl shadow-lg p-8 max-w-md w-full text-center space-y-4">
+          <h2 className="text-xl font-semibold text-label">
             {t('reviewEmptyTitle')}
           </h2>
-          <p className="text-slate-600 dark:text-slate-400">
+          <p className="text-label-secondary">
             {t('reviewEmptyHint')}
           </p>
         </div>
@@ -217,33 +217,33 @@ export default function DailyReviewPage() {
 
   if (isComplete) {
     return (
-      <div className="h-full flex items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
-        <div className="glass-card rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-8 max-w-md w-full text-center space-y-6">
-          <div className="w-20 h-20 bg-indigo-100 dark:bg-indigo-950 rounded-full flex items-center justify-center mx-auto">
-            <Check className="w-10 h-10 text-indigo-600 dark:text-indigo-400" />
+      <div className="h-full flex items-center justify-center px-4 bg-surface">
+        <div className="glass-card rounded-2xl shadow-lg p-8 max-w-md w-full text-center space-y-6">
+          <div className="w-20 h-20 bg-[var(--color-primary-soft)] rounded-full flex items-center justify-center mx-auto">
+            <Check className="w-10 h-10 text-primary" />
           </div>
           <div>
-            <h2 className="text-2xl font-semibold text-slate-900 dark:text-white mb-2">
+            <h2 className="text-2xl font-semibold text-label mb-2">
               {t('reviewCompleteTitle')}
             </h2>
-            <p className="text-slate-600 dark:text-slate-400">
+            <p className="text-label-secondary">
               {t('reviewCompleteSubtitle')}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-4 py-4">
-            <div className="bg-green-50 dark:bg-green-950/30 rounded-xl p-4 border border-green-100 dark:border-green-900">
-              <p className="text-3xl font-bold text-green-600 dark:text-green-400">
+            <div className="bg-success/10 rounded-xl p-4 border border-success/20">
+              <p className="text-3xl font-bold text-success">
                 {reviewedCount}
               </p>
-              <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+              <p className="text-sm text-success mt-1">
                 {t('reviewKnown')}
               </p>
             </div>
-            <div className="bg-yellow-50 dark:bg-yellow-950/30 rounded-xl p-4 border border-yellow-100 dark:border-yellow-900">
-              <p className="text-3xl font-bold text-yellow-600 dark:text-yellow-400">
+            <div className="bg-warning/10 rounded-xl p-4 border border-warning/20">
+              <p className="text-3xl font-bold text-warning">
                 {needPracticeCount}
               </p>
-              <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+              <p className="text-sm text-warning mt-1">
                 {t('reviewPractice')}
               </p>
             </div>
@@ -261,37 +261,37 @@ export default function DailyReviewPage() {
   }
 
   return (
-    <div className="h-full flex flex-col items-center justify-center px-4 bg-slate-50 dark:bg-slate-950">
+    <div className="h-full flex flex-col items-center justify-center px-4 bg-surface">
       <div className="w-full max-w-lg mb-6 space-y-3">
         {errorMessage && (
-          <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {errorMessage}
           </div>
         )}
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-slate-600 dark:text-slate-400">
+          <span className="text-sm text-label-secondary">
             {t('reviewCardLabel')} {currentIndex + 1} / {cards.length}
           </span>
-          <span className="text-sm text-slate-600 dark:text-slate-400">
+          <span className="text-sm text-label-secondary">
             {reviewedCount} {t('reviewKnown')} · {needPracticeCount}{' '}
             {t('reviewPractice')}
           </span>
         </div>
-        <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+        <div className="w-full bg-fill rounded-full h-2">
           <div
-            className="bg-indigo-600 dark:bg-indigo-500 h-2 rounded-full transition-all duration-300"
+            className="bg-primary h-2 rounded-full transition-all duration-300"
             style={{ width: `${progressValue}%` }}
           />
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8 max-w-lg w-full min-h-[420px] flex flex-col">
+      <div className="glass-card rounded-2xl shadow-xl p-8 max-w-lg w-full min-h-[420px] flex flex-col">
         <div className="flex-1 flex flex-col items-center justify-center space-y-6">
           <div className="text-center space-y-3">
-            <p className="text-sm text-indigo-600 dark:text-indigo-400 font-medium">
+            <p className="text-sm text-primary font-medium">
               {t('reviewWordLabel')}
             </p>
-            <h2 className="text-4xl font-semibold text-slate-900 dark:text-white">
+            <h2 className="text-4xl font-semibold text-label">
               {currentCard.term}
             </h2>
             {audioUrl ? (
@@ -302,7 +302,7 @@ export default function DailyReviewPage() {
               <button
                 onClick={handleSpeak}
                 disabled={isSpeaking}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-950/60 transition-colors disabled:opacity-60 font-medium"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-[var(--color-primary-soft)] text-primary hover:bg-[var(--color-primary-soft)] transition-colors disabled:opacity-60 font-medium"
               >
                 <Volume2 className={`w-4 h-4 ${isSpeaking ? 'animate-pulse' : ''}`} />
                 {isSpeaking ? t('reviewLoading') : t('reviewSpeak')}
@@ -312,30 +312,30 @@ export default function DailyReviewPage() {
 
           <button
             onClick={() => setShowTranslation(!showTranslation)}
-            className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium underline"
+            className="text-sm text-primary hover:opacity-80 font-medium underline"
           >
             {showTranslation ? t('reviewHide') : t('reviewShow')}
           </button>
 
           {showTranslation && (
             <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">
+              <div className="bg-fill-secondary rounded-xl p-4 border border-separator">
+                <p className="text-sm text-label-secondary mb-1">
                   {t('reviewTranslation')}
                 </p>
-                <p className="text-lg text-slate-900 dark:text-white">
+                <p className="text-lg text-label">
                   {getCardLabel(currentCard)}
                 </p>
               </div>
-              <div className="bg-indigo-50 dark:bg-indigo-950/30 rounded-xl p-4 border border-indigo-100 dark:border-indigo-900">
-                <p className="text-sm text-indigo-600 dark:text-indigo-400 mb-2">
+              <div className="bg-[var(--color-primary-soft)] rounded-xl p-4 border border-primary/20">
+                <p className="text-sm text-primary mb-2">
                   {t('reviewExample')}
                 </p>
-                <p className="text-slate-900 dark:text-white mb-1">
+                <p className="text-label mb-1">
                   {getCardExample(currentCard)}
                 </p>
                 {currentCard.exampleTranslation && (
-                  <p className="text-sm text-slate-600 dark:text-slate-400 italic">
+                  <p className="text-sm text-label-secondary italic">
                     {currentCard.exampleTranslation}
                   </p>
                 )}
@@ -347,7 +347,7 @@ export default function DailyReviewPage() {
         <div className="grid grid-cols-2 gap-3 mt-6">
           <button
             onClick={handlePractice}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-medium transition-colors"
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-fill hover:bg-fill text-label-secondary rounded-xl font-medium transition-colors"
           >
             <X className="w-5 h-5" />
             {t('reviewNeedPractice')}

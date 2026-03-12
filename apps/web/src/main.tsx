@@ -21,10 +21,10 @@ createRoot(document.getElementById('root')!).render(
               toastOptions={{
                 duration: 3500,
                 style: {
-                  background: 'rgba(15, 15, 25, 0.9)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  color: '#e2e8f0',
-                  backdropFilter: 'blur(12px)',
+                  background: 'var(--glass-bg-heavy)',
+                  border: '1px solid var(--glass-border)',
+                  color: 'var(--color-label)',
+                  backdropFilter: 'blur(var(--glass-blur))',
                   fontSize: '13px',
                 },
               }}

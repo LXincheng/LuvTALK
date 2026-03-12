@@ -23,7 +23,7 @@ export default function MessageBubble({
     <div className="px-2">
       <button
         onClick={() => setTranslationExpanded(!translationExpanded)}
-        className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1"
+        className="text-xs text-label-tertiary hover:text-label-secondary flex items-center gap-1"
       >
         {t('translation')}
         {translationExpanded ? (
@@ -36,7 +36,7 @@ export default function MessageBubble({
         <motion.p
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
-          className="text-sm text-slate-600 dark:text-slate-400 mt-1"
+          className="text-sm text-label-secondary mt-1"
         >
           {message.translation}
         </motion.p>
@@ -60,19 +60,19 @@ export default function MessageBubble({
   ].filter(Boolean) as { label: string; text: string; border: string }[];
 
   const scoreBlock =
-    message.pronunciationScore !== undefined ? (
-      <div className="mx-1 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-white/70 dark:bg-slate-800/50 backdrop-blur-sm overflow-hidden shadow-sm">
+    message.pronunciationScore !== undefined && message.audioUrl ? (
+      <div className="mx-1 rounded-xl border border-separator glass-card overflow-hidden shadow-sm">
         <button
           type="button"
           onClick={() => hasTips && setTipsExpanded(!tipsExpanded)}
-          className={`w-full flex items-center justify-between px-3 py-2 ${hasTips ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors' : 'cursor-default'}`}
+          className={`w-full flex items-center justify-between px-3 py-2 ${hasTips ? 'cursor-pointer hover:bg-fill-secondary transition-colors' : 'cursor-default'}`}
         >
           <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${scoreColorClass}`}>
             <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
             {t('pronunciation')} {message.pronunciationScore}
           </div>
           {hasTips && (
-            <span className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+            <span className="flex items-center gap-1 text-[11px] text-label-tertiary">
               {tips.length} {t('tips')}
               {tipsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </span>
@@ -83,7 +83,7 @@ export default function MessageBubble({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="border-t border-slate-100 dark:border-slate-700/60"
+            className="border-t border-separator"
           >
             <div className="px-3 py-2 space-y-2">
               {tips.map((tip) => (
@@ -91,10 +91,10 @@ export default function MessageBubble({
                   key={tip.label}
                   className={`border-l-2 ${tip.border} pl-2.5 py-0.5`}
                 >
-                  <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <span className="text-[11px] font-medium text-label-tertiary">
                     {tip.label}
                   </span>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-0.5">
+                  <p className="text-xs text-label-secondary leading-relaxed mt-0.5">
                     {tip.text}
                   </p>
                 </div>
@@ -113,22 +113,15 @@ export default function MessageBubble({
 
   const loadingBlock =
     message.type === 'ai' && message.isLoading ? (
-      <div className="relative overflow-hidden rounded-2xl glass-status p-3.5">
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-2/5 status-shimmer" />
-        <div className="relative space-y-2">
-          <div className="flex items-center gap-2.5">
-            <div className="status-orbit" />
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
-              {t('tutorThinking')}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {t('tutorThinkingHint')}
-          </p>
-          <div className="relative h-1.5 overflow-hidden rounded-full status-track">
-            <div className="absolute inset-y-0 left-0 w-2/5 status-shimmer" />
-          </div>
+      <div className="flex items-center gap-3 px-1 py-1">
+        <div className="flex items-center gap-1.5">
+          <span className="pulse-dot w-2 h-2 rounded-full bg-label-tertiary" />
+          <span className="pulse-dot w-2 h-2 rounded-full bg-label-tertiary" />
+          <span className="pulse-dot w-2 h-2 rounded-full bg-label-tertiary" />
         </div>
+        <span className="text-xs text-label-tertiary">
+          {t('tutorThinking')}
+        </span>
       </div>
     ) : null;
 
@@ -146,7 +139,7 @@ export default function MessageBubble({
                     : ''
             }`}
           />
-          <span className="text-xs text-slate-700 dark:text-slate-200 leading-tight">
+          <span className="text-xs text-label leading-tight">
             {message.statusText}
           </span>
         </div>
@@ -158,7 +151,7 @@ export default function MessageBubble({
     return (
       <div className="flex justify-end">
         <div className="max-w-[85%] sm:max-w-md md:max-w-lg space-y-2">
-          <div className="bg-indigo-600 dark:bg-indigo-500 text-white px-4 py-3 rounded-2xl rounded-tr-sm shadow-lg">
+          <div className="bg-primary text-white px-4 py-3 rounded-2xl rounded-tr-sm shadow-lg">
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           </div>
           {translationBlock}
@@ -173,7 +166,7 @@ export default function MessageBubble({
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] sm:max-w-md md:max-w-lg space-y-2">
-        <div className="glass-card border border-slate-200 dark:border-slate-700 shadow-lg px-4 py-3 rounded-2xl rounded-tl-sm">
+        <div className="glass-card border border-separator shadow-lg px-4 py-3 rounded-2xl rounded-tl-sm">
           {loadingBlock ? (
             loadingBlock
           ) : (
