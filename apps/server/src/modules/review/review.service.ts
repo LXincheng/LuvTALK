@@ -129,9 +129,7 @@ export class ReviewService {
     return { status: "ok" };
   }
 
-  private async buildLowScoreCards(
-    userId?: string,
-  ): Promise<ReviewCard[]> {
+  private async buildLowScoreCards(userId?: string): Promise<ReviewCard[]> {
     const cards: ReviewCard[] = [];
     if (this.prisma.canUseDatabase()) {
       const records = await this.prisma.conversation.findMany({

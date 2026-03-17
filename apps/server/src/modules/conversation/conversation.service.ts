@@ -606,7 +606,10 @@ export class ConversationService {
   }
 
   private extractTitleSnippet(text: string): string {
-    const normalized = text.replace(/[\n\r]+/g, " ").replace(/\s+/g, " ").trim();
+    const normalized = text
+      .replace(/[\n\r]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (!normalized) {
       return "";
     }
@@ -828,7 +831,9 @@ export class ConversationService {
     const apiKey = envConfig.deepseek.apiKey;
     const endpoint = this.fallbackEndpoint;
     if (!apiKey || !endpoint) {
-      this.logger.warn("Fallback provider config missing; using fallback payload.");
+      this.logger.warn(
+        "Fallback provider config missing; using fallback payload.",
+      );
       return null;
     }
 
@@ -1240,7 +1245,10 @@ export class ConversationService {
     const memoryPack = buildConversationMemoryPack({
       session,
       interactionMode,
-      scenarioLabel: this.describeScenario(session.scenarioId, session.nativeLanguage),
+      scenarioLabel: this.describeScenario(
+        session.scenarioId,
+        session.nativeLanguage,
+      ),
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
     });
     if (!memoryPack.trim()) {

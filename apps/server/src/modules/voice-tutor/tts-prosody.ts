@@ -72,9 +72,7 @@ const splitLongLine = (input: string, style: ProsodyStyle): string => {
   return `${input.slice(0, splitAt).trim()}${style.pauseJoiner}${input.slice(splitAt + 1).trim()}`;
 };
 
-const resolveScenarioStyle = (
-  scenarioId?: string,
-): ProsodyStyle => {
+const resolveScenarioStyle = (scenarioId?: string): ProsodyStyle => {
   if (!scenarioId) {
     return SCENARIO_STYLE.daily;
   }

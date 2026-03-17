@@ -13,9 +13,13 @@ describe("voice tip templater", () => {
   });
 
   it("keeps actionable chinese tip without extra prefix", () => {
-    const tip = toVoiceMicroTip("先重读关键词，再放慢句尾速度。", LanguageCode.Mandarin, {
-      kind: "rhythm",
-    });
+    const tip = toVoiceMicroTip(
+      "先重读关键词，再放慢句尾速度。",
+      LanguageCode.Mandarin,
+      {
+        kind: "rhythm",
+      },
+    );
     expect(tip).toContain("先重读关键词，再放慢句尾速度。");
     expect(tip).toContain("在意群边界做一次短停顿");
   });

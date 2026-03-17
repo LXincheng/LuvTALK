@@ -1,7 +1,16 @@
 import { LanguageCode } from "../../common/enums/language-code.enum";
 
 const ACTION_TOKENS_EN = ["try", "focus", "keep", "start", "pause", "stress"];
-const ACTION_TOKENS_ZH = ["先", "再", "注意", "建议", "尝试", "保持", "重读", "停顿"];
+const ACTION_TOKENS_ZH = [
+  "先",
+  "再",
+  "注意",
+  "建议",
+  "尝试",
+  "保持",
+  "重读",
+  "停顿",
+];
 const GENERIC_EN_PATTERNS = [
   /\bgood job\b/i,
   /\blooks good\b/i,
@@ -50,10 +59,7 @@ const normalizeSpacing = (text: string): string => {
   return text.replace(/\s+/g, " ").trim();
 };
 
-const isGenericTip = (
-  text: string,
-  nativeLanguage: LanguageCode,
-): boolean => {
+const isGenericTip = (text: string, nativeLanguage: LanguageCode): boolean => {
   if (!text) {
     return true;
   }

@@ -34,4 +34,3 @@ export const buildConversationSystemPromptWithProfile = (
     "- Avoid generic encouragement without a concrete next step.",
   ].join("\n");
 };
-

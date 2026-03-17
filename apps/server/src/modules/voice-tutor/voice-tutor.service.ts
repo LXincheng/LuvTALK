@@ -17,7 +17,13 @@ import { buildProsodyReadyTtsInput } from "./tts-prosody";
 
 const DEFAULT_STORAGE_ROOT = join(process.cwd(), "tmp", "voice-uploads");
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-const CONVERTIBLE_AUDIO_EXTENSIONS = new Set([".webm", ".wav", ".m4a", ".mp4", ".bin"]);
+const CONVERTIBLE_AUDIO_EXTENSIONS = new Set([
+  ".webm",
+  ".wav",
+  ".m4a",
+  ".mp4",
+  ".bin",
+]);
 
 interface LanguageHint {
   languageCode: string;
@@ -90,7 +96,7 @@ export class VoiceTutorService {
       `Stored voice upload for ${conversationId} -> ${filePath} (${file.mimetype})`,
     );
 
-    let result: VoiceUploadResult = {
+    const result: VoiceUploadResult = {
       operationId,
       filePath,
       fileName,
@@ -150,7 +156,10 @@ export class VoiceTutorService {
       status: "transcribing",
     });
     try {
-      let transcript = await this.transcribeWithOpenAi(activeUpload, languageHint);
+      let transcript = await this.transcribeWithOpenAi(
+        activeUpload,
+        languageHint,
+      );
       const transcribeElapsedMs = Date.now() - startedAt;
       this.logger.debug(
         `Voice ${activeUpload.operationId} transcription stage took ${transcribeElapsedMs}ms`,
@@ -162,7 +171,10 @@ export class VoiceTutorService {
           await this.updateOperationStatus(conversationId, activeUpload, {
             status: "transcribing",
           });
-          transcript = await this.transcribeWithOpenAi(activeUpload, languageHint);
+          transcript = await this.transcribeWithOpenAi(
+            activeUpload,
+            languageHint,
+          );
           this.logger.debug(
             `Voice ${activeUpload.operationId} retried transcription after mp3 conversion`,
           );

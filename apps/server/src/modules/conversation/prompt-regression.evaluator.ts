@@ -1,5 +1,8 @@
 import { LanguageCode } from "../../common/enums/language-code.enum";
-import { PromptRegressionCase, PromptRegressionResult } from "./prompt-regression.types";
+import {
+  PromptRegressionCase,
+  PromptRegressionResult,
+} from "./prompt-regression.types";
 
 const ACTIONABLE_CN_HINTS = [
   "先",
@@ -25,7 +28,18 @@ const SCENARIO_KEYWORDS: Record<string, string[]> = {
   restaurant: ["dish", "menu", "order", "signature", "菜", "点餐", "推荐"],
   directions: ["route", "walk", "distance", "map", "路线", "怎么走", "距离"],
   business: ["timeline", "action", "align", "meeting", "计划", "进度", "安排"],
-  daily: ["today", "tomorrow", "day", "next", "plan", "chat", "今天", "明天", "下一步", "日常"],
+  daily: [
+    "today",
+    "tomorrow",
+    "day",
+    "next",
+    "plan",
+    "chat",
+    "今天",
+    "明天",
+    "下一步",
+    "日常",
+  ],
 };
 
 const hasStructuredStudySteps = (reply: string): boolean => {
@@ -36,10 +50,14 @@ const hasStructuredStudySteps = (reply: string): boolean => {
 };
 
 const countNonEmptyTips = (input: string[]): number => {
-  return input.map((item) => item.trim()).filter((item) => item.length > 0).length;
+  return input.map((item) => item.trim()).filter((item) => item.length > 0)
+    .length;
 };
 
-const hasActionableHint = (text: string, nativeLanguage: LanguageCode): boolean => {
+const hasActionableHint = (
+  text: string,
+  nativeLanguage: LanguageCode,
+): boolean => {
   const normalized = text.trim().toLowerCase();
   if (!normalized) {
     return false;
@@ -129,7 +147,10 @@ export const evaluatePromptRegressionCase = (
     checks.push("associative_phrases_ok");
   }
 
-  if (!testCase.payload.scoreReason || testCase.payload.scoreReason.trim().length < 4) {
+  if (
+    !testCase.payload.scoreReason ||
+    testCase.payload.scoreReason.trim().length < 4
+  ) {
     score -= 10;
     failures.push("score_reason_weak");
   } else {

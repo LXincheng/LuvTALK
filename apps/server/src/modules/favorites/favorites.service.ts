@@ -74,10 +74,7 @@ export class FavoritesService {
     return items.sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
   }
 
-  async create(
-    dto: CreateFavoriteDto,
-    userId?: string,
-  ): Promise<FavoriteItem> {
+  async create(dto: CreateFavoriteDto, userId?: string): Promise<FavoriteItem> {
     const favorite: FavoriteItem = {
       id: randomUUID(),
       type: dto.type ?? FavoriteTypeEnum.Phrase,

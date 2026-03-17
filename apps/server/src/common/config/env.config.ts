@@ -44,20 +44,18 @@ export const envConfig = {
   openai: {
     apiKey: readTrimmed(process.env.PRIMARY_API_KEY),
     apiUrl: readTrimmed(process.env.PRIMARY_API_URL),
-    realtimeApiUrl:
-      readTrimmed(
-        process.env.PRIMARY_REALTIME_API_URL,
-        process.env.PRIMARY_API_URL
-          ? `${process.env.PRIMARY_API_URL.replace(/\/$/, "")}/realtime`
-          : "",
-      ),
-    audioApiUrl:
-      readTrimmed(
-        process.env.PRIMARY_AUDIO_API_URL,
-        process.env.PRIMARY_API_URL
-          ? `${process.env.PRIMARY_API_URL.replace(/\/$/, "")}/audio`
-          : "",
-      ),
+    realtimeApiUrl: readTrimmed(
+      process.env.PRIMARY_REALTIME_API_URL,
+      process.env.PRIMARY_API_URL
+        ? `${process.env.PRIMARY_API_URL.replace(/\/$/, "")}/realtime`
+        : "",
+    ),
+    audioApiUrl: readTrimmed(
+      process.env.PRIMARY_AUDIO_API_URL,
+      process.env.PRIMARY_API_URL
+        ? `${process.env.PRIMARY_API_URL.replace(/\/$/, "")}/audio`
+        : "",
+    ),
   },
 };
 

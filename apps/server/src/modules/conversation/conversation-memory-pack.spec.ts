@@ -78,4 +78,3 @@ describe("buildConversationMemoryPack", () => {
     expect(pack.length).toBeLessThanOrEqual(1203);
   });
 });
-

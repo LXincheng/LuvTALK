@@ -10,7 +10,9 @@ describe("prompt profiles", () => {
   it("defaults to stable profile when env is missing/unknown", () => {
     expect(resolvePromptProfileId(undefined)).toBe(DEFAULT_PROMPT_PROFILE);
     expect(resolvePromptProfileId("")).toBe(DEFAULT_PROMPT_PROFILE);
-    expect(resolvePromptProfileId("unknown_profile")).toBe(DEFAULT_PROMPT_PROFILE);
+    expect(resolvePromptProfileId("unknown_profile")).toBe(
+      DEFAULT_PROMPT_PROFILE,
+    );
   });
 
   it("resolves experimental aliases", () => {
@@ -37,8 +39,10 @@ describe("prompt profiles", () => {
       scenarioLabel: "Restaurant chat",
       interactionMode: "text" as const,
     };
-    const exp = buildConversationSystemPromptWithProfile(input, "exp_teaching_v1");
+    const exp = buildConversationSystemPromptWithProfile(
+      input,
+      "exp_teaching_v1",
+    );
     expect(exp).toContain("QUALITY GUARD (exp_teaching_v1):");
   });
 });
-

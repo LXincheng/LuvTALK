@@ -53,7 +53,10 @@ export class RealtimeMetricsService {
   private transcriptSavedMessages = 0;
   private transcriptSaveCalls = 0;
   private transcriptSaveFailures = 0;
-  private readonly errorCodeCounter = new Map<RealtimeServerErrorCode, number>();
+  private readonly errorCodeCounter = new Map<
+    RealtimeServerErrorCode,
+    number
+  >();
   private readonly wsCloseCodeCounter = new Map<number, number>();
   private readonly connectDuration: DurationAggregate = {
     count: 0,
@@ -71,8 +74,14 @@ export class RealtimeMetricsService {
     this.connectedConnections += 1;
     this.connectDuration.count += 1;
     this.connectDuration.totalMs += durationMs;
-    this.connectDuration.minMs = Math.min(this.connectDuration.minMs, durationMs);
-    this.connectDuration.maxMs = Math.max(this.connectDuration.maxMs, durationMs);
+    this.connectDuration.minMs = Math.min(
+      this.connectDuration.minMs,
+      durationMs,
+    );
+    this.connectDuration.maxMs = Math.max(
+      this.connectDuration.maxMs,
+      durationMs,
+    );
   }
 
   recordReconnectAttempt() {
@@ -107,7 +116,10 @@ export class RealtimeMetricsService {
   }
 
   recordWsClosed(code: number) {
-    this.wsCloseCodeCounter.set(code, (this.wsCloseCodeCounter.get(code) ?? 0) + 1);
+    this.wsCloseCodeCounter.set(
+      code,
+      (this.wsCloseCodeCounter.get(code) ?? 0) + 1,
+    );
   }
 
   recordTranscriptSaved(messageCount: number) {

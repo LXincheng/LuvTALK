@@ -120,9 +120,7 @@ export class RealtimeService {
 
     if (!response.ok) {
       const detail = await safeReadText(response);
-      this.logger.warn(
-        `Realtime offer failed (${response.status}): ${detail}`,
-      );
+      this.logger.warn(`Realtime offer failed (${response.status}): ${detail}`);
       throw new ServiceUnavailableException("Realtime offer failed");
     }
 

@@ -78,4 +78,3 @@ export const buildConversationMemoryPack = (params: {
   }
   return `${rawPack.slice(0, MAX_MEMORY_PACK_CHARS).trimEnd()}...`;
 };
-

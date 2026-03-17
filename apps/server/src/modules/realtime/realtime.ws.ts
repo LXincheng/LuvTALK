@@ -208,7 +208,7 @@ export class RealtimeWsProxy {
         // Log important upstream events for debugging
         const parsed = safeParseJson(text);
         if (parsed && typeof parsed.type === "string") {
-          const eventType = parsed.type as string;
+          const eventType = parsed.type;
           if (
             eventType === "error" ||
             eventType === "session.created" ||
@@ -299,7 +299,7 @@ export class RealtimeWsProxy {
           return;
         }
         upstreamTerminalHandled = true;
-        this.logger.warn(`Realtime upstream error: ${(error as Error).message}`);
+        this.logger.warn(`Realtime upstream error: ${error.message}`);
         this.closeWithMetric({
           client,
           upstream,
@@ -307,7 +307,7 @@ export class RealtimeWsProxy {
           code: REALTIME_SERVER_ERROR_CODES.UPSTREAM_ERROR,
           message: "Realtime upstream error",
           retriable: true,
-          detail: (error as Error).message,
+          detail: error.message,
         });
       });
 
@@ -365,7 +365,7 @@ export class RealtimeWsProxy {
       });
 
       client.on("error", (error) => {
-        this.logger.warn(`Realtime client error: ${(error as Error).message}`);
+        this.logger.warn(`Realtime client error: ${error.message}`);
         this.closeWithMetric({
           client,
           upstream,
@@ -373,7 +373,7 @@ export class RealtimeWsProxy {
           code: REALTIME_SERVER_ERROR_CODES.INTERNAL_ERROR,
           message: "Realtime client error",
           retriable: true,
-          detail: (error as Error).message,
+          detail: error.message,
         });
       });
     } catch (error) {

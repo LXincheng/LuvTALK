@@ -2,15 +2,21 @@ import { LanguageCode } from "../../common/enums/language-code.enum";
 import { AiResponse } from "../../common/types/ai-response.schema";
 import { PromptRegressionCase } from "./prompt-regression.types";
 
-const buildPayload = (input: Partial<AiResponse> & Pick<AiResponse, "reply">): AiResponse => {
+const buildPayload = (
+  input: Partial<AiResponse> & Pick<AiResponse, "reply">,
+): AiResponse => {
   return {
     reply: input.reply,
     correction: input.correction ?? "",
     cultureNote: input.cultureNote ?? "",
-    associativePhrases:
-      input.associativePhrases ?? ["Could you tell me more about that?", "What should I do next?"],
+    associativePhrases: input.associativePhrases ?? [
+      "Could you tell me more about that?",
+      "What should I do next?",
+    ],
     score: input.score ?? 78,
-    scoreReason: input.scoreReason ?? "Detected mixed language usage; encourage one clearer target-language sentence.",
+    scoreReason:
+      input.scoreReason ??
+      "Detected mixed language usage; encourage one clearer target-language sentence.",
     pronunciationTip: input.pronunciationTip ?? "",
     rhythmTip: input.rhythmTip ?? "",
     grammarTip: input.grammarTip ?? "",
@@ -37,7 +43,8 @@ const SCENARIOS: ScenarioTemplate[] = [
       "I'd like something light but flavorful.",
     ],
     cultureCn: "点餐时先表示感谢再提需求，会更礼貌。",
-    cultureEn: "In restaurants, a brief thanks before requests sounds more natural.",
+    cultureEn:
+      "In restaurants, a brief thanks before requests sounds more natural.",
   },
   {
     id: "directions",
@@ -48,7 +55,8 @@ const SCENARIOS: ScenarioTemplate[] = [
       "Is it within walking distance from here?",
     ],
     cultureCn: "问路时先说目的地，再问路线效率更高。",
-    cultureEn: "When asking directions, name destination first, then ask route options.",
+    cultureEn:
+      "When asking directions, name destination first, then ask route options.",
   },
   {
     id: "business",
@@ -64,7 +72,8 @@ const SCENARIOS: ScenarioTemplate[] = [
   {
     id: "daily",
     latestUserMessage: "I had a busy day.",
-    targetSentence: "That sounds busy. Tell me one thing you want to improve tomorrow.",
+    targetSentence:
+      "That sounds busy. Tell me one thing you want to improve tomorrow.",
     associativePhrases: [
       "What was the busiest part of your day?",
       "What do you want to improve tomorrow?",
@@ -106,7 +115,9 @@ const createTextCase = (
       reply,
       correction,
       cultureNote:
-        nativeLanguage === LanguageCode.English ? scenario.cultureEn : scenario.cultureCn,
+        nativeLanguage === LanguageCode.English
+          ? scenario.cultureEn
+          : scenario.cultureCn,
       associativePhrases: scenario.associativePhrases,
       grammarTip,
       scoreReason:
@@ -151,7 +162,9 @@ const createVoiceCase = (
       pronunciationTip,
       grammarTip,
       cultureNote:
-        nativeLanguage === LanguageCode.English ? scenario.cultureEn : scenario.cultureCn,
+        nativeLanguage === LanguageCode.English
+          ? scenario.cultureEn
+          : scenario.cultureCn,
       associativePhrases: scenario.associativePhrases,
       scoreReason:
         nativeLanguage === LanguageCode.English
@@ -188,7 +201,11 @@ const negativeCases: PromptRegressionCase[] = [
       scoreReason: "good",
     }),
     expectedMinScore: 0,
-    requiredFailures: ["reply_too_short", "text_missing_study_steps", "not_actionable"],
+    requiredFailures: [
+      "reply_too_short",
+      "text_missing_study_steps",
+      "not_actionable",
+    ],
   },
   {
     id: "voice_no_tip_001",
@@ -204,7 +221,10 @@ const negativeCases: PromptRegressionCase[] = [
       rhythmTip: "",
       grammarTip: "",
       cultureNote: "Business context needs clear actions.",
-      associativePhrases: ["Could we align on the next action today?", "Let's confirm the timeline before we proceed."],
+      associativePhrases: [
+        "Could we align on the next action today?",
+        "Let's confirm the timeline before we proceed.",
+      ],
       scoreReason: "clear",
     }),
     expectedMinScore: 0,

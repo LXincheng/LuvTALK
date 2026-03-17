@@ -10,10 +10,11 @@ export const buildSessionUpdate = (params: {
   turnDetection: typeof REALTIME_DEFAULT_TURN_DETECTION;
   transcribeModel?: string;
 }) => {
-  const realtimeTranscribeModel =
-    params.transcribeModel?.toLowerCase().includes("whisper")
-      ? params.transcribeModel
-      : "whisper-1";
+  const realtimeTranscribeModel = params.transcribeModel
+    ?.toLowerCase()
+    .includes("whisper")
+    ? params.transcribeModel
+    : "whisper-1";
   return {
     type: "session.update",
     session: {
@@ -65,4 +66,3 @@ export const resolveSafeCloseCode = (code: number): number => {
   }
   return code;
 };
-

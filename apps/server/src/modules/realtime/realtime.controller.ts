@@ -15,10 +15,7 @@ export class RealtimeController {
   ) {}
 
   @Post("offer")
-  async createOffer(
-    @Body() dto: CreateRealtimeOfferDto,
-    @Req() req: Request,
-  ) {
+  async createOffer(@Body() dto: CreateRealtimeOfferDto, @Req() req: Request) {
     const profile = await this.authService.resolveUserFromRequest(req);
     return this.realtimeService.createOffer(dto, profile?.id);
   }
