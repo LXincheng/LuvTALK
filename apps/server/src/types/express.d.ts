@@ -1,5 +1,3 @@
-import type { IncomingHttpHeaders } from "http";
-
 declare global {
   namespace Express {
     interface User {

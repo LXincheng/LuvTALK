@@ -42,6 +42,7 @@ export interface VoiceUploadResult {
   filePath: string;
   fileName: string;
   mimeType: string;
+  conversationKey?: string;
 }
 
 @Injectable()
@@ -72,6 +73,8 @@ export class VoiceTutorService {
   async handleUpload(
     conversationId: string,
     file: VoiceUploadFile,
+    userId?: string,
+    conversationKey?: string,
   ): Promise<VoiceUploadResult> {
     if (!file?.buffer?.length) {
       throw new BadRequestException("文件内容为空");
@@ -80,7 +83,14 @@ export class VoiceTutorService {
       throw new BadRequestException("音频文件过大");
     }
 
-    const session = await this.conversationService.getSession(conversationId);
+    const session = await this.conversationService.getAccessibleSession(
+      conversationId,
+      {
+        userId,
+        conversationKey,
+        bindUserIfAuthenticated: true,
+      },
+    );
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
 
     const operationId = `voice-op-${Date.now()}-${randomUUID()}`;
@@ -101,6 +111,7 @@ export class VoiceTutorService {
       filePath,
       fileName,
       mimeType: file.mimetype,
+      conversationKey: session.accessKey,
     };
 
     await this.updateOperationStatus(conversationId, result, {
@@ -198,6 +209,11 @@ export class VoiceTutorService {
         transcript,
       });
       await this.forwardTranscript(conversationId, activeUpload, transcript);
+      await this.ensureLatestTutorReplySpeech(
+        conversationId,
+        languageHint,
+        activeUpload.conversationKey,
+      );
       await this.updateOperationStatus(conversationId, activeUpload, {
         status: "completed",
         transcript,
@@ -284,7 +300,47 @@ export class VoiceTutorService {
           audioUrl: this.buildAudioReference(conversationId, upload.fileName),
         },
       },
+      undefined,
+      upload.conversationKey,
     );
+  }
+
+  private async ensureLatestTutorReplySpeech(
+    conversationId: string,
+    languageHint: LanguageHint,
+    conversationKey?: string,
+  ): Promise<void> {
+    try {
+      const session = await this.conversationService.getAccessibleSession(
+        conversationId,
+        {
+          conversationKey,
+          allowBootstrapMissingAccessKey: true,
+        },
+      );
+      const latestAiMessage = [...session.messages]
+        .reverse()
+        .find((message) => message.sender === "ai");
+      if (!latestAiMessage?.text?.trim()) {
+        return;
+      }
+      if (latestAiMessage.meta?.audioUrl) {
+        return;
+      }
+      await this.synthesizeSpeech(
+        conversationId,
+        latestAiMessage.text,
+        languageHint.ttsVoice,
+        undefined,
+        conversationKey,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to eagerly synthesize tutor reply for ${conversationId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private async respondWithFallbackMessage(
@@ -302,6 +358,8 @@ export class VoiceTutorService {
           audioUrl: this.buildAudioReference(conversationId, upload.fileName),
         },
       },
+      undefined,
+      upload.conversationKey,
     );
     await this.updateOperationStatus(conversationId, upload, {
       status: "completed",
@@ -319,7 +377,14 @@ export class VoiceTutorService {
   async getVoiceOperationStatus(
     conversationId: string,
     operationId: string,
+    userId?: string,
+    conversationKey?: string,
   ): Promise<VoiceOperationSnapshot | undefined> {
+    await this.conversationService.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      allowBootstrapMissingAccessKey: true,
+    });
     const snapshot = await this.voiceOperationCache.getSnapshot(operationId);
     if (!snapshot || snapshot.conversationId !== conversationId) {
       return undefined;
@@ -411,6 +476,8 @@ export class VoiceTutorService {
     conversationId: string,
     text: string,
     voice?: string,
+    userId?: string,
+    conversationKey?: string,
   ): Promise<{ audioUrl: string; fileName: string } | undefined> {
     const { apiKey, audioApiUrl } = envConfig.openai;
     const ttsModel = envConfig.modelRouting.ttsModel;
@@ -418,7 +485,14 @@ export class VoiceTutorService {
       this.logger.warn("Primary provider TTS 配置缺失，无法执行语音合成");
       return undefined;
     }
-    const session = await this.conversationService.getSession(conversationId);
+    const session = await this.conversationService.getAccessibleSession(
+      conversationId,
+      {
+        userId,
+        conversationKey,
+        bindUserIfAuthenticated: true,
+      },
+    );
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
     const resolvedVoice = voice ?? languageHint.ttsVoice;
     const directory = join(this.storageRoot, conversationId);
@@ -549,7 +623,14 @@ export class VoiceTutorService {
   async openAudioStream(
     conversationId: string,
     fileName: string,
+    userId?: string,
+    conversationKey?: string,
   ): Promise<{ stream: Readable; mimeType: string }> {
+    await this.conversationService.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      allowBootstrapMissingAccessKey: true,
+    });
     const safeFileName = basename(fileName);
     const filePath = join(this.storageRoot, conversationId, safeFileName);
     try {

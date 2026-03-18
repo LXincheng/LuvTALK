@@ -1,5 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { ConversationMessage } from "../../common/types/conversation.types";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import {
   AchievementDefinition,
@@ -151,11 +152,49 @@ const LEVEL_SEED: LevelDefinition[] = [
   },
 ];
 
+type AchievementMetricKey = AchievementDefinition["targetMetric"];
+
+type UserProgressMetrics = Record<AchievementMetricKey, number> & {
+  totalXp: number;
+};
+
 @Injectable()
 export class AchievementService {
+  private readonly logger = new Logger(AchievementService.name);
+  private readonly syncTimers = new Map<string, NodeJS.Timeout>();
+  private seedReady = false;
+  private seedPromise?: Promise<void>;
+
   constructor(private readonly prisma: PrismaService) {}
 
+  queueUserProgressSync(userId?: string, delayMs = 400): void {
+    if (!userId || !this.prisma.canUseDatabase()) {
+      return;
+    }
+    const existing = this.syncTimers.get(userId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(() => {
+      this.syncTimers.delete(userId);
+      void this.syncUserProgressNow(userId).catch((error: unknown) => {
+        this.logger.warn(
+          `Failed to sync achievement progress for ${userId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }, delayMs);
+    this.syncTimers.set(userId, timer);
+  }
+
   async listAchievements(userId?: string): Promise<AchievementWithProgress[]> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const definitions = await this.getAchievementDefinitions();
     if (!userId) {
       return definitions.map((def) => ({
@@ -175,42 +214,73 @@ export class AchievementService {
       }));
     }
 
-    const rows = await this.prisma.userAchievement.findMany({
-      where: { userId },
-    });
-    const progressMap = new Map(
-      rows.map((row) => [
-        row.achievementId,
-        {
-          progress: row.progress,
-          unlocked: Boolean(row.unlockedAt),
+    try {
+      await this.syncUserProgressNow(userId);
+      const rows = await this.prisma.userAchievement.findMany({
+        where: { userId },
+        include: {
+          achievement: {
+            select: { code: true },
+          },
         },
-      ]),
-    );
+      });
+      const progressMap = new Map(
+        rows.map((row) => [
+          row.achievement?.code ?? row.achievementId,
+          {
+            progress: row.progress,
+            unlocked: Boolean(row.unlockedAt),
+          },
+        ]),
+      );
 
-    return definitions.map((def) => {
-      const row = progressMap.get(def.code);
-      return {
-        id: def.code,
-        ...def,
-        progress: row?.progress ?? 0,
-        unlocked: row?.unlocked ?? false,
-      };
-    });
+      return definitions.map((def) => {
+        const row = progressMap.get(def.code);
+        return {
+          id: def.code,
+          ...def,
+          progress: row?.progress ?? 0,
+          unlocked: row?.unlocked ?? false,
+        };
+      });
+    } catch (error) {
+      if (this.handleDatabaseConnectionError(error, "listAchievements")) {
+        return definitions.map((def) => ({
+          id: def.code,
+          ...def,
+          progress: 0,
+          unlocked: false,
+        }));
+      }
+      throw error;
+    }
   }
 
   async listLevels(userId?: string): Promise<LevelWithProgress[]> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const definitions = await this.getLevelDefinitions();
     let currentXp = 0;
     let currentLevel = 0;
 
     if (userId && this.prisma.canUseDatabase()) {
-      const userLevel = await this.prisma.userLevel.findUnique({
-        where: { userId },
-        include: { level: true },
-      });
-      currentXp = userLevel?.currentXp ?? 0;
-      currentLevel = userLevel?.level?.level ?? 0;
+      try {
+        await this.syncUserProgressNow(userId);
+        const userLevel = await this.prisma.userLevel.findUnique({
+          where: { userId },
+          include: { level: true },
+        });
+        currentXp = userLevel?.currentXp ?? 0;
+        currentLevel = userLevel?.level?.level ?? 0;
+      } catch (error) {
+        if (!this.handleDatabaseConnectionError(error, "listLevels")) {
+          throw error;
+        }
+      }
     }
 
     return definitions.map((def) => ({
@@ -221,6 +291,12 @@ export class AchievementService {
   }
 
   async getSummary(userId?: string): Promise<AchievementSummary> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const totalCount = ACHIEVEMENT_SEED.length;
     if (!userId || !this.prisma.canUseDatabase()) {
       return {
@@ -232,26 +308,40 @@ export class AchievementService {
       };
     }
 
-    const unlockedCount = await this.prisma.userAchievement.count({
-      where: { userId, unlockedAt: { not: null } },
-    });
-    const levelRow = await this.prisma.userLevel.findUnique({
-      where: { userId },
-      include: { level: true },
-    });
+    try {
+      await this.syncUserProgressNow(userId);
+      const unlockedCount = await this.prisma.userAchievement.count({
+        where: { userId, unlockedAt: { not: null } },
+      });
+      const levelRow = await this.prisma.userLevel.findUnique({
+        where: { userId },
+        include: { level: true },
+      });
 
-    const totalXp = levelRow?.currentXp ?? 0;
-    const currentLevel = levelRow?.level?.level ?? 0;
-    const completionRate =
-      totalCount === 0 ? 0 : Math.round((unlockedCount / totalCount) * 100);
+      const totalXp = levelRow?.currentXp ?? 0;
+      const currentLevel = levelRow?.level?.level ?? 0;
+      const completionRate =
+        totalCount === 0 ? 0 : Math.round((unlockedCount / totalCount) * 100);
 
-    return {
-      unlockedCount,
-      totalCount,
-      completionRate,
-      currentLevel,
-      totalXp,
-    };
+      return {
+        unlockedCount,
+        totalCount,
+        completionRate,
+        currentLevel,
+        totalXp,
+      };
+    } catch (error) {
+      if (this.handleDatabaseConnectionError(error, "getSummary")) {
+        return {
+          unlockedCount: 0,
+          totalCount,
+          completionRate: 0,
+          currentLevel: 0,
+          totalXp: 0,
+        };
+      }
+      throw error;
+    }
   }
 
   private async getAchievementDefinitions(): Promise<AchievementDefinition[]> {
@@ -259,6 +349,7 @@ export class AchievementService {
       return ACHIEVEMENT_SEED;
     }
     try {
+      await this.ensureSeedData();
       const rows = await this.prisma.achievement.findMany({
         orderBy: { createdAt: "asc" },
       });
@@ -277,6 +368,11 @@ export class AchievementService {
       }));
     } catch (error) {
       if (
+        this.handleDatabaseConnectionError(error, "getAchievementDefinitions")
+      ) {
+        return ACHIEVEMENT_SEED;
+      }
+      if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2021" || error.code === "P2022")
       ) {
@@ -291,6 +387,7 @@ export class AchievementService {
       return LEVEL_SEED;
     }
     try {
+      await this.ensureSeedData();
       const rows = await this.prisma.levelDefinition.findMany({
         orderBy: { level: "asc" },
       });
@@ -305,6 +402,9 @@ export class AchievementService {
         minXp: row.minXp,
       }));
     } catch (error) {
+      if (this.handleDatabaseConnectionError(error, "getLevelDefinitions")) {
+        return LEVEL_SEED;
+      }
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         (error.code === "P2021" || error.code === "P2022")
@@ -313,5 +413,346 @@ export class AchievementService {
       }
       throw error;
     }
+  }
+
+  private async syncUserProgressNow(userId: string): Promise<void> {
+    if (!this.prisma.canUseDatabase()) {
+      return;
+    }
+    try {
+      await this.ensureSeedData();
+      const [definitions, metrics, achievements, levelRows] = await Promise.all(
+        [
+          this.getAchievementDefinitions(),
+          this.collectUserMetrics(userId),
+          this.prisma.achievement.findMany({
+            select: { id: true, code: true },
+          }),
+          this.prisma.levelDefinition.findMany({
+            select: { id: true, level: true, minXp: true },
+          }),
+        ],
+      );
+      const achievementIdByCode = new Map(
+        achievements.map((item) => [item.code, item.id] as const),
+      );
+      const now = new Date();
+
+      await this.prisma.$transaction(async (tx) => {
+        for (const definition of definitions) {
+          const achievementId = achievementIdByCode.get(definition.code);
+          if (!achievementId) {
+            continue;
+          }
+          const progress = Math.min(
+            metrics[definition.targetMetric],
+            definition.targetValue,
+          );
+          const unlocked =
+            metrics[definition.targetMetric] >= definition.targetValue;
+          await tx.userAchievement.upsert({
+            where: {
+              userId_achievementId: {
+                userId,
+                achievementId,
+              },
+            },
+            update: {
+              progress,
+              unlockedAt: unlocked ? now : null,
+            },
+            create: {
+              userId,
+              achievementId,
+              progress,
+              unlockedAt: unlocked ? now : null,
+            },
+          });
+        }
+
+        const currentLevel =
+          levelRows
+            .slice()
+            .sort((left, right) => left.level - right.level)
+            .reverse()
+            .find((level) => metrics.totalXp >= level.minXp) ?? levelRows[0];
+        if (!currentLevel) {
+          return;
+        }
+        await tx.userLevel.upsert({
+          where: { userId },
+          update: {
+            levelId: currentLevel.id,
+            currentXp: metrics.totalXp,
+          },
+          create: {
+            userId,
+            levelId: currentLevel.id,
+            currentXp: metrics.totalXp,
+          },
+        });
+      });
+    } catch (error) {
+      if (this.handleDatabaseConnectionError(error, "syncUserProgressNow")) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async ensureSeedData(): Promise<void> {
+    if (!this.prisma.canUseDatabase()) {
+      return;
+    }
+    if (this.seedReady) {
+      return;
+    }
+    if (!this.seedPromise) {
+      this.seedPromise = this.seedDefinitions();
+    }
+    try {
+      await this.seedPromise;
+      this.seedReady = true;
+    } catch (error) {
+      this.seedPromise = undefined;
+      if (this.handleDatabaseConnectionError(error, "ensureSeedData")) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async seedDefinitions(): Promise<void> {
+    const upserts = [
+      ...ACHIEVEMENT_SEED.map((definition) =>
+        this.prisma.achievement.upsert({
+          where: { code: definition.code },
+          update: {
+            title: definition.title,
+            description: definition.description,
+            icon: definition.icon,
+            color: definition.color,
+            rarity: definition.rarity,
+            targetValue: definition.targetValue,
+            targetMetric: definition.targetMetric,
+          },
+          create: {
+            code: definition.code,
+            title: definition.title,
+            description: definition.description,
+            icon: definition.icon,
+            color: definition.color,
+            rarity: definition.rarity,
+            targetValue: definition.targetValue,
+            targetMetric: definition.targetMetric,
+          },
+        }),
+      ),
+      ...LEVEL_SEED.map((level) =>
+        this.prisma.levelDefinition.upsert({
+          where: { level: level.level },
+          update: {
+            title: level.title,
+            icon: level.icon,
+            color: level.color,
+            minXp: level.minXp,
+          },
+          create: {
+            level: level.level,
+            title: level.title,
+            icon: level.icon,
+            color: level.color,
+            minXp: level.minXp,
+          },
+        }),
+      ),
+    ];
+
+    await Promise.all(upserts);
+  }
+
+  private handleDatabaseConnectionError(
+    error: unknown,
+    context: string,
+  ): boolean {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      (error.code === "P1001" || error.code === "P1002")
+    ) {
+      this.logger.warn(
+        `Achievement service fallback in ${context}: ${error.code} ${
+          error.message
+        }`,
+      );
+      this.prisma.markDatabaseUnavailable(
+        `Achievement service connection failure in ${context}.`,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  private async collectUserMetrics(
+    userId: string,
+  ): Promise<UserProgressMetrics> {
+    const [conversations, reviewFeedback, learningActivity] = await Promise.all(
+      [
+        this.prisma.conversation.findMany({
+          where: { userId },
+          select: {
+            targetLanguage: true,
+            messages: true,
+            updatedAt: true,
+          },
+        }),
+        this.prisma.reviewFeedback.findMany({
+          where: { userId },
+          select: { createdAt: true },
+        }),
+        this.prisma.learningActivityDaily.findMany({
+          where: {
+            userId,
+            focusSeconds: { gt: 0 },
+          },
+          select: { dateKey: true },
+        }),
+      ],
+    );
+
+    const distinctVocabulary = new Set<string>();
+    const activeDays = new Set<string>(
+      learningActivity.map((row) => row.dateKey),
+    );
+    const masteredLanguages = new Set<string>();
+    const todayKey = this.toDateKey(new Date());
+
+    let conversationCount = 0;
+    let perfectScoreCount = 0;
+    let conversationsToday = 0;
+
+    conversations.forEach((conversation) => {
+      const messages = Array.isArray(conversation.messages)
+        ? (conversation.messages as unknown as ConversationMessage[])
+        : [];
+      const userMessages = messages.filter(
+        (message) => message.sender === "user",
+      );
+      if (userMessages.length === 0) {
+        return;
+      }
+      conversationCount += 1;
+      masteredLanguages.add(conversation.targetLanguage);
+
+      const userDayKeys = new Set<string>();
+      userMessages.forEach((message) => {
+        const dateKey = this.toDateKey(new Date(message.createdAt));
+        if (dateKey) {
+          userDayKeys.add(dateKey);
+          activeDays.add(dateKey);
+        }
+        this.extractVocabularyTokens(message.text).forEach((token) => {
+          distinctVocabulary.add(token);
+        });
+      });
+      if (userDayKeys.has(todayKey)) {
+        conversationsToday += 1;
+      }
+
+      messages.forEach((message) => {
+        if (message.sender !== "ai") {
+          return;
+        }
+        if ((message.meta?.score ?? 0) >= 100) {
+          perfectScoreCount += 1;
+        }
+        message.meta?.keyTerms?.forEach((term) => {
+          const normalized = this.normalizeVocabularyToken(term.term);
+          if (normalized) {
+            distinctVocabulary.add(normalized);
+          }
+        });
+      });
+    });
+
+    reviewFeedback.forEach((item) => {
+      const dateKey = this.toDateKey(item.createdAt);
+      if (dateKey) {
+        activeDays.add(dateKey);
+      }
+    });
+
+    const reviewToday = reviewFeedback.filter(
+      (item) => this.toDateKey(item.createdAt) === todayKey,
+    ).length;
+    const streakDays = this.computeStreakDays(activeDays, todayKey);
+    const dailyLessons = conversationsToday + reviewToday;
+    const totalXp =
+      conversationCount * 10 +
+      distinctVocabulary.size +
+      perfectScoreCount * 20 +
+      reviewFeedback.length * 3 +
+      streakDays * 5 +
+      masteredLanguages.size * 25;
+
+    return {
+      conversation_count: conversationCount,
+      streak_days: streakDays,
+      vocab_count: distinctVocabulary.size,
+      perfect_score_count: perfectScoreCount,
+      daily_lessons: dailyLessons,
+      language_mastery: masteredLanguages.size,
+      totalXp,
+    };
+  }
+
+  private computeStreakDays(activeDays: Set<string>, todayKey: string): number {
+    if (!activeDays.size) {
+      return 0;
+    }
+    const today = this.fromDateKey(todayKey);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const latestKey = activeDays.has(todayKey)
+      ? todayKey
+      : activeDays.has(this.toDateKey(yesterday))
+        ? this.toDateKey(yesterday)
+        : "";
+    if (!latestKey) {
+      return 0;
+    }
+    let streak = 0;
+    const cursor = this.fromDateKey(latestKey);
+    while (activeDays.has(this.toDateKey(cursor))) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return streak;
+  }
+
+  private extractVocabularyTokens(text: string): string[] {
+    return text
+      .split(/\s+/)
+      .map((token) => this.normalizeVocabularyToken(token))
+      .filter((token): token is string => Boolean(token));
+  }
+
+  private normalizeVocabularyToken(token: string): string | undefined {
+    const normalized = token
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}']/gu, "")
+      .trim();
+    return normalized.length >= 2 ? normalized : undefined;
+  }
+
+  private toDateKey(value: Date | string): string {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+    return date.toISOString().slice(0, 10);
+  }
+
+  private fromDateKey(dateKey: string): Date {
+    return new Date(`${dateKey}T00:00:00.000Z`);
   }
 }

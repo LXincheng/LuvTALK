@@ -36,6 +36,12 @@ export class LearningGoalService {
   ) {}
 
   async getGoal(userId?: string): Promise<LearningGoalPayload> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const now = new Date();
     const goal = await this.resolveGoalSettings(userId);
     const progress = await this.resolveProgress(userId, now);
@@ -50,6 +56,12 @@ export class LearningGoalService {
     dto: RecordLearningFocusDto,
     userId?: string,
   ): Promise<LearningGoalPayload> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const now = new Date();
     const dateKey = this.toDateKey(now);
     const safeSeconds = Math.max(15, Math.min(600, dto.focusSeconds));
@@ -107,6 +119,12 @@ export class LearningGoalService {
     dto: UpsertLearningGoalDto,
     userId?: string,
   ): Promise<LearningGoalPayload> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const nowIso = new Date().toISOString();
     const goal: LearningGoalSettings = {
       dailyMinutes: dto.dailyMinutes,

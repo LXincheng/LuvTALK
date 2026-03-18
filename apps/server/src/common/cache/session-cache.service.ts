@@ -7,22 +7,20 @@ export class SessionCacheService {
   private readonly ttlSeconds = 60;
   private readonly cache = new Map<string, ConversationSession>();
 
-  async getSession(
-    conversationId: string,
-  ): Promise<ConversationSession | undefined> {
+  getSession(conversationId: string): Promise<ConversationSession | undefined> {
     try {
-      return this.cache.get(this.buildKey(conversationId));
+      return Promise.resolve(this.cache.get(this.buildKey(conversationId)));
     } catch (error) {
       this.logger.warn(
         `Failed to read session cache for ${conversationId}: ${
           (error as Error).message
         }`,
       );
-      return undefined;
+      return Promise.resolve(undefined);
     }
   }
 
-  async setSession(session: ConversationSession): Promise<void> {
+  setSession(session: ConversationSession): Promise<void> {
     try {
       // 当前仅使用内存 Map 作为轻量缓存，TTL 通过上层逻辑控制使用频率。
       this.cache.set(this.buildKey(session.id), session);
@@ -33,6 +31,7 @@ export class SessionCacheService {
         }`,
       );
     }
+    return Promise.resolve();
   }
 
   private buildKey(conversationId: string): string {

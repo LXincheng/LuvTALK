@@ -45,7 +45,7 @@ const SCENARIO_KEYWORDS: Record<string, string[]> = {
 const hasStructuredStudySteps = (reply: string): boolean => {
   return (
     /(\n|^)\s*(学习建议|Study Steps)[:：]/i.test(reply) ||
-    /(\n|^)\s*1[\).]/.test(reply)
+    /(\n|^)\s*1[).]/.test(reply)
   );
 };
 

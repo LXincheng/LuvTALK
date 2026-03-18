@@ -23,6 +23,11 @@ const readNumber = (value: string | undefined, fallback: number): number => {
 export const envConfig = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
+  runtime: {
+    allowInMemoryFallback:
+      readTrimmed(process.env.ALLOW_IN_MEMORY_FALLBACK).toLowerCase() ===
+        "true" || process.env.NODE_ENV !== "production",
+  },
   modelRouting: {
     primaryModel: readTrimmed(process.env.PRIMARY_MODEL),
     secondaryModel: readTrimmed(process.env.SECONDARY_MODEL),

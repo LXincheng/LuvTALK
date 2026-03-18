@@ -8,11 +8,14 @@ export const buildConversationModePrompt = (
     case "voice":
       return [
         "MODE RULES (voice):",
-        `- reply must feel spoken and natural in ${targetLabel}, no textbook tone.`,
-        "- Use 1-2 short sentences in reply, prioritizing flow over explanation.",
-        `- If correction is needed, first encourage, then provide one concise fix in ${nativeLabel}.`,
+        `- reply must still feel spoken and natural in ${targetLabel}, but keep strong tutoring value.`,
+        "- Allow 1-3 short sentences when needed so the learner gets a complete, useful response.",
+        "- Prioritize scenario-fit wording, natural expression, and clear teaching value over casual small talk.",
+        `- If correction is needed, make it concise but specific, especially for wording, expression, grammar, or pragmatics.`,
         `- pronunciationTip should be populated when there is a clear, actionable sound-level issue in ${targetLabel}.`,
         "- rhythmTip should focus on pause/stress/intonation and stay within one sentence.",
+        `- grammarTip and correction should be concrete and useful in ${nativeLabel}, not generic encouragement.`,
+        `- Avoid numbered teaching structure inside reply, but do not sacrifice depth of coaching.`,
       ];
     case "immersive":
       return [

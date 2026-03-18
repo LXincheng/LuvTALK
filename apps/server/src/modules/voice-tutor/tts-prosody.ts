@@ -2,8 +2,8 @@ import { LanguageCode } from "../../common/enums/language-code.enum";
 
 const MAX_TTS_CHARS = 320;
 const STUDY_SECTION_PATTERN = /(\n|^)\s*(学习建议|Study Steps)[:：]/i;
-const LIST_LINE_PATTERN = /^\s*(\d+[\).]|[-*•])\s*/gm;
-const LIST_INLINE_PATTERN = /(?:^|\s)(\d+[\).]|[-*•])\s+/g;
+const LIST_LINE_PATTERN = /^\s*(\d+[).]|[-*•])\s*/gm;
+const LIST_INLINE_PATTERN = /(?:^|\s)(\d+[).]|[-*•])\s+/g;
 const SPACE_AFTER_PUNCT_PATTERN = /\s*([,，;；:：])\s*/g;
 const SPACE_AFTER_ENDING_PATTERN = /\s*([。！？!?])\s*/g;
 

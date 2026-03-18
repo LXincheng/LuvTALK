@@ -1,6 +1,7 @@
 import "./common/config/load-env";
 import { Logger, ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import type { Server as HttpServer } from "http";
 import { AppModule } from "./app.module";
 import { RealtimeWsProxy } from "./modules/realtime/realtime.ws";
 
@@ -24,7 +25,7 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
   const realtimeWs = app.get(RealtimeWsProxy);
-  realtimeWs.attach(app.getHttpServer());
+  realtimeWs.attach(app.getHttpServer() as HttpServer);
   logger.log(`API listening on http://localhost:${port}/api/health`);
 }
 void bootstrap();

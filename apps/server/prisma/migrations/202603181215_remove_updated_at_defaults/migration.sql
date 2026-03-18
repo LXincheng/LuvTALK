@@ -1,0 +1,14 @@
+ALTER TABLE "LearningGoal"
+ALTER COLUMN "updatedAt" DROP DEFAULT;
+
+ALTER TABLE "LearningActivityDaily"
+ALTER COLUMN "updatedAt" DROP DEFAULT;
+
+ALTER TABLE "ReviewQueueItem"
+ALTER COLUMN "updatedAt" DROP DEFAULT;
+
+ALTER TABLE "UserAchievement"
+ALTER COLUMN "updatedAt" DROP DEFAULT;
+
+ALTER TABLE "UserLevel"
+ALTER COLUMN "updatedAt" DROP DEFAULT;

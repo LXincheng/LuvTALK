@@ -95,26 +95,22 @@ export class RealtimeWsProxy {
       }
 
       const accessToken = url.searchParams.get("accessToken") ?? undefined;
+      const conversationKey =
+        url.searchParams.get("conversationKey") ?? undefined;
       const requestedVoice = url.searchParams.get("voice") ?? undefined;
       const scenarioId = url.searchParams.get("scenarioId") ?? undefined;
 
       const profile = await this.resolveProfile(accessToken);
 
-      const session = await this.conversationService.getSession(conversationId);
-      if (session.userId && (!profile || session.userId !== profile.id)) {
-        this.closeWithMetric({
-          client,
-          wsCode: 1008,
-          code: REALTIME_SERVER_ERROR_CODES.PERMISSION_DENIED,
-          message: "Conversation not found",
-          retriable: false,
-        });
-        return;
-      }
-      if (!session.userId && profile) {
-        session.userId = profile.id;
-        await this.conversationService.persistSessionPublic(session);
-      }
+      const session = await this.conversationService.getAccessibleSession(
+        conversationId,
+        {
+          userId: profile?.id,
+          conversationKey,
+          bindUserIfAuthenticated: true,
+          allowBootstrapMissingAccessKey: true,
+        },
+      );
 
       const cooldownKey = profile
         ? `user:${profile.id}`
@@ -522,14 +518,22 @@ const toTextMessage = (data: RawData): string | null => {
 const safeReadResponseBody = async (
   response: IncomingMessage,
 ): Promise<string> => {
-  const chunks: Buffer[] = [];
+  const chunks: Buffer<ArrayBufferLike>[] = [];
   return new Promise((resolve) => {
-    response.on("data", (chunk) => {
+    response.on("data", (chunk: RawData) => {
       if (typeof chunk === "string") {
         chunks.push(Buffer.from(chunk, "utf8"));
         return;
       }
-      chunks.push(Buffer.from(chunk));
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+        return;
+      }
+      if (chunk instanceof ArrayBuffer) {
+        chunks.push(Buffer.from(chunk));
+        return;
+      }
+      chunks.push(Buffer.concat(chunk.map((part) => Buffer.from(part))));
     });
     response.on("end", () => {
       resolve(Buffer.concat(chunks).toString("utf8"));

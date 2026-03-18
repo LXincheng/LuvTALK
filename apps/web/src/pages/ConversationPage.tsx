@@ -11,9 +11,9 @@ import ConversationRecoveryBanner from '../components/chat/ConversationRecoveryB
 import SessionSummaryCard from '../components/chat/SessionSummaryCard';
 import type { ConversationRecoveryState } from '../components/chat/ConversationRecoveryBanner';
 import ImmersiveMode from '../components/immersive/ImmersiveMode';
-import type { ChatMode } from '../components/chat/ChatModeSwitcher';
 import { API_BASE_URL } from '../services/apiClient';
 import {
+  storeConversationAccessKey,
   fetchConversationSummary,
   fetchConversationById,
   fetchConversationHistory,
@@ -24,12 +24,13 @@ import {
   synthesizeConversationSpeech,
   updateConversationPreferences,
   uploadConversationVoice,
+  withConversationAccessQuery,
 } from '../services/conversationService';
 import { createFavorite } from '../services/favoritesService';
 import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
-import type { Annotation, Message, MessageStatusTone } from '../types/chat';
+import type { Annotation, ChatMode, Message, MessageStatusTone } from '../types/chat';
 import type {
   ConversationHistorySummary,
   ConversationSession,
@@ -183,14 +184,20 @@ const mapAnnotationTypeToFavoriteType = (
 };
 
 /** Resolve backend-relative audio URLs to full URLs using the API base. */
-const resolveAudioUrl = (url: string | undefined): string | undefined => {
+const resolveAudioUrl = (
+  url: string | undefined,
+  conversationId: string,
+): string | undefined => {
   if (!url) return undefined;
   if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;
   // Backend returns paths like /api/conversation/{id}/voice/{file}
   if (url.startsWith('/api/')) {
-    return `${API_BASE_URL}${url.slice(4)}`;
+    return withConversationAccessQuery(
+      `${API_BASE_URL}${url.slice(4)}`,
+      conversationId,
+    );
   }
-  return url;
+  return withConversationAccessQuery(url, conversationId);
 };
 
 const mapSessionToMessages = (
@@ -203,7 +210,9 @@ const mapSessionToMessages = (
     content: message.text,
     translation: message.meta?.translation,
     timestamp: new Date(message.createdAt),
-    audioUrl: resolveAudioUrl(message.meta?.audioUrl) ?? ttsAudioMap[message.id],
+    audioUrl:
+      resolveAudioUrl(message.meta?.audioUrl, session.id) ??
+      ttsAudioMap[message.id],
     annotations:
       message.sender === 'ai' && index > 0
         ? message.meta?.keyTerms?.map((term) => ({
@@ -399,6 +408,7 @@ export default function ConversationPage() {
   const ttsVoiceRef = useRef(ttsVoice);
   const ttsBaselineRef = useRef(0);
   const prevChatModeRef = useRef<ChatMode>(chatMode);
+  const prevAutoTtsModeRef = useRef<ChatMode>(chatMode);
   const currentSessionIdRef = useRef<string | null>(null);
   const streamRecoveryTimerRef = useRef<number | null>(null);
   const pendingVoiceStatusTimerRef = useRef<number | null>(null);
@@ -422,8 +432,16 @@ export default function ConversationPage() {
       window.localStorage.setItem('activeConversationId', nextSession.id);
       storeActiveConversationIdByLanguage(nextSession.targetLanguage, nextSession.id);
       trackConversationId(nextSession.id);
+      storeConversationAccessKey(nextSession.id, nextSession.accessKey);
     }
   }, []);
+
+  useEffect(() => {
+    if (!session?.id) {
+      return;
+    }
+    storeConversationAccessKey(session.id, session.accessKey);
+  }, [session?.accessKey, session?.id]);
 
   const clearStreamRecoveryTimer = useCallback(() => {
     if (streamRecoveryTimerRef.current !== null) {
@@ -835,6 +853,27 @@ export default function ConversationPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [mergedMessages]);
 
+  const loadHistory = useCallback(async () => {
+    setIsLoadingHistory(true);
+    try {
+      const ids = getStoredConversationIds();
+      const history = await fetchConversationHistory(ids);
+      setConversationHistory(normalizeHistoryList(history, session?.id));
+    } catch {
+      // Retry once after a short delay for transient failures
+      try {
+        await new Promise((r) => setTimeout(r, 800));
+        const ids = getStoredConversationIds();
+        const history = await fetchConversationHistory(ids);
+        setConversationHistory(normalizeHistoryList(history, session?.id));
+      } catch {
+        // History is non-critical, keep previous data if any
+      }
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [session?.id]);
+
   useEffect(() => {
     let isMounted = true;
     loadOrResumeSession()
@@ -855,7 +894,7 @@ export default function ConversationPage() {
     return () => {
       isMounted = false;
     };
-  }, [loadOrResumeSession, t]);
+  }, [loadHistory, loadOrResumeSession, t]);
 
   useEffect(() => {
     if (!session) {
@@ -926,7 +965,10 @@ export default function ConversationPage() {
     }
     let disposed = false;
     const source = new EventSource(
-      `${API_BASE_URL}/conversation/${session.id}/events`,
+      withConversationAccessQuery(
+        `${API_BASE_URL}/conversation/${session.id}/events`,
+        session.id,
+      ),
     );
     source.onopen = () => {
       toast.dismiss('stream');
@@ -1071,6 +1113,22 @@ export default function ConversationPage() {
 
   useEffect(() => {
     if (!session?.id) {
+      prevAutoTtsModeRef.current = chatMode;
+      return;
+    }
+    const prevMode = prevAutoTtsModeRef.current;
+    prevAutoTtsModeRef.current = chatMode;
+    if (prevMode === chatMode) {
+      return;
+    }
+    if (chatMode === 'text' || prevMode === 'text') {
+      // Do not backfill older tutor replies when toggling between text and voice.
+      ttsBaselineRef.current = session.messages.length;
+    }
+  }, [chatMode, session?.id, session?.messages.length]);
+
+  useEffect(() => {
+    if (!session?.id) {
       return;
     }
     const conversationId = session.id;
@@ -1146,10 +1204,11 @@ export default function ConversationPage() {
   }, [session, t]);
 
   useEffect(() => {
-    if (!session || chatMode === 'immersive') {
+    if (!session || chatMode !== 'voice') {
       return;
     }
-    // Only TTS messages added after the baseline (skip messages from immersive session)
+    // Only TTS messages added after the baseline. This skips the opening line and
+    // avoids backfilling tutor replies created while text mode was active.
     const baseline = ttsBaselineRef.current;
     const candidates = baseline > 0
       ? session.messages.slice(baseline)
@@ -1194,27 +1253,6 @@ export default function ConversationPage() {
       }
     };
   }, [clearPendingTutorReply, clearStreamRecoveryTimer]);
-
-  const loadHistory = async () => {
-    setIsLoadingHistory(true);
-    try {
-      const ids = getStoredConversationIds();
-      const history = await fetchConversationHistory(ids);
-      setConversationHistory(normalizeHistoryList(history, session?.id));
-    } catch {
-      // Retry once after a short delay for transient failures
-      try {
-        await new Promise((r) => setTimeout(r, 800));
-        const ids = getStoredConversationIds();
-        const history = await fetchConversationHistory(ids);
-        setConversationHistory(normalizeHistoryList(history, session?.id));
-      } catch {
-        // History is non-critical, keep previous data if any
-      }
-    } finally {
-      setIsLoadingHistory(false);
-    }
-  };
 
   const handleSelectConversation = async (conversationId: string) => {
     setIsInitializing(true);
@@ -1354,6 +1392,7 @@ export default function ConversationPage() {
       const nextSession = await sendConversationMessage(
         session.id,
         messageText,
+        chatMode,
       );
       clearPendingTutorReply();
       setSession(nextSession);

@@ -7,5 +7,6 @@ import { AchievementService } from "./achievement.service";
   imports: [AuthModule],
   controllers: [AchievementController],
   providers: [AchievementService],
+  exports: [AchievementService],
 })
 export class AchievementModule {}

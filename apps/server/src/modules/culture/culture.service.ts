@@ -69,8 +69,9 @@ export class CultureService {
       );
     }
 
-    const payload: { cards?: Array<Record<string, string>> } =
-      await response.json();
+    const payload = (await response.json()) as {
+      cards?: Array<Record<string, string>>;
+    };
     const rawCards = payload.cards;
     if (!rawCards?.length) {
       throw new ServiceUnavailableException("Secondary provider cards empty");

@@ -9,6 +9,7 @@ import {
   ReviewSourceType,
 } from "../../common/types/review.types";
 import { PrismaService } from "../../core/prisma/prisma.service";
+import { AchievementService } from "../achievement/achievement.service";
 import { ConversationService } from "../conversation/conversation.service";
 import { FavoritesService } from "../favorites/favorites.service";
 import {
@@ -54,10 +55,17 @@ export class ReviewService {
   constructor(
     private readonly favoritesService: FavoritesService,
     private readonly prisma: PrismaService,
+    private readonly achievementService: AchievementService,
     private readonly conversationService: ConversationService,
   ) {}
 
   async buildDailyReview(userId?: string): Promise<DailyReviewPayload> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const favorites = await this.favoritesService.list(userId);
     const favoriteCards = this.buildFavoriteCards(favorites);
     const lowScoreCards = await this.buildLowScoreCards(userId);
@@ -88,6 +96,12 @@ export class ReviewService {
     dto: ReviewFeedbackDto,
     userId?: string,
   ): Promise<{ status: string }> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const createdAt = new Date().toISOString();
     const entry = { ...dto, createdAt };
     this.feedbackLog.set(`${dto.cardId}-${createdAt}`, entry);
@@ -126,6 +140,7 @@ export class ReviewService {
       }
     }
 
+    this.achievementService.queueUserProgressSync(userId);
     return { status: "ok" };
   }
 

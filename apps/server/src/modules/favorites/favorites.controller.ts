@@ -32,7 +32,8 @@ export class FavoritesController {
   }
 
   @Delete(":id")
-  remove(@Param("id") id: string) {
-    return this.favoritesService.remove(id);
+  async remove(@Param("id") id: string, @Req() req: Request) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.favoritesService.remove(id, profile?.id);
   }
 }

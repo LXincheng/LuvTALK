@@ -17,7 +17,11 @@ export class RealtimeController {
   @Post("offer")
   async createOffer(@Body() dto: CreateRealtimeOfferDto, @Req() req: Request) {
     const profile = await this.authService.resolveUserFromRequest(req);
-    return this.realtimeService.createOffer(dto, profile?.id);
+    return this.realtimeService.createOffer(
+      dto,
+      profile?.id,
+      resolveConversationKey(req),
+    );
   }
 
   @Post("transcript")
@@ -26,7 +30,11 @@ export class RealtimeController {
     @Req() req: Request,
   ) {
     const profile = await this.authService.resolveUserFromRequest(req);
-    return this.realtimeService.saveTranscript(dto, profile?.id);
+    return this.realtimeService.saveTranscript(
+      dto,
+      profile?.id,
+      resolveConversationKey(req),
+    );
   }
 
   @Get("metrics")
@@ -34,3 +42,13 @@ export class RealtimeController {
     return this.realtimeMetrics.snapshot();
   }
 }
+
+const resolveConversationKey = (req: Request): string | undefined => {
+  const headerValue = req.headers["x-conversation-key"];
+  const headerKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const queryKey =
+    typeof req.query.conversationKey === "string"
+      ? req.query.conversationKey
+      : undefined;
+  return headerKey?.trim() || queryKey?.trim() || undefined;
+};

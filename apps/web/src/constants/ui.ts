@@ -73,8 +73,8 @@ export const PROFILE_DEFAULT_PROGRESS = [
 // Available TTS voice options for AI speech (curated for natural sound)
 export const TTS_VOICE_OPTIONS = [
   { id: 'shimmer', labelKey: 'voiceShimmer' },
-  { id: 'nova', labelKey: 'voiceNova' },
   { id: 'alloy', labelKey: 'voiceAlloy' },
+  { id: 'nova', labelKey: 'voiceNova' },
 ] as const;
 
 export const DEFAULT_TTS_VOICE = 'shimmer';

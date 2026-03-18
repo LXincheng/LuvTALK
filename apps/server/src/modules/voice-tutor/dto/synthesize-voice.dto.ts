@@ -1,9 +1,11 @@
 import { IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 
+const MAX_TTS_REQUEST_TEXT_LENGTH = 12_000;
+
 export class SynthesizeVoiceDto {
   @IsString()
   @MinLength(1)
-  @MaxLength(2000)
+  @MaxLength(MAX_TTS_REQUEST_TEXT_LENGTH)
   text!: string;
 
   @IsOptional()

@@ -20,13 +20,14 @@ export async function apiRequest<TResponse>(
 ): Promise<TResponse> {
   const isFormDataBody = options.body instanceof FormData;
   const accessToken = await getAccessToken();
+  const { headers: customHeaders, ...restOptions } = options;
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...restOptions,
     headers: {
       ...(isFormDataBody ? {} : { 'Content-Type': 'application/json' }),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...(options.headers ?? {}),
+      ...(customHeaders ?? {}),
     },
-    ...options,
   });
 
   if (!response.ok) {
@@ -42,12 +43,23 @@ export async function apiRequest<TResponse>(
 }
 
 export const apiClient = {
-  get: <T>(path: string) => apiRequest<T>(path),
+  get: <T>(path: string, options?: ApiRequestOptions) => apiRequest<T>(path, options),
   post: <T, TBody = unknown>(path: string, body: TBody) =>
     apiRequest<T>(path, { method: 'POST', body: JSON.stringify(body) }),
-  postForm: <T>(path: string, formData: FormData) =>
-    apiRequest<T>(path, { method: 'POST', body: formData }),
-  delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
+  postWithOptions: <T, TBody = unknown>(
+    path: string,
+    body: TBody,
+    options?: ApiRequestOptions,
+  ) =>
+    apiRequest<T>(path, {
+      ...options,
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  postForm: <T>(path: string, formData: FormData, options?: ApiRequestOptions) =>
+    apiRequest<T>(path, { ...options, method: 'POST', body: formData }),
+  delete: <T>(path: string, options?: ApiRequestOptions) =>
+    apiRequest<T>(path, { ...options, method: 'DELETE' }),
 };
 
 // Simple stale-while-revalidate cache for GET requests

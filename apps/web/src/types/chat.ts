@@ -1,5 +1,6 @@
 export type MessageType = 'user' | 'ai';
 export type MessageStatusTone = 'sending' | 'waiting' | 'rerouting' | 'error';
+export type ChatMode = 'voice' | 'text' | 'immersive';
 
 export interface Annotation {
   word: string;

@@ -3,7 +3,6 @@ import {
   HttpStatus,
   Injectable,
   Logger,
-  NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { envConfig } from "../../common/config/env.config";
@@ -60,22 +59,21 @@ export class RealtimeService {
   async createOffer(
     dto: CreateRealtimeOfferDto,
     userId?: string,
+    conversationKey?: string,
   ): Promise<RealtimeOfferResult> {
     const { apiKey, realtimeApiUrl } = envConfig.openai;
     const realtimeModel = envConfig.modelRouting.realtimeModel;
     if (!apiKey || !realtimeApiUrl || !realtimeModel) {
       throw new ServiceUnavailableException("Realtime service unavailable");
     }
-    const session = await this.conversationService.getSession(
+    const session = await this.conversationService.getAccessibleSession(
       dto.conversationId,
+      {
+        userId,
+        conversationKey,
+        bindUserIfAuthenticated: true,
+      },
     );
-    if (session.userId && (!userId || session.userId !== userId)) {
-      throw new NotFoundException("Conversation not found");
-    }
-    if (!session.userId && userId) {
-      session.userId = userId;
-      await this.conversationService.persistSessionPublic(session);
-    }
 
     const scenarioLabel = dto.scenarioId ?? session.scenarioId ?? "daily";
     const prompt = buildRealtimeSystemPrompt({
@@ -148,6 +146,7 @@ export class RealtimeService {
   async saveTranscript(
     dto: SaveRealtimeTranscriptDto,
     userId?: string,
+    conversationKey?: string,
   ): Promise<{ saved: number }> {
     if (!dto.messages?.length) {
       this.realtimeMetrics.recordTranscriptSaved(0);
@@ -170,6 +169,7 @@ export class RealtimeService {
         dto.conversationId,
         cleaned,
         userId,
+        conversationKey,
       );
       this.realtimeMetrics.recordTranscriptSaved(saved);
       return { saved };

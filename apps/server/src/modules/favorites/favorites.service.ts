@@ -37,30 +37,40 @@ export class FavoritesService {
   ];
 
   async list(userId?: string): Promise<FavoriteItem[]> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
+
     if (this.prisma.canUseDatabase()) {
       const records = await this.prisma.favorite.findMany({
         where: userId ? { userId } : undefined,
         orderBy: { createdAt: "desc" },
       });
       if (records.length > 0) {
-        return records.map((record) => ({
-          id: record.id,
-          type: record.type as FavoriteTypeEnum,
-          title: record.title,
-          content: record.content,
-          metadata: (record.metadata as Record<string, unknown>) ?? undefined,
-          createdAt: record.createdAt.toISOString(),
-          pinned: false,
-          authorName:
-            record.type === FavoriteTypeEnum.Phrase
-              ? "Learner"
-              : "LuvTALK 导师",
-          avatar:
-            record.type === FavoriteTypeEnum.Phrase
-              ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
-              : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
-          conversationId: record.conversationId ?? undefined,
-        }));
+        return records.map((record) => {
+          const favoriteType = record.type as FavoriteTypeEnum;
+          return {
+            id: record.id,
+            type: favoriteType,
+            title: record.title,
+            content: record.content,
+            metadata: (record.metadata as Record<string, unknown>) ?? undefined,
+            createdAt: record.createdAt.toISOString(),
+            pinned: false,
+            authorName:
+              favoriteType === FavoriteTypeEnum.Phrase
+                ? "Learner"
+                : "LuvTALK 导师",
+            avatar:
+              favoriteType === FavoriteTypeEnum.Phrase
+                ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
+                : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
+            conversationId: record.conversationId ?? undefined,
+          };
+        });
       }
     }
 
@@ -75,17 +85,19 @@ export class FavoritesService {
   }
 
   async create(dto: CreateFavoriteDto, userId?: string): Promise<FavoriteItem> {
+    this.prisma.ensurePersistentStorageAvailable();
+    const favoriteType = dto.type ?? FavoriteTypeEnum.Phrase;
     const favorite: FavoriteItem = {
       id: randomUUID(),
-      type: dto.type ?? FavoriteTypeEnum.Phrase,
+      type: favoriteType,
       title: dto.title,
       content: dto.content,
       metadata: dto.metadata,
       pinned: dto.pinned ?? false,
       authorName:
-        dto.type === FavoriteTypeEnum.Phrase ? "Learner" : "LuvTALK 导师",
+        favoriteType === FavoriteTypeEnum.Phrase ? "Learner" : "LuvTALK 导师",
       avatar:
-        dto.type === FavoriteTypeEnum.Phrase
+        favoriteType === FavoriteTypeEnum.Phrase
           ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
           : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
       createdAt: new Date().toISOString(),
@@ -111,12 +123,9 @@ export class FavoritesService {
     return favorite;
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, userId?: string): Promise<void> {
     if (this.favorites.has(id)) {
       this.favorites.delete(id);
-      if (this.prisma.canUseDatabase()) {
-        await this.prisma.favorite.delete({ where: { id } });
-      }
       return;
     }
 
@@ -126,9 +135,25 @@ export class FavoritesService {
       return;
     }
 
+    if (this.prisma.canUseDatabase() && userId) {
+      const deleted = await this.prisma.favorite.deleteMany({
+        where: {
+          id,
+          userId,
+        },
+      });
+      if (deleted.count > 0) {
+        return;
+      }
+      throw new NotFoundException(`Favorite ${id} not found`);
+    }
+
     if (this.prisma.canUseDatabase()) {
-      await this.prisma.favorite.delete({ where: { id } });
-      return;
+      throw new NotFoundException(`Favorite ${id} not found`);
+    }
+
+    if (!this.prisma.allowsInMemoryFallback()) {
+      this.prisma.ensurePersistentStorageAvailable();
     }
 
     throw new NotFoundException(`Favorite ${id} not found`);

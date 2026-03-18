@@ -10,8 +10,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { Request } from "express";
-import { Observable } from "rxjs";
-import { map } from "rxjs/operators";
+import { from, Observable } from "rxjs";
+import { map, switchMap } from "rxjs/operators";
 import { ConversationService } from "./conversation.service";
 import { StartConversationDto } from "./dto/start-conversation.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
@@ -36,7 +36,11 @@ export class ConversationController {
   @Post("resume")
   async resumeSession(@Body() dto: StartConversationDto, @Req() req: Request) {
     const profile = await this.authService.resolveUserFromRequest(req);
-    return this.conversationService.resumeOrCreateSession(dto, profile?.id);
+    return this.conversationService.resumeOrCreateSession(
+      dto,
+      profile?.id,
+      resolveConversationKey(req),
+    );
   }
 
   @Post(":conversationId/archive")
@@ -48,6 +52,7 @@ export class ConversationController {
     await this.conversationService.archiveConversation(
       conversationId,
       profile?.id,
+      resolveConversationKey(req),
     );
     return { status: "archived" };
   }
@@ -63,6 +68,7 @@ export class ConversationController {
       conversationId,
       dto,
       profile?.id,
+      resolveConversationKey(req),
     );
   }
 
@@ -78,6 +84,7 @@ export class ConversationController {
       dto,
       undefined,
       profile?.id,
+      resolveConversationKey(req),
     );
   }
 
@@ -95,8 +102,16 @@ export class ConversationController {
   }
 
   @Get(":conversationId")
-  getSession(@Param("conversationId") conversationId: string) {
-    return this.conversationService.getSession(conversationId);
+  async getSession(
+    @Param("conversationId") conversationId: string,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.getAccessibleSession(conversationId, {
+      userId: profile?.id,
+      conversationKey: resolveConversationKey(req),
+      allowBootstrapMissingAccessKey: true,
+    });
   }
 
   @Get(":conversationId/summary")
@@ -108,6 +123,7 @@ export class ConversationController {
     return this.conversationService.getSessionSummary(
       conversationId,
       profile?.id,
+      resolveConversationKey(req),
     );
   }
 
@@ -126,11 +142,33 @@ export class ConversationController {
   @Sse(":conversationId/events")
   streamSession(
     @Param("conversationId") conversationId: string,
+    @Req() req: Request,
   ): Observable<MessageEvent> {
-    return this.conversationService.streamSession(conversationId).pipe(
+    const conversationKey = resolveConversationKey(req);
+    return from(this.authService.resolveUserFromRequest(req)).pipe(
+      switchMap((profile) =>
+        from(
+          this.conversationService.getAccessibleSession(conversationId, {
+            userId: profile?.id,
+            conversationKey,
+            allowBootstrapMissingAccessKey: true,
+          }),
+        ),
+      ),
+      switchMap(() => this.conversationService.streamSession(conversationId)),
       map((session) => ({
         data: session,
       })),
     );
   }
 }
+
+const resolveConversationKey = (req: Request): string | undefined => {
+  const headerValue = req.headers["x-conversation-key"];
+  const headerKey = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const queryKey =
+    typeof req.query.conversationKey === "string"
+      ? req.query.conversationKey
+      : undefined;
+  return headerKey?.trim() || queryKey?.trim() || undefined;
+};

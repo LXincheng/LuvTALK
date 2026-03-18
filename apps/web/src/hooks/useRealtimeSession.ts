@@ -14,6 +14,7 @@ import {
 } from '../constants/realtime';
 import { getAccessToken } from '../services/authService';
 import { API_BASE_URL } from '../services/apiClient';
+import { getStoredConversationAccessKey } from '../services/conversationService';
 import { saveRealtimeTranscript } from '../services/realtimeService';
 import type {
   RealtimeErrorCode,
@@ -952,6 +953,10 @@ const buildRealtimeWsUrl = (params: {
   }
   if (params.accessToken) {
     url.searchParams.set('accessToken', params.accessToken);
+  }
+  const conversationKey = getStoredConversationAccessKey(params.conversationId);
+  if (conversationKey) {
+    url.searchParams.set('conversationKey', conversationKey);
   }
   return url.toString();
 };

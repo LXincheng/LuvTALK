@@ -23,22 +23,22 @@ export class VoiceOperationCacheService {
   private readonly ttlSeconds = 5 * 60;
   private readonly cache = new Map<string, VoiceOperationSnapshot>();
 
-  async getSnapshot(
+  getSnapshot(
     operationId: string,
   ): Promise<VoiceOperationSnapshot | undefined> {
     try {
-      return this.cache.get(this.buildKey(operationId));
+      return Promise.resolve(this.cache.get(this.buildKey(operationId)));
     } catch (error) {
       this.logger.warn(
         `Failed to read voice-op cache ${operationId}: ${
           (error as Error).message
         }`,
       );
-      return undefined;
+      return Promise.resolve(undefined);
     }
   }
 
-  async saveSnapshot(
+  saveSnapshot(
     snapshot: VoiceOperationSnapshot,
   ): Promise<VoiceOperationSnapshot> {
     try {
@@ -51,7 +51,7 @@ export class VoiceOperationCacheService {
         }`,
       );
     }
-    return snapshot;
+    return Promise.resolve(snapshot);
   }
 
   async mergeSnapshot(

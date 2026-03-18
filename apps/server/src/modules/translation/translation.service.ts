@@ -15,7 +15,17 @@ export class TranslationService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async translate(dto: CreateTranslationDto): Promise<TranslationRecord> {
+  async translate(
+    dto: CreateTranslationDto,
+    userId?: string,
+  ): Promise<TranslationRecord> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
+
     const translated = await this.performTranslation(
       dto.text,
       dto.sourceLanguage,
@@ -33,28 +43,92 @@ export class TranslationService {
       createdAt: new Date().toISOString(),
     };
 
-    this.history.unshift(record);
-    this.history.splice(8);
-
     if (this.prisma.canUseDatabase()) {
-      await this.prisma.translationRecord.create({
-        data: {
-          id: record.id,
-          sourceLanguage: record.sourceLanguage,
-          targetLanguage: record.targetLanguage,
-          sourceText: record.sourceText,
-          translatedText: record.translatedText,
-          romanization: record.romanization,
-          cultureNote: record.cultureNote,
-        },
-      });
+      try {
+        await this.prisma.translationRecord.create({
+          data: {
+            id: record.id,
+            sourceLanguage: record.sourceLanguage,
+            targetLanguage: record.targetLanguage,
+            sourceText: record.sourceText,
+            translatedText: record.translatedText,
+            romanization: record.romanization,
+            cultureNote: record.cultureNote,
+            userId,
+          },
+        });
+      } catch (error) {
+        if (this.isDatabaseConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Translation record persistence failed (P1001/P1002).",
+          );
+          this.prisma.ensurePersistentStorageAvailable();
+        }
+        throw error;
+      }
+    } else {
+      this.history.unshift(record);
+      this.history.splice(8);
     }
 
     return record;
   }
 
-  listHistory(): TranslationRecord[] {
-    return this.history;
+  async listHistory(userId?: string): Promise<TranslationRecord[]> {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
+
+    if (!userId) {
+      return [];
+    }
+
+    if (this.prisma.canUseDatabase()) {
+      try {
+        const records = await this.prisma.translationRecord.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          take: 8,
+        });
+        return records.map((record) => ({
+          id: record.id,
+          sourceLanguage: record.sourceLanguage as LanguageCode,
+          targetLanguage: record.targetLanguage as LanguageCode,
+          sourceText: record.sourceText,
+          translatedText: record.translatedText,
+          romanization: record.romanization ?? undefined,
+          cultureNote: record.cultureNote ?? undefined,
+          variations: [],
+          createdAt: record.createdAt.toISOString(),
+        }));
+      } catch (error) {
+        if (this.isDatabaseConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Translation history query failed (P1001/P1002).",
+          );
+          this.prisma.ensurePersistentStorageAvailable();
+        }
+        throw error;
+      }
+    }
+
+    return [];
+  }
+
+  private isDatabaseConnectionError(error: unknown): boolean {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+    ) {
+      const code = (error as { code: string }).code;
+      return code === "P1001" || code === "P1002";
+    }
+    return false;
   }
 
   private async performTranslation(

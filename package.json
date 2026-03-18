@@ -7,7 +7,11 @@
     "dev:server": "pnpm --filter server dev",
     "dev:web": "pnpm --filter web dev",
     "build": "turbo run build",
-    "lint": "turbo run lint"
+    "lint": "turbo run lint",
+    "verify": "node scripts/verify.js",
+    "verify:server": "node scripts/verify.js server",
+    "verify:web": "node scripts/verify.js web",
+    "db:check-sync": "node scripts/check-db-sync.js"
   },
   "devDependencies": {
     "turbo": "^2.6.1"

@@ -1,8 +1,10 @@
 import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
 import { TranslationController } from "./translation.controller";
 import { TranslationService } from "./translation.service";
 
 @Module({
+  imports: [AuthModule],
   controllers: [TranslationController],
   providers: [TranslationService],
   exports: [TranslationService],

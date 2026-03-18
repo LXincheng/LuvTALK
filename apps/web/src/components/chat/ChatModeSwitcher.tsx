@@ -1,7 +1,6 @@
 import { Mic, Type, Radio } from 'lucide-react';
 import { useLocale } from '../../providers/LocaleContext';
-
-export type ChatMode = 'voice' | 'text' | 'immersive';
+import type { ChatMode } from '../../types/chat';
 
 interface ChatModeSwitcherProps {
   mode: ChatMode;

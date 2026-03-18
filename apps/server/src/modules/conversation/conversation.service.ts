@@ -20,6 +20,7 @@ import {
 } from "../../common/types/ai-response.schema";
 import { PrismaService } from "../../core/prisma/prisma.service";
 import { SessionCacheService } from "../../common/cache/session-cache.service";
+import { AchievementService } from "../achievement/achievement.service";
 import { TranslationService } from "../translation/translation.service";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { StartConversationDto } from "./dto/start-conversation.dto";
@@ -112,6 +113,13 @@ interface RealtimeTranscriptEntry {
   timestamp?: string;
 }
 
+interface SessionAccessOptions {
+  userId?: string;
+  conversationKey?: string;
+  allowBootstrapMissingAccessKey?: boolean;
+  bindUserIfAuthenticated?: boolean;
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
@@ -130,6 +138,7 @@ export class ConversationService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly achievementService: AchievementService,
     private readonly translation: TranslationService,
     private readonly sessionCache: SessionCacheService,
   ) {}
@@ -138,6 +147,7 @@ export class ConversationService {
     dto: StartConversationDto,
     userId?: string,
   ): Promise<ConversationSession> {
+    this.prisma.ensurePersistentStorageAvailable();
     const now = new Date().toISOString();
     const scenarioId = dto.scenarioId ?? CONVERSATION_DEFAULTS.scenarioId;
     const nativeLanguage = dto.nativeLanguage ?? LanguageCode.Mandarin;
@@ -172,6 +182,7 @@ export class ConversationService {
       scenarioId,
       targetLanguage: dto.targetLanguage,
       nativeLanguage,
+      accessKey: this.createConversationAccessKey(),
       memoryEnabled: true,
       userId,
       title: this.buildConversationTitle(
@@ -194,14 +205,13 @@ export class ConversationService {
     conversationId: string,
     entries: RealtimeTranscriptEntry[],
     userId?: string,
+    conversationKey?: string,
   ): Promise<number> {
-    const session = await this.getSession(conversationId);
-    if (session.userId && (!userId || session.userId !== userId)) {
-      throw new NotFoundException("Conversation not found");
-    }
-    if (!session.userId && userId) {
-      session.userId = userId;
-    }
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
 
     const normalized = entries
       .map((entry) => ({
@@ -259,6 +269,7 @@ export class ConversationService {
   async resumeOrCreateSession(
     dto: StartConversationDto,
     userId?: string,
+    conversationKey?: string,
   ): Promise<ConversationSession> {
     // 1. Try to resume by userId + language (authenticated users)
     if (userId && this.prisma.canUseDatabase()) {
@@ -272,7 +283,12 @@ export class ConversationService {
           orderBy: { updatedAt: "desc" },
         });
         if (existing) {
-          return this.getSession(existing.id);
+          return this.getAccessibleSession(existing.id, {
+            userId,
+            conversationKey,
+            allowBootstrapMissingAccessKey: true,
+            bindUserIfAuthenticated: true,
+          });
         }
       } catch (error) {
         this.logger.warn(
@@ -284,18 +300,18 @@ export class ConversationService {
     // 2. Try to resume by conversationId (guest users via localStorage)
     if (dto.conversationId) {
       try {
-        const session = await this.getSession(dto.conversationId);
+        const session = await this.getAccessibleSession(dto.conversationId, {
+          userId,
+          conversationKey,
+          allowBootstrapMissingAccessKey: true,
+          bindUserIfAuthenticated: true,
+        });
         // Only resume if the target language matches the request
         if (session.targetLanguage !== dto.targetLanguage) {
           this.logger.log(
             `Language mismatch (session=${session.targetLanguage}, requested=${dto.targetLanguage}), creating new session.`,
           );
         } else {
-          // Bind to user if not already bound
-          if (!session.userId && userId) {
-            session.userId = userId;
-            await this.persistSession(session);
-          }
           return session;
         }
       } catch {
@@ -313,11 +329,13 @@ export class ConversationService {
   async archiveConversation(
     conversationId: string,
     userId?: string,
+    conversationKey?: string,
   ): Promise<void> {
-    const session = await this.getSession(conversationId);
-    if (session.userId && userId && session.userId !== userId) {
-      throw new NotFoundException("Conversation not found");
-    }
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
     session.status = "archived";
     await this.persistSession(session);
   }
@@ -326,11 +344,13 @@ export class ConversationService {
     conversationId: string,
     dto: UpdateConversationPreferencesDto,
     userId?: string,
+    conversationKey?: string,
   ): Promise<ConversationSession> {
-    const session = await this.getSession(conversationId);
-    if (session.userId && userId && session.userId !== userId) {
-      throw new NotFoundException("Conversation not found");
-    }
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
     if (typeof dto.memoryEnabled === "boolean") {
       session.memoryEnabled = dto.memoryEnabled;
     }
@@ -350,14 +370,13 @@ export class ConversationService {
     dto: SendMessageDto,
     options?: ProcessMessageOptions,
     userId?: string,
+    conversationKey?: string,
   ): Promise<ConversationSession> {
-    const session = await this.getSession(conversationId);
-    if (session.userId && userId && session.userId !== userId) {
-      throw new NotFoundException("Conversation not found");
-    }
-    if (!session.userId && userId) {
-      session.userId = userId;
-    }
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
     const trimmed = dto.message.trim();
     if (!trimmed) {
       return session;
@@ -392,6 +411,7 @@ export class ConversationService {
     this.broadcastSession(session);
 
     const interactionMode = this.resolveInteractionMode(
+      dto.mode,
       options?.userMessageMeta,
     );
     const rawAiPayload =
@@ -460,6 +480,7 @@ export class ConversationService {
         );
       });
 
+    this.achievementService.queueUserProgressSync(userId);
     return session;
   }
 
@@ -487,6 +508,7 @@ export class ConversationService {
         scenarioId: string;
         targetLanguage: string;
         nativeLanguage: string | null;
+        accessKey: string | null;
         messages: Prisma.JsonValue;
         score: number | null;
         title?: string | null;
@@ -517,6 +539,7 @@ export class ConversationService {
           targetLanguage: record.targetLanguage as LanguageCode,
           nativeLanguage:
             (record.nativeLanguage as LanguageCode) ?? LanguageCode.Mandarin,
+          accessKey: record.accessKey ?? undefined,
           userId: record.userId ?? undefined,
           title: record.title ?? undefined,
           status: record.status ?? "active",
@@ -540,6 +563,14 @@ export class ConversationService {
     }
 
     throw new NotFoundException(`Conversation ${conversationId} not found`);
+  }
+
+  async getAccessibleSession(
+    conversationId: string,
+    options: SessionAccessOptions = {},
+  ): Promise<ConversationSession> {
+    const session = await this.getSession(conversationId);
+    return this.authorizeSessionAccess(session, options);
   }
 
   streamSession(conversationId: string): Observable<ConversationSession> {
@@ -1266,7 +1297,7 @@ export class ConversationService {
     const rawReply = payload.reply.trim();
     const alreadyStructured =
       /(\n|^)\s*(学习建议|Study Steps)[:：]/i.test(rawReply) ||
-      /(\n|^)\s*1[\).]/.test(rawReply);
+      /(\n|^)\s*1[).]/.test(rawReply);
     if (alreadyStructured) {
       return rawReply;
     }
@@ -1458,15 +1489,92 @@ export class ConversationService {
   }
 
   private resolveInteractionMode(
+    requestedMode?: TutorInteractionMode,
     messageMeta?: ConversationMessage["meta"],
   ): TutorInteractionMode {
+    if (requestedMode) {
+      return requestedMode;
+    }
     if (messageMeta?.audioUrl || messageMeta?.source === "realtime") {
       return "voice";
     }
     return "text";
   }
 
+  private createConversationAccessKey(): string {
+    return randomUUID().replace(/-/g, "");
+  }
+
+  private normalizeConversationAccessKey(
+    conversationKey?: string,
+  ): string | undefined {
+    const normalized = conversationKey?.trim();
+    return normalized ? normalized : undefined;
+  }
+
+  private ensureConversationAccessKey(session: ConversationSession): boolean {
+    if (session.accessKey?.trim()) {
+      return false;
+    }
+    session.accessKey = this.createConversationAccessKey();
+    return true;
+  }
+
+  private hasMatchingConversationAccessKey(
+    session: ConversationSession,
+    conversationKey?: string,
+  ): boolean {
+    const normalized = this.normalizeConversationAccessKey(conversationKey);
+    return Boolean(
+      normalized &&
+        session.accessKey?.trim() &&
+        normalized === session.accessKey,
+    );
+  }
+
+  private async authorizeSessionAccess(
+    session: ConversationSession,
+    options: SessionAccessOptions,
+  ): Promise<ConversationSession> {
+    const generatedAccessKey = this.ensureConversationAccessKey(session);
+    const hasMatchingKey = this.hasMatchingConversationAccessKey(
+      session,
+      options.conversationKey,
+    );
+    const shouldBindUser =
+      Boolean(options.bindUserIfAuthenticated) &&
+      Boolean(options.userId) &&
+      !session.userId;
+
+    if (session.userId) {
+      const hasUserAccess =
+        Boolean(options.userId) && session.userId === options.userId;
+      if (!hasUserAccess && !hasMatchingKey) {
+        throw new NotFoundException("Conversation not found");
+      }
+      if (generatedAccessKey) {
+        await this.persistSession(session);
+      }
+      return session;
+    }
+
+    const allowBootstrapAccess =
+      Boolean(options.allowBootstrapMissingAccessKey) && generatedAccessKey;
+    if (!hasMatchingKey && !allowBootstrapAccess) {
+      throw new NotFoundException("Conversation not found");
+    }
+
+    if (shouldBindUser) {
+      session.userId = options.userId;
+    }
+    if (generatedAccessKey || shouldBindUser) {
+      await this.persistSession(session);
+    }
+    return session;
+  }
+
   private async persistSession(session: ConversationSession): Promise<void> {
+    this.prisma.ensurePersistentStorageAvailable();
     this.sessions.set(session.id, session);
     await this.sessionCache.setSession(session);
 
@@ -1495,6 +1603,12 @@ export class ConversationService {
   async listByIds(ids: string[], limit = 20) {
     if (!ids.length) {
       return [];
+    }
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
     }
     const safeIds = ids.slice(0, limit);
 
@@ -1532,6 +1646,9 @@ export class ConversationService {
           this.prisma.markDatabaseUnavailable(
             "Database connection lost (P1001/P1002).",
           );
+          if (!this.prisma.allowsInMemoryFallback()) {
+            this.prisma.ensurePersistentStorageAvailable();
+          }
         } else {
           this.logger.warn(`listByIds failed: ${(error as Error).message}`);
         }
@@ -1542,6 +1659,9 @@ export class ConversationService {
     }
 
     // Fallback: resolve from in-memory cache
+    if (!this.prisma.allowsInMemoryFallback()) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     const idSet = new Set(safeIds);
     const cached = Array.from(this.sessions.values())
       .filter((s) => idSet.has(s.id))
@@ -1565,6 +1685,12 @@ export class ConversationService {
   }
 
   async listUserHistory(userId: string, limit = 20) {
+    if (
+      !this.prisma.canUseDatabase() &&
+      !this.prisma.allowsInMemoryFallback()
+    ) {
+      this.prisma.ensurePersistentStorageAvailable();
+    }
     if (!this.prisma.canUseDatabase()) {
       return [];
     }
@@ -1601,6 +1727,9 @@ export class ConversationService {
         this.prisma.markDatabaseUnavailable(
           "Database connection lost (P1001/P1002).",
         );
+        if (!this.prisma.allowsInMemoryFallback()) {
+          this.prisma.ensurePersistentStorageAvailable();
+        }
         return [];
       }
       if (this.isMissingUserColumnError(error)) {
@@ -1644,21 +1773,22 @@ export class ConversationService {
     conversationId: string,
     userId: string,
   ): Promise<ConversationSession> {
-    const session = await this.getSession(conversationId);
-    if (session.userId !== userId) {
-      throw new NotFoundException("Conversation not found");
-    }
-    return session;
+    return this.getAccessibleSession(conversationId, {
+      userId,
+      allowBootstrapMissingAccessKey: true,
+    });
   }
 
   async getSessionSummary(
     conversationId: string,
     userId?: string,
+    conversationKey?: string,
   ): Promise<SessionSummaryPayload> {
-    const session = await this.getSession(conversationId);
-    if (session.userId && userId && session.userId !== userId) {
-      throw new NotFoundException("Conversation not found");
-    }
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      allowBootstrapMissingAccessKey: true,
+    });
     return buildSessionSummary({
       conversationId: session.id,
       createdAt: session.createdAt,
@@ -1693,6 +1823,7 @@ export class ConversationService {
       scenarioId: session.scenarioId,
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage,
+      accessKey: session.accessKey,
       messages: session.messages as unknown as Prisma.JsonArray,
       score: session.coach?.overallScore,
       title: session.title,

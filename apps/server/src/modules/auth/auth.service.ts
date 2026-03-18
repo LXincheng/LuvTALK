@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, Req } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { Request } from "express";
 import { PrismaService } from "../../core/prisma/prisma.service";

@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,11 +21,5 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Lint server
-        run: pnpm --filter server lint
-      - name: Build server
-        run: pnpm --filter server build
-      - name: Lint web
-        run: pnpm --filter web lint
-      - name: Build web
-        run: pnpm --filter web build
+      - name: Verify Monorepo
+        run: pnpm verify
