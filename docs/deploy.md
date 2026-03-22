@@ -13,9 +13,9 @@
 | ---- | ------------------ | ------------------------------------------------------------------ | -------------------------------------------------------- |
 | 1    | 配置生产环境变量   | 在 Railway / Vercel / 其他平台填好后端、前端、数据库、AI、鉴权变量 | 服务可正常启动，不出现缺失环境变量错误                   |
 | 2    | 关闭业务内存回退   | 后端生产环境必须设置 `ALLOW_IN_MEMORY_FALLBACK=false`              | 数据库异常时不会出现“接口看起来成功、实际没写入”的假成功 |
-| 3    | 确认数据库连接方式 | `DATABASE_URL` 用运行时稳定连接；`DIRECT_URL` 用 Prisma 迁移连接   | `pnpm db:check-sync` 能跑通                              |
-| 4    | 执行远端迁移检查   | 在准备上线的环境执行 `pnpm db:check-sync`                          | 不出现 migration 历史不一致、连接失败、schema 漂移       |
-| 5    | 执行构建与验证     | 本地或 CI 执行 `pnpm verify`                                       | server / web 的 lint、类型、测试、构建全部通过           |
+| 3    | 确认数据库连接方式 | `DATABASE_URL` 用运行时稳定连接；`DIRECT_URL` 用 Prisma 迁移连接   | `pnpm --filter server prisma:migrate:status` 能跑通      |
+| 4    | 执行远端迁移检查   | 在准备上线的环境执行 `pnpm --filter server prisma:migrate:status`  | 不出现 migration 历史不一致、连接失败、schema 漂移       |
+| 5    | 执行构建与验证     | 本地或 CI 分别执行 server / web 校验命令                           | server / web 的 lint、类型、测试、构建全部通过           |
 | 6    | 部署后端           | 发布 `apps/server`                                                 | 服务启动成功，健康接口正常                               |
 | 7    | 部署前端           | 发布 `apps/web`，并确认代理地址指向正确后端                        | 页面能正常访问 API，不出现跨域或 404                     |
 | 8    | 做真实账号冒烟     | 用真实登录用户跑一轮核心功能                                       | 文本、语音、收藏、复习、成就、历史会话都正常             |
@@ -47,7 +47,7 @@
 | -------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
 | `DATABASE_URL` | 优先使用当前环境最稳定的运行时连接 | 如果 `:6543` transaction pooler 有抖动，可直接改用 `*.pooler.supabase.com:5432` |
 | `DIRECT_URL`   | 用于 Prisma migration 的连接       | 不要把 `:6543` transaction pooler 用作迁移连接                                  |
-| 迁移校验       | `pnpm db:check-sync`               | 用来确认 migration 历史和 schema 没漂移                                         |
+| 迁移校验       | `pnpm --filter server prisma:migrate:status` | 用来确认 migration 历史和 schema 没漂移                               |
 
 > 当前项目在这台机器上的实测结论：  
 > `aws-1-ap-south-1.pooler.supabase.com:5432` 比 `:6543` 更稳定，适合作为当前环境的运行时和迁移连接。  
@@ -57,8 +57,8 @@
 
 | 类别       | 检查项                                        | 期望结果                                    |
 | ---------- | --------------------------------------------- | ------------------------------------------- |
-| 数据库     | `pnpm db:check-sync` 通过                     | 本地 schema、migration 历史、远端库结构一致 |
-| 构建       | `pnpm verify` 通过                            | 不带病上线                                  |
+| 数据库     | `pnpm --filter server prisma:migrate:status` 通过 | 本地 schema、migration 历史、远端库结构一致 |
+| 构建       | `pnpm --filter server lint:check && pnpm --filter server build && pnpm --filter server test && pnpm --filter web lint && pnpm --filter web exec tsc -b && pnpm --filter web exec vite build` 通过 | 不带病上线 |
 | 安全       | `ALLOW_IN_MEMORY_FALLBACK=false`              | 没有假成功写入                              |
 | 会话安全   | 匿名会话访问需要 `accessKey`                  | 未授权用户无法访问他人会话、媒体、TTS       |
 | AI 配置    | 主模型、备用模型、STT、TTS、Realtime 均已配置 | 不会出现部分链路能用、部分链路缺配置        |

@@ -162,8 +162,10 @@ type UserProgressMetrics = Record<AchievementMetricKey, number> & {
 export class AchievementService {
   private readonly logger = new Logger(AchievementService.name);
   private readonly syncTimers = new Map<string, NodeJS.Timeout>();
+  private static readonly SEED_RETRY_COOLDOWN_MS = 30_000;
   private seedReady = false;
   private seedPromise?: Promise<void>;
+  private seedRetryNotBefore = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -421,18 +423,22 @@ export class AchievementService {
     }
     try {
       await this.ensureSeedData();
-      const [definitions, metrics, achievements, levelRows] = await Promise.all(
-        [
-          this.getAchievementDefinitions(),
-          this.collectUserMetrics(userId),
-          this.prisma.achievement.findMany({
-            select: { id: true, code: true },
-          }),
-          this.prisma.levelDefinition.findMany({
-            select: { id: true, level: true, minXp: true },
-          }),
-        ],
-      );
+      if (!this.prisma.canUseDatabase()) {
+        return;
+      }
+      const definitions = await this.getAchievementDefinitions();
+      if (!this.prisma.canUseDatabase()) {
+        return;
+      }
+      const [metrics, achievements, levelRows] = await Promise.all([
+        this.collectUserMetrics(userId),
+        this.prisma.achievement.findMany({
+          select: { id: true, code: true },
+        }),
+        this.prisma.levelDefinition.findMany({
+          select: { id: true, level: true, minXp: true },
+        }),
+      ]);
       const achievementIdByCode = new Map(
         achievements.map((item) => [item.code, item.id] as const),
       );
@@ -507,19 +513,40 @@ export class AchievementService {
     if (this.seedReady) {
       return;
     }
+    if (Date.now() < this.seedRetryNotBefore) {
+      return;
+    }
     if (!this.seedPromise) {
-      this.seedPromise = this.seedDefinitions();
+      this.seedPromise = this.seedDefinitionsIfNeeded();
     }
     try {
       await this.seedPromise;
       this.seedReady = true;
+      this.seedRetryNotBefore = 0;
     } catch (error) {
       this.seedPromise = undefined;
       if (this.handleDatabaseConnectionError(error, "ensureSeedData")) {
+        this.seedRetryNotBefore =
+          Date.now() + AchievementService.SEED_RETRY_COOLDOWN_MS;
         return;
       }
       throw error;
     }
+  }
+
+  private async seedDefinitionsIfNeeded(): Promise<void> {
+    const [achievementCount, levelCount] = await Promise.all([
+      this.prisma.achievement.count(),
+      this.prisma.levelDefinition.count(),
+    ]);
+
+    const hasAchievementSeed = achievementCount >= ACHIEVEMENT_SEED.length;
+    const hasLevelSeed = levelCount >= LEVEL_SEED.length;
+    if (hasAchievementSeed && hasLevelSeed) {
+      return;
+    }
+
+    await this.seedDefinitions();
   }
 
   private async seedDefinitions(): Promise<void> {
@@ -579,9 +606,10 @@ export class AchievementService {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       (error.code === "P1001" || error.code === "P1002")
     ) {
+      const summary = error.message.split("\n").find(Boolean)?.trim();
       this.logger.warn(
-        `Achievement service fallback in ${context}: ${error.code} ${
-          error.message
+        `Achievement service fallback in ${context}: ${error.code}${
+          summary ? ` ${summary}` : ""
         }`,
       );
       this.prisma.markDatabaseUnavailable(

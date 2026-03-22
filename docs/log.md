@@ -379,9 +379,9 @@
 | 维度     | 记录                                                                                                                                                                            |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 问题点   | 原 CI 直接执行 `server lint --fix`，不适合作为稳定发布门禁；本地缺少统一、可复现的校验入口。                                                                                    |
-| 修复点   | 新增根脚本 `pnpm verify`、`pnpm verify:server`、`pnpm verify:web`；server 增加 `lint:check`、`prisma:validate`、`prisma:migrate:deploy/status`；CI 改为统一执行 `pnpm verify`。 |
-| 配套脚本 | 新增 `scripts/verify.js` 与 `scripts/check-db-sync.js`，分别用于跨平台门禁校验与数据库链路一致性检查。                                                                          |
-| 验证结果 | `pnpm verify` 通过；server lint/build/test 与 web lint/typecheck/build 可由同一脚本稳定复现。                                                                                   |
+| 修复点   | 收敛发布门禁命令，补齐 server 侧 `lint:check`、`prisma:validate`、`prisma:migrate:deploy/status`，并统一 server / web 的校验执行口径。 |
+| 配套说明 | 当时曾引入过根级脚本包装层以统一校验入口；后续已在 2026-03-22 清理，当前以各包直接命令为准。 |
+| 验证结果 | server lint/build/test 与 web lint/typecheck/build 均可稳定复现。 |
 | 价值点   | 发布门禁从“零散命令”收敛为“统一脚本”，减少本地与 CI 行为偏差。                                                                                                                  |
 
 ### 2026-03-17（DB-02：高频查询索引与翻译历史隔离）
@@ -411,8 +411,8 @@
 | 执行动作 | 按“清空重建”方案执行：通过 Supavisor session mode `:5432` 连接远端 Supabase，清空 `public` schema 后重新应用当前全部 Prisma migration。                                                                                                      |
 | 连接决策 | 当前工作站无法直连 Supabase IPv6 direct host，因此迁移与状态检查统一使用 `aws-1-ap-south-1.pooler.supabase.com:5432` session mode；运行时 `DATABASE_URL` 仍保留 transaction pooler `:6543`。                                                 |
 | 迁移补齐 | 新增 migration `202603181215_remove_updated_at_defaults`，移除 `LearningGoal`、`LearningActivityDaily`、`ReviewQueueItem`、`UserAchievement`、`UserLevel` 的 `updatedAt DEFAULT CURRENT_TIMESTAMP`，收敛 Prisma schema 与 migration 链差异。 |
-| 脚本修正 | `scripts/check-db-sync.js` 改为在 `apps/server` 下直接执行 `pnpm exec prisma migrate status`，并使用 `DIRECT_URL` 作为校验连接，避免根目录 `filter run` + runtime pooler 造成的误报。                                                        |
-| 验证结果 | `pnpm db:check-sync` 通过；`prisma migrate diff --from-url ... --to-schema-datamodel prisma/schema.prisma --script` 返回空 migration；`pnpm verify` 通过。                                                                                   |
+| 脚本修正 | 迁移状态检查统一收敛到 server 包内的 Prisma 命令，并使用稳定的 `DIRECT_URL` 作为校验连接，避免根级包装层带来的误报。 |
+| 验证结果 | Prisma migration 状态检查通过；`prisma migrate diff --from-url ... --to-schema-datamodel prisma/schema.prisma --script` 返回空 migration；构建与校验链路通过。 |
 | 当前结论 | 远端 Supabase 已与本地 Prisma schema / migration 历史对齐，具备上线前数据库一致性前提；后续只需补做真实账号写链路冒烟与生产环境变量核对。                                                                                                    |
 
 ### 2026-03-18（回退：移除 Learning Lab 翻译/文化入口）
@@ -451,7 +451,23 @@
 | 修复点 | 为 `PrismaService` 增加后台自动重连：断连后按退避间隔调度重连，重连成功后恢复 `databaseReady=true`，不再要求人工重启服务才能恢复真实数据库读写。                         |
 | 价值点 | 将“偶发网络抖动”从永久降级问题收敛为短时降级问题，减少成就、复习、会话等模块因瞬时断连长期停留在 fallback 状态。                                                         |
 
-### 2026-03-18（增强：新增数据库健康接口，便于判断是否处于降级或重连中）
+### 2026-03-22（收敛：统一 `.env` 权威来源，移除 `apps/server/.env` 覆盖风险）
+
+| 维度     | 记录                                                                                                                                                                                                           |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点   | 项目同时存在根目录 `.env` 与 `apps/server/.env`，Nest 运行时与 Prisma CLI 可能读取到不同数据库连接，出现“根目录已改成 `:5432`，实际 Prisma 仍连 `:6543`”的配置漂移。                                           |
+| 修复点   | 删除 `apps/server/.env`，新增 `scripts/run-prisma.js` 统一从仓库根目录 `.env` 加载环境变量，并让 `apps/server/package.json` 中全部 Prisma 命令通过该包装脚本执行。                                             |
+| 文档同步 | `.env.example` 明确声明“仅维护仓库根目录 `.env`”，禁止在 `apps/server/.env`、`apps/web/.env` 下再复制同名变量。                                                                                                |
+| 验证结果 | 仓库内非 `node_modules` 的 env 文件现仅剩根目录 `.env` 与 `.env.example`；`pnpm --filter server prisma:validate`、`pnpm --filter server prisma:migrate:status` 通过；`/api/health/db` 返回 `connected: true`。 |
+
+### 2026-03-22（清理：删除非运行必需的脚本包装层）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 根目录 `scripts/verify.js`、`scripts/check-db-sync.js` 仅用于聚合校验与预检包装，不属于开发启动、部署启动或运行时必需脚本，维护成本高于价值。 |
+| 清理点 | 删除 `scripts/verify.js`、`scripts/check-db-sync.js` 及根 `package.json` 中对应 `verify`、`verify:server`、`verify:web`、`db:check-sync` 入口。 |
+| 保留项 | 保留 `scripts/dev.js` 作为开发启动入口，保留 `scripts/run-prisma.js` 作为 Prisma 统一加载根目录 `.env` 的必要脚本。 |
+| 文档同步 | `docs/deploy.md` 改为直接使用现存命令：`pnpm --filter server prisma:migrate:status` 以及 server / web 各自的 lint、build、test、typecheck 命令。 |
 
 | 维度     | 记录                                                                                                                                         |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
