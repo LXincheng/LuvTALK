@@ -18,14 +18,23 @@ createRoot(document.getElementById('root')!).render(
             <Toaster
               position="top-center"
               visibleToasts={2}
+              expand={false}
+              gap={12}
+              offset={20}
               toastOptions={{
-                duration: 3500,
+                duration: 4200,
                 style: {
-                  background: 'var(--glass-bg-heavy)',
-                  border: '1px solid var(--glass-border)',
+                  background: 'var(--toast-bg)',
+                  border: '1px solid var(--toast-border)',
                   color: 'var(--color-label)',
-                  backdropFilter: 'blur(var(--glass-blur))',
+                  backdropFilter: 'blur(24px)',
+                  WebkitBackdropFilter: 'blur(24px)',
+                  borderRadius: '20px',
+                  boxShadow: '0 24px 54px rgba(15, 23, 42, 0.12)',
                   fontSize: '13px',
+                  padding: '14px 16px',
+                  maxWidth: '380px',
+                  lineHeight: '1.5',
                 },
               }}
             />

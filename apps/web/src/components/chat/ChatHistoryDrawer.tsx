@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { X, Plus, MessageCircle } from 'lucide-react';
 import { useLocale } from '../../providers/LocaleContext';
+import type { LocaleKey } from '../../providers/LocaleContext';
 import type { ConversationHistorySummary } from '../../types/api';
 
 interface ChatHistoryDrawerProps {
@@ -13,20 +14,20 @@ interface ChatHistoryDrawerProps {
   isLoading: boolean;
 }
 
-function formatRelativeTime(dateStr: string, locale: string): string {
+function formatRelativeTime(dateStr: string, locale: string, t: (key: LocaleKey) => string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diffMs = now - then;
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return locale === 'zh' ? '刚刚' : 'Just now';
+  if (diffMin < 1) return t('timeJustNow');
   if (diffMin < 60)
-    return locale === 'zh' ? `${diffMin} 分钟前` : `${diffMin}m ago`;
+    return t('timeMinutesAgo').replace('{n}', String(diffMin));
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24)
-    return locale === 'zh' ? `${diffHr} 小时前` : `${diffHr}h ago`;
+    return t('timeHoursAgo').replace('{n}', String(diffHr));
   const diffDay = Math.floor(diffHr / 24);
   if (diffDay < 30)
-    return locale === 'zh' ? `${diffDay} 天前` : `${diffDay}d ago`;
+    return t('timeDaysAgo').replace('{n}', String(diffDay));
   return new Date(dateStr).toLocaleDateString(
     locale === 'zh' ? 'zh-CN' : 'en-US',
     { month: 'short', day: 'numeric' },
@@ -126,11 +127,11 @@ export default function ChatHistoryDrawer({
                     </p>
                     <div className="flex items-center justify-between mt-1.5">
                       <span className="text-xs text-label-tertiary">
-                        {formatRelativeTime(conv.updatedAt, locale)}
+                        {formatRelativeTime(conv.updatedAt, locale, t)}
                       </span>
                       {conv.messageCount != null && (
                         <span className="text-xs text-label-tertiary">
-                          {conv.messageCount} {locale === 'zh' ? '条' : 'msgs'}
+                          {conv.messageCount} {t('messageCountUnit')}
                         </span>
                       )}
                     </div>

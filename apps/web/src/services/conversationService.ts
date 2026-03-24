@@ -1,6 +1,8 @@
 import { apiClient } from './apiClient';
 import type {
   ConversationHistorySummary,
+  ConversationReportHistoryItem,
+  ConversationReportPayload,
   ConversationSession,
   LanguageCode,
   SessionSummaryPayload,
@@ -20,6 +22,7 @@ export interface ResumeConversationPayload extends StartConversationPayload {
 }
 
 const CONVERSATION_ACCESS_KEYS_STORAGE_KEY = 'conversationAccessKeys';
+const CONVERSATION_REPORT_CACHE_KEY = 'conversationReportsCache';
 
 const readStoredConversationAccessKeys = (): Record<string, string> => {
   if (typeof window === 'undefined') {
@@ -48,6 +51,76 @@ const writeStoredConversationAccessKeys = (value: Record<string, string>) => {
     JSON.stringify(value),
   );
 };
+
+const readCachedReports = (): ConversationReportPayload[] => {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(CONVERSATION_REPORT_CACHE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as ConversationReportPayload[] : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeCachedReports = (reports: ConversationReportPayload[]) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(
+    CONVERSATION_REPORT_CACHE_KEY,
+    JSON.stringify(reports),
+  );
+};
+
+const toReportHistoryItem = (
+  report: ConversationReportPayload,
+): ConversationReportHistoryItem => ({
+  id: report.id,
+  conversationId: report.conversationId,
+  createdAt: report.createdAt,
+  updatedAt: report.updatedAt,
+  targetLanguage: report.targetLanguage,
+  nativeLanguage: report.nativeLanguage,
+  sourceMode: report.sourceMode,
+  voiceStyle: report.voiceStyle,
+  reportLanguage: report.reportLanguage,
+  headline: report.report.headline,
+  overallSummary: report.report.overallSummary,
+  averageScore: report.metrics.averageScore,
+  durationMinutes: report.metrics.durationMinutes,
+});
+
+export const cacheConversationReport = (report: ConversationReportPayload) => {
+  const existing = readCachedReports().filter(
+    (item) =>
+      item.id !== report.id && item.conversationId !== report.conversationId,
+  );
+  existing.unshift(report);
+  existing.sort(
+    (a, b) =>
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+  writeCachedReports(existing.slice(0, 10));
+};
+
+const getCachedConversationReport = (
+  conversationId: string,
+): ConversationReportPayload | null =>
+  readCachedReports().find((item) => item.conversationId === conversationId) ?? null;
+
+const getCachedConversationReportById = (
+  reportId: string,
+): ConversationReportPayload | null =>
+  readCachedReports().find((item) => item.id === reportId) ?? null;
+
+const getCachedConversationReportHistory = (): ConversationReportHistoryItem[] =>
+  readCachedReports().map(toReportHistoryItem);
 
 export const getStoredConversationAccessKey = (
   conversationId: string,
@@ -120,11 +193,82 @@ export function fetchConversationById(conversationId: string) {
   );
 }
 
-export function fetchConversationSummary(conversationId: string) {
+export function fetchConversationSummary(conversationId: string, locale?: string) {
+  const params = locale ? `?locale=${locale}` : '';
   return apiClient.get<SessionSummaryPayload>(
-    `/conversation/${conversationId}/summary`,
+    `/conversation/${conversationId}/summary${params}`,
     { headers: buildConversationAccessHeaders(conversationId) },
   );
+}
+
+export function fetchConversationReport(conversationId: string) {
+  return apiClient.get<ConversationReportPayload | null>(
+    `/conversation/${conversationId}/report`,
+    { headers: buildConversationAccessHeaders(conversationId) },
+  )
+    .then((payload) => {
+      if (payload) {
+        cacheConversationReport(payload);
+      }
+      return payload;
+    })
+    .catch(() => getCachedConversationReport(conversationId));
+}
+
+export function generateConversationReport(
+  conversationId: string,
+  payload: {
+    sourceMode?: 'immersive' | 'voice' | 'text';
+    voiceStyle?: string;
+    force?: boolean;
+  } = {},
+) {
+  return apiClient.postWithOptions<
+    ConversationReportPayload,
+    {
+      sourceMode?: 'immersive' | 'voice' | 'text';
+      voiceStyle?: string;
+      force?: boolean;
+    }
+  >(
+    `/conversation/${conversationId}/report`,
+    payload,
+    { headers: buildConversationAccessHeaders(conversationId) },
+  ).then((report) => {
+    cacheConversationReport(report);
+    return report;
+  });
+}
+
+export function fetchConversationReportHistory() {
+  return apiClient.get<ConversationReportHistoryItem[]>(
+    '/conversation/reports/history',
+  )
+    .then((payload) => {
+      const cached = getCachedConversationReportHistory();
+      if (!payload.length && cached.length) {
+        return cached;
+      }
+      return payload;
+    })
+    .catch(() => getCachedConversationReportHistory());
+}
+
+export function fetchConversationReportById(reportId: string) {
+  return apiClient.get<ConversationReportPayload>(
+    `/conversation/reports/${reportId}`,
+  )
+    .then((payload) => {
+      cacheConversationReport(payload);
+      return payload;
+    })
+    .catch(() => {
+      const cached = getCachedConversationReportById(reportId);
+      if (!cached) {
+        throw new Error('report_not_found');
+      }
+      return cached;
+    });
 }
 
 export function archiveConversation(conversationId: string) {

@@ -1,117 +1,192 @@
-# 上线清单
+# LuvTALK 部署教程
 
-> 这份文档只回答两件事：
->
-> 1. 上线前你要做哪些操作。
-> 2. 上线前你要检查什么。
->
-> 当前结论：项目已经具备上线前提，但上线前仍必须完成一次生产环境变量核对、一次数据库迁移校验、一次真实账号冒烟。
+> 本文档帮助你将 LuvTALK 部署到生产环境。
+> 架构：前端（Vercel） + 后端（Railway） + 数据库（Supabase PostgreSQL）
 
-## 1. 上线前要做的操作
+## 一分钟速览
 
-| 顺序 | 要做什么           | 具体操作                                                           | 通过标准                                                 |
-| ---- | ------------------ | ------------------------------------------------------------------ | -------------------------------------------------------- |
-| 1    | 配置生产环境变量   | 在 Railway / Vercel / 其他平台填好后端、前端、数据库、AI、鉴权变量 | 服务可正常启动，不出现缺失环境变量错误                   |
-| 2    | 关闭业务内存回退   | 后端生产环境必须设置 `ALLOW_IN_MEMORY_FALLBACK=false`              | 数据库异常时不会出现“接口看起来成功、实际没写入”的假成功 |
-| 3    | 确认数据库连接方式 | `DATABASE_URL` 用运行时稳定连接；`DIRECT_URL` 用 Prisma 迁移连接   | `pnpm --filter server prisma:migrate:status` 能跑通      |
-| 4    | 执行远端迁移检查   | 在准备上线的环境执行 `pnpm --filter server prisma:migrate:status`  | 不出现 migration 历史不一致、连接失败、schema 漂移       |
-| 5    | 执行构建与验证     | 本地或 CI 分别执行 server / web 校验命令                           | server / web 的 lint、类型、测试、构建全部通过           |
-| 6    | 部署后端           | 发布 `apps/server`                                                 | 服务启动成功，健康接口正常                               |
-| 7    | 部署前端           | 发布 `apps/web`，并确认代理地址指向正确后端                        | 页面能正常访问 API，不出现跨域或 404                     |
-| 8    | 做真实账号冒烟     | 用真实登录用户跑一轮核心功能                                       | 文本、语音、收藏、复习、成就、历史会话都正常             |
-| 9    | 检查健康接口       | 访问 `/api/health` 与 `/api/health/db`                             | 接口可访问，数据库状态与当前实际情况一致                 |
+```
+┌─────────────┐      ┌─────────────────┐      ┌──────────────┐
+│  Vercel      │─────▶│  Railway         │─────▶│  Supabase    │
+│  (前端 SPA)  │ API  │  (NestJS 后端)   │  SQL │  (PostgreSQL)│
+│  apps/web    │ 代理 │  apps/server     │      │              │
+└─────────────┘      └─────────────────┘      └──────────────┘
+```
 
-## 2. 必填环境变量
+**部署顺序**：① 数据库就绪 → ② 部署后端 → ③ 部署前端 → ④ 冒烟测试
 
-### 后端
+---
 
-| 分类          | 变量                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Runtime       | `NODE_ENV=production`、`PORT`、`ALLOW_IN_MEMORY_FALLBACK=false`                                                    |
-| Database      | `DATABASE_URL`、`DIRECT_URL`                                                                                       |
-| Primary AI    | `PRIMARY_API_URL`、`PRIMARY_AUDIO_API_URL`、`PRIMARY_REALTIME_API_URL`、`PRIMARY_API_KEY`                          |
-| Secondary AI  | `SECONDARY_API_URL`、`SECONDARY_API_KEY`                                                                           |
-| Model Routing | `PRIMARY_MODEL`、`SECONDARY_MODEL`、`THIRD_MODEL`、`STT_MODEL`、`TTS_MODEL`、`REALTIME_MODEL`、`TRANSLATION_MODEL` |
-| Auth          | `JWT_SECRET`、`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`                                                           |
+## 1. 前置条件
 
-### 前端
+- [Supabase](https://supabase.com) 项目已创建，PostgreSQL 可用
+- [Railway](https://railway.app) 账号已注册
+- [Vercel](https://vercel.com) 账号已注册
+- 本仓库已推送到 GitHub
 
-| 分类     | 变量                                          |
-| -------- | --------------------------------------------- |
-| API      | `VITE_API_URL`、`VITE_PROXY_API`              |
-| Supabase | `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY` |
+---
 
-## 3. 数据库连接要求
+## 2. 数据库配置
 
-| 用途           | 推荐配置                           | 说明                                                                            |
-| -------------- | ---------------------------------- | ------------------------------------------------------------------------------- |
-| `DATABASE_URL` | 优先使用当前环境最稳定的运行时连接 | 如果 `:6543` transaction pooler 有抖动，可直接改用 `*.pooler.supabase.com:5432` |
-| `DIRECT_URL`   | 用于 Prisma migration 的连接       | 不要把 `:6543` transaction pooler 用作迁移连接                                  |
-| 迁移校验       | `pnpm --filter server prisma:migrate:status` | 用来确认 migration 历史和 schema 没漂移                               |
+1. 在 Supabase 项目设置中获取数据库连接字符串
+2. 推荐配置：
+   - `DATABASE_URL`：使用 Session Mode pooler（`:5432`），运行时稳定
+   - `DIRECT_URL`：使用 Session Mode pooler（`:5432`）或 Direct 连接，供 Prisma 迁移
+3. 验证迁移状态：
+   ```bash
+   pnpm --filter server prisma:migrate:status
+   ```
+4. 首次部署需要执行迁移：
+   ```bash
+   pnpm --filter server prisma:migrate:deploy
+   ```
 
-> 当前项目在这台机器上的实测结论：  
-> `aws-1-ap-south-1.pooler.supabase.com:5432` 比 `:6543` 更稳定，适合作为当前环境的运行时和迁移连接。  
-> 如果你的部署环境对 Supabase direct host 可稳定访问，也可以让 `DIRECT_URL` 走 direct 连接。
+---
 
-## 4. 上线前必须检查
+## 3. 部署后端（Railway）
 
-| 类别       | 检查项                                        | 期望结果                                    |
-| ---------- | --------------------------------------------- | ------------------------------------------- |
-| 数据库     | `pnpm --filter server prisma:migrate:status` 通过 | 本地 schema、migration 历史、远端库结构一致 |
-| 构建       | `pnpm --filter server lint:check && pnpm --filter server build && pnpm --filter server test && pnpm --filter web lint && pnpm --filter web exec tsc -b && pnpm --filter web exec vite build` 通过 | 不带病上线 |
-| 安全       | `ALLOW_IN_MEMORY_FALLBACK=false`              | 没有假成功写入                              |
-| 会话安全   | 匿名会话访问需要 `accessKey`                  | 未授权用户无法访问他人会话、媒体、TTS       |
-| AI 配置    | 主模型、备用模型、STT、TTS、Realtime 均已配置 | 不会出现部分链路能用、部分链路缺配置        |
-| 前后端联通 | 前端 API 代理正确                             | 页面请求不会打错域名或端口                  |
-| 数据一致性 | Supabase 远端与当前 Prisma schema 一致        | 上线后不会出现写入失败或字段不匹配          |
-| 健康接口   | `/api/health`、`/api/health/db` 可正常返回    | 可快速判断是否处于数据库降级或自动重连阶段  |
+### 步骤
 
-## 5. 上线前建议的冒烟顺序
+1. 在 Railway 创建新项目 → **Deploy from GitHub repo**
+2. 选择本仓库
+3. 配置构建：
+   - **Dockerfile Path**: `apps/server/Dockerfile`
+   - **Build Context**: `apps/server`
+   - **Start Command**: `node dist/main`
+4. 添加环境变量（见下方完整列表）
+5. 部署完成后记录后端域名（例：`your-app.up.railway.app`）
 
-| 顺序 | 场景                         | 需要确认什么                                 |
-| ---- | ---------------------------- | -------------------------------------------- |
-| 1    | 登录并进入聊天页             | 用户登录正常，页面无白屏                     |
-| 2    | 新建会话并发送文字消息       | `Conversation` 可正常写入和读取              |
-| 3    | 在 chat 语音模式发送文字消息 | 导师回复风格自然，且可生成 TTS               |
-| 4    | 上传一条语音                 | 转写、导师回复、导师音频播放器都正常         |
-| 5    | 收藏一个表达                 | `Favorite` 写入成功                          |
-| 6    | 进入每日复习并提交反馈       | `ReviewQueueItem`、`ReviewFeedback` 写入成功 |
-| 7    | 打开成就和等级页             | `UserAchievement`、`UserLevel` 可读取        |
-| 8    | 刷新页面并恢复历史会话       | 会话、标题、历史记录一致                     |
-| 9    | 打开健康接口                 | `/api/health` 返回 `ok` 或 `degraded`，`/api/health/db` 可看到数据库当前状态 |
+### 后端环境变量
 
-## 6. 如果检查失败，优先看哪里
+| 分类         | 变量                             | 说明                           |
+| ------------ | -------------------------------- | ------------------------------ |
+| **运行时**   | `NODE_ENV=production`            | 生产模式                       |
+|              | `PORT=3000`                      | 服务端口                       |
+|              | `ALLOW_IN_MEMORY_FALLBACK=false` | **必须 false**，禁止假成功写入 |
+| **数据库**   | `DATABASE_URL`                   | 运行时连接                     |
+|              | `DIRECT_URL`                     | Prisma 迁移连接                |
+| **主模型**   | `PRIMARY_API_URL`                | 主 AI 服务地址                 |
+|              | `PRIMARY_AUDIO_API_URL`          | 主 AI 音频服务地址             |
+|              | `PRIMARY_REALTIME_API_URL`       | 主 AI 实时服务地址             |
+|              | `PRIMARY_API_KEY`                | 主 AI 密钥                     |
+| **备用模型** | `SECONDARY_API_URL`              | 备用 AI 服务地址               |
+|              | `SECONDARY_API_KEY`              | 备用 AI 密钥                   |
+| **模型路由** | `PRIMARY_MODEL`                  | 主模型名称                     |
+|              | `SECONDARY_MODEL`                | 备用模型名称                   |
+|              | `THIRD_MODEL`                    | 第三备用模型名称               |
+|              | `STT_MODEL`                      | 语音转文字模型                 |
+|              | `TTS_MODEL`                      | 文字转语音模型                 |
+|              | `REALTIME_MODEL`                 | 实时语音模型                   |
+|              | `TRANSLATION_MODEL`              | 翻译模型                       |
+| **认证**     | `JWT_SECRET`                     | JWT 签名密钥                   |
+|              | `GOOGLE_CLIENT_ID`               | Google OAuth ID                |
+|              | `GOOGLE_CLIENT_SECRET`           | Google OAuth Secret            |
 
-| 问题现象                       | 优先检查                                                        |
-| ------------------------------ | --------------------------------------------------------------- |
-| 服务启动就报数据库错误         | `DATABASE_URL`、`DIRECT_URL`、Supabase 连接方式                 |
-| 迁移失败                       | `DIRECT_URL` 是否误用了 `:6543`，以及 `_prisma_migrations` 状态 |
-| 健康接口显示 `degraded`        | 查看 `/api/health/db` 中 `connected`、`reconnectScheduled`、`reconnectInFlight` |
-| 文本能聊、语音不能用           | `PRIMARY_AUDIO_API_URL`、`STT_MODEL`、`TTS_MODEL`               |
-| 沉浸模式异常                   | `PRIMARY_REALTIME_API_URL`、`REALTIME_MODEL`                    |
-| 数据写入偶发丢失               | 是否误开了 `ALLOW_IN_MEMORY_FALLBACK=true`                      |
-| 前端请求 404 / 跨域 / 代理错乱 | `VITE_API_URL`、`VITE_PROXY_API`、前端代理配置                  |
+### 验证后端
 
-## 7. 发布目标配置
+```bash
+curl https://your-app.up.railway.app/api/health
+# 期望返回: {"status":"ok", ...}
 
-### Railway（后端）
+curl https://your-app.up.railway.app/api/health/db
+# 期望返回: {"connected":true, ...}
+```
 
-| 项目          | 配置                     |
-| ------------- | ------------------------ |
-| Build         | `apps/server/Dockerfile` |
-| Build Context | `apps/server`            |
-| Start Command | `node dist/main`         |
+---
 
-### Vercel（前端）
+## 4. 部署前端（Vercel）
 
-| 项目             | 配置                                |
-| ---------------- | ----------------------------------- |
-| Root Directory   | `apps/web`                          |
-| Build Command    | `pnpm --filter web exec vite build` |
-| Output Directory | `dist`                              |
+### 步骤
 
-### 前端代理
+1. 在 Vercel 创建新项目 → **Import Git Repository**
+2. 选择本仓库
+3. 配置项目：
+   - **Root Directory**: `apps/web`
+   - **Build Command**: `pnpm --filter web exec vite build`
+   - **Output Directory**: `dist`
+   - **Install Command**: `pnpm install`
+4. 添加环境变量：
 
-| 项目      | 配置                                                        |
-| --------- | ----------------------------------------------------------- |
-| API Proxy | `apps/web/vercel.json` 或等价代理配置，必须指向正式后端域名 |
+| 变量                     | 值                                | 说明              |
+| ------------------------ | --------------------------------- | ----------------- |
+| `VITE_API_URL`           | `/api`                            | API 路径前缀      |
+| `VITE_PROXY_API`         | `https://your-app.up.railway.app` | 后端真实域名      |
+| `VITE_SUPABASE_URL`      | `https://xxx.supabase.co`         | Supabase 项目 URL |
+| `VITE_SUPABASE_ANON_KEY` | `eyJ...`                          | Supabase 匿名密钥 |
+
+5. **重要**：更新 `apps/web/vercel.json` 中的 API 代理地址：
+
+   ```json
+   {
+     "rewrites": [
+       {
+         "source": "/api/(.*)",
+         "destination": "https://your-app.up.railway.app/api/$1"
+       },
+       {
+         "source": "/(.*)",
+         "destination": "/index.html"
+       }
+     ]
+   }
+   ```
+
+   将 `your-app.up.railway.app` 替换为 Railway 分配的真实域名。
+
+6. 点击 **Deploy**
+
+---
+
+## 5. 部署后验证（冒烟测试）
+
+| 顺序 | 场景                   | 需要确认什么                   |
+| ---- | ---------------------- | ------------------------------ |
+| 1    | 登录并进入聊天页       | 用户登录正常，页面无白屏       |
+| 2    | 新建会话并发送文字消息 | 会话可正常写入和读取           |
+| 3    | 在语音模式发送文字消息 | 导师回复自然，可生成 TTS       |
+| 4    | 上传一条语音           | 转写、导师回复、音频播放器正常 |
+| 5    | 收藏一个表达           | 收藏写入成功                   |
+| 6    | 进入每日复习并提交反馈 | 复习卡片和反馈正常             |
+| 7    | 打开成就和等级页       | 成就数据可读取                 |
+| 8    | 刷新页面并恢复历史会话 | 会话、标题、历史记录一致       |
+| 9    | 打开健康接口           | `/api/health` 返回 `ok`        |
+
+---
+
+## 6. 常见问题排查
+
+| 问题现象                | 优先检查                                                     |
+| ----------------------- | ------------------------------------------------------------ |
+| 服务启动就报数据库错误  | `DATABASE_URL`、`DIRECT_URL` 是否正确                        |
+| 迁移失败                | `DIRECT_URL` 是否误用了 `:6543` transaction pooler           |
+| 健康接口显示 `degraded` | `/api/health/db` 中 `connected` 和 `reconnectScheduled` 状态 |
+| 文本能聊、语音不能用    | `PRIMARY_AUDIO_API_URL`、`STT_MODEL`、`TTS_MODEL` 是否配置   |
+| 沉浸模式异常            | `PRIMARY_REALTIME_API_URL`、`REALTIME_MODEL` 是否配置        |
+| 数据写入偶发丢失        | 是否误开了 `ALLOW_IN_MEMORY_FALLBACK=true`                   |
+| 前端请求 404 / 跨域     | `vercel.json` 中 API 代理地址是否正确                        |
+
+---
+
+## 7. 上线前构建验证
+
+本地执行以下命令确认全部通过后再部署：
+
+```bash
+# 后端
+pnpm --filter server lint:check
+pnpm --filter server build
+pnpm --filter server test
+
+# 前端
+pnpm --filter web lint
+pnpm --filter web exec tsc -b
+pnpm --filter web exec vite build
+```
+
+## 8. 数据库连接说明
+
+| 用途           | 推荐配置                                     | 说明               |
+| -------------- | -------------------------------------------- | ------------------ |
+| `DATABASE_URL` | Session Mode pooler `:5432`                  | 运行时稳定连接     |
+| `DIRECT_URL`   | Session Mode pooler `:5432` 或 Direct        | Prisma 迁移专用    |
+| 迁移校验       | `pnpm --filter server prisma:migrate:status` | 确认 schema 无漂移 |

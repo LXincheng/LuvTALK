@@ -138,3 +138,74 @@ export interface SessionSummaryPayload {
     definition: string;
   }>;
 }
+
+export type ConversationReportSourceMode = 'immersive' | 'voice' | 'text';
+
+export interface ConversationReportMetrics {
+  durationMinutes: number;
+  userTurns: number;
+  aiTurns: number;
+  averageScore: number | null;
+  latestScore: number | null;
+  pronunciationMentions: number;
+  grammarMentions: number;
+  rhythmMentions: number;
+  realtimeTurns: number;
+}
+
+export interface ConversationReportSection {
+  summary: string;
+  highlights: string[];
+  actionPlan: string[];
+}
+
+export interface ConversationReportPayload {
+  id: string;
+  conversationId: string;
+  userId?: string;
+  createdAt: string;
+  updatedAt: string;
+  targetLanguage: LanguageCode;
+  nativeLanguage: LanguageCode | null;
+  sourceMode: ConversationReportSourceMode;
+  voiceStyle?: string;
+  reportLanguage: 'zh' | 'en';
+  metrics: ConversationReportMetrics;
+  report: {
+    headline: string;
+    overallSummary: string;
+    learnerSnapshot: string;
+    strengths: string[];
+    opportunities: string[];
+    pronunciation: ConversationReportSection;
+    vocabulary: ConversationReportSection;
+    grammar: ConversationReportSection;
+    rhythm: ConversationReportSection;
+    nextSessionPlan: {
+      focus: string;
+      drills: string[];
+      checkpoint: string;
+    };
+    keyMoments: Array<{
+      speaker: 'user' | 'ai';
+      quote: string;
+      note: string;
+    }>;
+  };
+}
+
+export interface ConversationReportHistoryItem {
+  id: string;
+  conversationId: string;
+  createdAt: string;
+  updatedAt: string;
+  targetLanguage: LanguageCode;
+  nativeLanguage: LanguageCode | null;
+  sourceMode: ConversationReportSourceMode;
+  voiceStyle?: string;
+  reportLanguage: 'zh' | 'en';
+  headline: string;
+  overallSummary: string;
+  averageScore: number | null;
+  durationMinutes: number;
+}

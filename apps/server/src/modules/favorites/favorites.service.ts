@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { FavoriteTypeEnum } from "../../common/enums/favorite-type.enum";
@@ -8,6 +8,7 @@ import { CreateFavoriteDto } from "./dto/create-favorite.dto";
 
 @Injectable()
 export class FavoritesService {
+  private readonly logger = new Logger(FavoritesService.name);
   private readonly favorites = new Map<string, FavoriteItem>();
 
   constructor(private readonly prisma: PrismaService) {}
@@ -45,32 +46,40 @@ export class FavoritesService {
     }
 
     if (this.prisma.canUseDatabase()) {
-      const records = await this.prisma.favorite.findMany({
-        where: userId ? { userId } : undefined,
-        orderBy: { createdAt: "desc" },
-      });
-      if (records.length > 0) {
-        return records.map((record) => {
-          const favoriteType = record.type as FavoriteTypeEnum;
-          return {
-            id: record.id,
-            type: favoriteType,
-            title: record.title,
-            content: record.content,
-            metadata: (record.metadata as Record<string, unknown>) ?? undefined,
-            createdAt: record.createdAt.toISOString(),
-            pinned: false,
-            authorName:
-              favoriteType === FavoriteTypeEnum.Phrase
-                ? "Learner"
-                : "LuvTALK 导师",
-            avatar:
-              favoriteType === FavoriteTypeEnum.Phrase
-                ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
-                : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
-            conversationId: record.conversationId ?? undefined,
-          };
+      try {
+        const records = await this.prisma.favorite.findMany({
+          where: userId ? { userId } : undefined,
+          orderBy: { createdAt: "desc" },
         });
+        if (records.length > 0) {
+          return records.map((record) => {
+            const favoriteType = record.type as FavoriteTypeEnum;
+            return {
+              id: record.id,
+              type: favoriteType,
+              title: record.title,
+              content: record.content,
+              metadata: (record.metadata as Record<string, unknown>) ?? undefined,
+              createdAt: record.createdAt.toISOString(),
+              pinned: false,
+              authorName:
+                favoriteType === FavoriteTypeEnum.Phrase
+                  ? "Learner"
+                  : "LuvTALK 导师",
+              avatar:
+                favoriteType === FavoriteTypeEnum.Phrase
+                  ? "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=student"
+                  : "https://api.dicebear.com/6.x/bottts-neutral/svg?seed=mentor",
+              conversationId: record.conversationId ?? undefined,
+            };
+          });
+        }
+      } catch (error) {
+        if (this.isConnectionError(error)) {
+          // Fall through to in-memory / default fallback below.
+        } else {
+          throw error;
+        }
       }
     }
 
@@ -157,5 +166,21 @@ export class FavoritesService {
     }
 
     throw new NotFoundException(`Favorite ${id} not found`);
+  }
+
+  private isConnectionError(error: unknown): boolean {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      (error.code === "P1001" || error.code === "P1002")
+    ) {
+      this.logger.warn(
+        `Database connection lost during favorites query: ${error.code}`,
+      );
+      this.prisma.markDatabaseUnavailable(
+        `Favorites service connection failure (${error.code}).`,
+      );
+      return true;
+    }
+    return false;
   }
 }

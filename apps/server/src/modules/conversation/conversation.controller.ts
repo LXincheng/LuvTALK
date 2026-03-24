@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   Sse,
   MessageEvent,
@@ -19,12 +20,15 @@ import { UpdateConversationPreferencesDto } from "./dto/update-conversation-pref
 import { AuthService } from "../auth/auth.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { SessionSummaryPayload } from "./conversation-summary.types";
+import { GenerateConversationReportDto } from "./dto/generate-conversation-report.dto";
+import { ConversationReportService } from "./conversation-report.service";
 
 @Controller("conversation")
 export class ConversationController {
   constructor(
     private readonly conversationService: ConversationService,
     private readonly authService: AuthService,
+    private readonly conversationReportService: ConversationReportService,
   ) {}
 
   @Post("session")
@@ -101,6 +105,24 @@ export class ConversationController {
     return [];
   }
 
+  @Get("reports/history")
+  @UseGuards(JwtAuthGuard)
+  async listReportHistory(@Req() req: Request) {
+    return this.conversationReportService.listUserReports(req.user!.id, 10);
+  }
+
+  @Get("reports/:reportId")
+  @UseGuards(JwtAuthGuard)
+  async getReportById(
+    @Param("reportId") reportId: string,
+    @Req() req: Request,
+  ) {
+    return this.conversationReportService.getUserReportById(
+      reportId,
+      req.user!.id,
+    );
+  }
+
   @Get(":conversationId")
   async getSession(
     @Param("conversationId") conversationId: string,
@@ -117,11 +139,41 @@ export class ConversationController {
   @Get(":conversationId/summary")
   async getSummary(
     @Param("conversationId") conversationId: string,
+    @Query("locale") locale: string | undefined,
     @Req() req: Request,
   ): Promise<SessionSummaryPayload> {
     const profile = await this.authService.resolveUserFromRequest(req);
     return this.conversationService.getSessionSummary(
       conversationId,
+      profile?.id,
+      resolveConversationKey(req),
+      locale,
+    );
+  }
+
+  @Get(":conversationId/report")
+  async getConversationReport(
+    @Param("conversationId") conversationId: string,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationReportService.getLatestReport(
+      conversationId,
+      profile?.id,
+      resolveConversationKey(req),
+    );
+  }
+
+  @Post(":conversationId/report")
+  async generateConversationReport(
+    @Param("conversationId") conversationId: string,
+    @Body() dto: GenerateConversationReportDto,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationReportService.generateReport(
+      conversationId,
+      dto,
       profile?.id,
       resolveConversationKey(req),
     );

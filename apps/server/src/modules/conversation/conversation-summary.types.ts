@@ -30,12 +30,38 @@ const dedupe = (items: string[]): string[] => {
   return output;
 };
 
+const LABELS = {
+  zh: {
+    stableExpression: "表达整体稳定，沟通流畅度较好。",
+    sufficientPractice: "练习轮次充足，持续输出表现不错。",
+    improvingTrend: "后半段表现提升明显，学习状态在变好。",
+    keepPracticing: "你已保持持续练习，建议继续稳定输出短句。",
+    focusAccuracy: "下一轮先用 2-3 个短句表达，优先保证准确度。",
+    pronunciationDrill: "开启语音模式跟读 3 轮，重点校准发音与停顿。",
+    grammarRewrite: "把本轮错误句改写 2 次，再用于下一轮对话。",
+    reuseExpressions: "进入下一轮场景对话，优先复用本轮高频表达。",
+  },
+  en: {
+    stableExpression: "Overall expression is stable with good fluency.",
+    sufficientPractice: "Plenty of practice turns with consistent output.",
+    improvingTrend: "Noticeable improvement in the second half of the session.",
+    keepPracticing: "Keep practicing — focus on short, accurate sentences.",
+    focusAccuracy: "Start the next round with 2–3 short sentences, prioritizing accuracy.",
+    pronunciationDrill: "Use voice mode for 3 rounds of shadowing to refine pronunciation.",
+    grammarRewrite: "Rewrite this round's errors twice and reuse them next round.",
+    reuseExpressions: "Move to the next scenario and prioritize reusing key phrases.",
+  },
+} as const;
+
 export function buildSessionSummary(params: {
   conversationId: string;
   createdAt: string;
   updatedAt: string;
   messages: ConversationMessage[];
+  locale?: string;
 }): SessionSummaryPayload {
+  const l = params.locale === "en" ? LABELS.en : LABELS.zh;
+
   const userMessages = params.messages.filter(
     (message) => message.sender === "user",
   );
@@ -57,20 +83,20 @@ export function buildSessionSummary(params: {
 
   const strengths: string[] = [];
   if (typeof averageScore === "number" && averageScore >= 85) {
-    strengths.push("表达整体稳定，沟通流畅度较好。");
+    strengths.push(l.stableExpression);
   }
   if (userMessages.length >= 6) {
-    strengths.push("练习轮次充足，持续输出表现不错。");
+    strengths.push(l.sufficientPractice);
   }
   if (
     latestScore !== null &&
     averageScore !== null &&
     latestScore > averageScore
   ) {
-    strengths.push("后半段表现提升明显，学习状态在变好。");
+    strengths.push(l.improvingTrend);
   }
   if (!strengths.length) {
-    strengths.push("你已保持持续练习，建议继续稳定输出短句。");
+    strengths.push(l.keepPracticing);
   }
 
   const improvements = dedupe(
@@ -87,24 +113,24 @@ export function buildSessionSummary(params: {
 
   const recommendedNextActions: string[] = [];
   if (latestScore !== null && latestScore < 75) {
-    recommendedNextActions.push("下一轮先用 2-3 个短句表达，优先保证准确度。");
+    recommendedNextActions.push(l.focusAccuracy);
   }
   if (
     improvements.some(
       (item) => item.includes("发音") || item.includes("pronunciation"),
     )
   ) {
-    recommendedNextActions.push("开启语音模式跟读 3 轮，重点校准发音与停顿。");
+    recommendedNextActions.push(l.pronunciationDrill);
   }
   if (
     improvements.some(
       (item) => item.includes("语法") || item.includes("grammar"),
     )
   ) {
-    recommendedNextActions.push("把本轮错误句改写 2 次，再用于下一轮对话。");
+    recommendedNextActions.push(l.grammarRewrite);
   }
   if (!recommendedNextActions.length) {
-    recommendedNextActions.push("进入下一轮场景对话，优先复用本轮高频表达。");
+    recommendedNextActions.push(l.reuseExpressions);
   }
 
   const keyTerms = params.messages

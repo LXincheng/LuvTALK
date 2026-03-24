@@ -29,3 +29,4 @@ apps/server/tmp/
 figma-proto
 .claude/settings.local.json
 .claude/settings.json
+.agents

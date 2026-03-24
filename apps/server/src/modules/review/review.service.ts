@@ -22,6 +22,25 @@ const MAX_LOW_SCORE_CARDS = 4;
 const MAX_DAILY_CARDS = 10;
 const MIN_EASE_FACTOR = 1.3;
 const MAX_EASE_FACTOR = 3.0;
+const MAX_TERMS_PER_LOW_SCORE_MESSAGE = 2;
+const MAX_REVIEW_TERM_WORDS = 8;
+const REVIEW_NOISE_PATTERNS = [
+  /\btest(?:ing)?\b/i,
+  /\bplaceholder\b/i,
+  /\bdummy\b/i,
+  /\bsample\b/i,
+  /\bsystem note\b/i,
+  /\bno real content\b/i,
+  /\btry a full simple sentence next\b/i,
+  /\bencourage you to try\b/i,
+  /\byour sentence\b/i,
+  /\bour sentence\b/i,
+  /测试/,
+  /占位/,
+  /示例文本/,
+  /系统提示/,
+  /请尝试/,
+];
 
 interface ReviewQueueSnapshot {
   id: string;
@@ -176,35 +195,42 @@ export class ReviewService {
   }
 
   private buildFavoriteCards(favorites: FavoriteItem[]): ReviewCard[] {
-    return favorites.map((favorite) => {
-      const metadata = favorite.metadata ?? {};
-      const definition =
-        typeof metadata.definition === "string"
-          ? metadata.definition
-          : favorite.content;
-      const translation =
-        typeof metadata.translation === "string"
-          ? metadata.translation
-          : undefined;
-      const examples = Array.isArray(metadata.examples)
-        ? metadata.examples.filter(
-            (example): example is string => typeof example === "string",
-          )
-        : [];
-      return {
-        id: favorite.id,
-        term: favorite.title,
-        definition,
-        example: examples[0] ?? translation ?? undefined,
-        exampleTranslation:
-          typeof metadata.exampleTranslation === "string"
-            ? metadata.exampleTranslation
-            : undefined,
-        sourceType: "favorite",
-        favoriteType: favorite.type,
-        conversationId: favorite.conversationId,
-      };
-    });
+    return favorites
+      .map((favorite) => {
+        const metadata = favorite.metadata ?? {};
+        const definition = this.pickReviewDefinition(
+          typeof metadata.definition === "string"
+            ? metadata.definition
+            : favorite.content,
+        );
+        const translation =
+          typeof metadata.translation === "string"
+            ? this.cleanReviewText(metadata.translation)
+            : undefined;
+        const examples = Array.isArray(metadata.examples)
+          ? metadata.examples.filter(
+              (example): example is string => typeof example === "string",
+            )
+          : [];
+        const card: ReviewCard = {
+          id: favorite.id,
+          term: this.cleanReviewText(favorite.title) ?? favorite.title,
+          definition,
+          example:
+            this.pickReviewExample(examples) ??
+            this.pickReviewExample([translation]) ??
+            undefined,
+          exampleTranslation:
+            typeof metadata.exampleTranslation === "string"
+              ? this.cleanReviewText(metadata.exampleTranslation)
+              : undefined,
+          sourceType: "favorite",
+          favoriteType: favorite.type,
+          conversationId: favorite.conversationId,
+        };
+        return this.isReviewCardUseful(card) ? card : null;
+      })
+      .filter((card): card is ReviewCard => Boolean(card));
   }
 
   private extractLowScoreCards(
@@ -227,20 +253,31 @@ export class ReviewService {
       for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
         const userMessage = messages[cursor];
         if (userMessage?.sender === "user") {
-          // Skip nonsensical inputs that aren't worth reviewing
           if (!this.isQualityInput(userMessage.text)) {
             break;
           }
-          cards.push({
-            id: `${conversationId}-${message.id}`,
-            term: userMessage.text,
-            definition: message.meta?.scoreReason,
-            example: message.text,
-            exampleTranslation: message.meta?.translation,
-            sourceType: "low_score",
+          const keyTermCards = this.extractKeyTermCards(
             conversationId,
+            message.id,
+            message,
             score,
-          });
+          );
+          if (keyTermCards.length > 0) {
+            cards.push(...keyTermCards);
+            break;
+          }
+          const fallbackCard = this.buildLowScoreFallbackCard(
+            conversationId,
+            message.id,
+            userMessage.text,
+            message.text,
+            message.meta?.translation,
+            message.meta?.scoreReason,
+            score,
+          );
+          if (fallbackCard) {
+            cards.push(fallbackCard);
+          }
           break;
         }
       }
@@ -248,22 +285,17 @@ export class ReviewService {
     return cards;
   }
 
-  /** Returns false for gibberish, random chars, repeated chars, pure numbers, or very short inputs */
   private isQualityInput(text: string): boolean {
-    const trimmed = text.trim();
-    // Too short to be meaningful
-    if (trimmed.length < 2) {
+    const trimmed = this.cleanReviewText(text);
+    if (!trimmed || trimmed.length < 2) {
       return false;
     }
-    // Pure numbers or punctuation
     if (/^[\d\s.,!?;:'"()\-_+=]+$/.test(trimmed)) {
       return false;
     }
-    // Repeated single character (e.g. "aaaa", "1111")
     if (/^(.)\1{2,}$/.test(trimmed)) {
       return false;
     }
-    // Random keyboard mashing: only ASCII letters with no vowels or very low variety
     const alphaOnly = trimmed.replace(/[^a-zA-Z]/g, "");
     if (alphaOnly.length >= 3) {
       const uniqueChars = new Set(alphaOnly.toLowerCase()).size;
@@ -271,6 +303,139 @@ export class ReviewService {
         return false;
       }
     }
+    return !this.isReviewNoise(trimmed);
+  }
+
+  private extractKeyTermCards(
+    conversationId: string,
+    messageId: string,
+    message: ConversationMessage,
+    score: number,
+  ): ReviewCard[] {
+    const keyTerms = message.meta?.keyTerms ?? [];
+    return keyTerms
+      .map((term, index) => {
+        const normalizedTerm = this.pickReviewTerm(term.term);
+        const definition = this.pickReviewDefinition(term.definition);
+        const example =
+          this.pickReviewExample(term.examples) ??
+          this.pickReviewExample([message.text]);
+        const exampleTranslation = this.cleanReviewText(
+          message.meta?.translation,
+        );
+        if (!normalizedTerm || !definition || !example) {
+          return null;
+        }
+        const card: ReviewCard = {
+          id: `${conversationId}-${messageId}-term-${index}`,
+          term: normalizedTerm,
+          definition,
+          example,
+          exampleTranslation,
+          sourceType: "low_score",
+          conversationId,
+          score,
+        };
+        return this.isReviewCardUseful(card) ? card : null;
+      })
+      .filter((card): card is ReviewCard => Boolean(card))
+      .slice(0, MAX_TERMS_PER_LOW_SCORE_MESSAGE);
+  }
+
+  private buildLowScoreFallbackCard(
+    conversationId: string,
+    messageId: string,
+    learnerText: string,
+    tutorReply?: string,
+    tutorTranslation?: string,
+    scoreReason?: string,
+    score?: number,
+  ): ReviewCard | null {
+    const term = this.pickReviewTerm(learnerText);
+    const definition = this.pickReviewDefinition(scoreReason);
+    const example =
+      this.pickReviewExample([learnerText]) ??
+      this.pickReviewExample([tutorReply]);
+    const exampleTranslation = this.cleanReviewText(tutorTranslation);
+    if (!term || !definition || !example) {
+      return null;
+    }
+    const card: ReviewCard = {
+      id: `${conversationId}-${messageId}`,
+      term,
+      definition,
+      example,
+      exampleTranslation,
+      sourceType: "low_score",
+      conversationId,
+      score,
+    };
+    return this.isReviewCardUseful(card) ? card : null;
+  }
+
+  private pickReviewTerm(value?: string): string | undefined {
+    const cleaned = this.cleanReviewText(value);
+    if (!cleaned || this.isReviewNoise(cleaned)) {
+      return undefined;
+    }
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    if (
+      /^[a-zA-Z][a-zA-Z\s'/-]*$/.test(cleaned) &&
+      words.length > MAX_REVIEW_TERM_WORDS
+    ) {
+      return undefined;
+    }
+    return cleaned;
+  }
+
+  private pickReviewDefinition(value?: string): string | undefined {
+    const cleaned = this.cleanReviewText(value);
+    if (!cleaned || this.isReviewNoise(cleaned)) {
+      return undefined;
+    }
+    if (cleaned.length < 2) {
+      return undefined;
+    }
+    return cleaned;
+  }
+
+  private pickReviewExample(
+    values: Array<string | undefined>,
+  ): string | undefined {
+    return values
+      .map((value) => this.cleanReviewText(value))
+      .find((value): value is string => {
+        if (!value) {
+          return false;
+        }
+        return !this.isReviewNoise(value);
+      });
+  }
+
+  private cleanReviewText(value?: string): string | undefined {
+    const trimmed = value?.replace(/\s+/g, " ").trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  private isReviewNoise(text: string): boolean {
+    const normalized = text.trim();
+    if (!normalized) {
+      return true;
+    }
+    return REVIEW_NOISE_PATTERNS.some((pattern) => pattern.test(normalized));
+  }
+
+  private isReviewCardUseful(card: ReviewCard): boolean {
+    const term = this.pickReviewTerm(card.term);
+    const definition = this.pickReviewDefinition(card.definition);
+    const example = this.pickReviewExample([card.example]);
+    if (!term || !definition || !example) {
+      return false;
+    }
+    card.term = term;
+    card.definition = definition;
+    card.example = example;
+    card.exampleTranslation = this.cleanReviewText(card.exampleTranslation);
     return true;
   }
 

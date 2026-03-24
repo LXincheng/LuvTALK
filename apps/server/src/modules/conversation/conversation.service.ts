@@ -1783,6 +1783,7 @@ export class ConversationService {
     conversationId: string,
     userId?: string,
     conversationKey?: string,
+    locale?: string,
   ): Promise<SessionSummaryPayload> {
     const session = await this.getAccessibleSession(conversationId, {
       userId,
@@ -1794,6 +1795,7 @@ export class ConversationService {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messages: session.messages,
+      locale,
     });
   }
 

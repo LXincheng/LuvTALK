@@ -376,13 +376,13 @@
 
 ### 2026-03-17（OPS-01：发布脚本与 CI 门禁整理）
 
-| 维度     | 记录                                                                                                                                                                            |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 问题点   | 原 CI 直接执行 `server lint --fix`，不适合作为稳定发布门禁；本地缺少统一、可复现的校验入口。                                                                                    |
+| 维度     | 记录                                                                                                                                   |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点   | 原 CI 直接执行 `server lint --fix`，不适合作为稳定发布门禁；本地缺少统一、可复现的校验入口。                                           |
 | 修复点   | 收敛发布门禁命令，补齐 server 侧 `lint:check`、`prisma:validate`、`prisma:migrate:deploy/status`，并统一 server / web 的校验执行口径。 |
-| 配套说明 | 当时曾引入过根级脚本包装层以统一校验入口；后续已在 2026-03-22 清理，当前以各包直接命令为准。 |
-| 验证结果 | server lint/build/test 与 web lint/typecheck/build 均可稳定复现。 |
-| 价值点   | 发布门禁从“零散命令”收敛为“统一脚本”，减少本地与 CI 行为偏差。                                                                                                                  |
+| 配套说明 | 当时曾引入过根级脚本包装层以统一校验入口；后续已在 2026-03-22 清理，当前以各包直接命令为准。                                           |
+| 验证结果 | server lint/build/test 与 web lint/typecheck/build 均可稳定复现。                                                                      |
+| 价值点   | 发布门禁从“零散命令”收敛为“统一脚本”，减少本地与 CI 行为偏差。                                                                         |
 
 ### 2026-03-17（DB-02：高频查询索引与翻译历史隔离）
 
@@ -411,8 +411,8 @@
 | 执行动作 | 按“清空重建”方案执行：通过 Supavisor session mode `:5432` 连接远端 Supabase，清空 `public` schema 后重新应用当前全部 Prisma migration。                                                                                                      |
 | 连接决策 | 当前工作站无法直连 Supabase IPv6 direct host，因此迁移与状态检查统一使用 `aws-1-ap-south-1.pooler.supabase.com:5432` session mode；运行时 `DATABASE_URL` 仍保留 transaction pooler `:6543`。                                                 |
 | 迁移补齐 | 新增 migration `202603181215_remove_updated_at_defaults`，移除 `LearningGoal`、`LearningActivityDaily`、`ReviewQueueItem`、`UserAchievement`、`UserLevel` 的 `updatedAt DEFAULT CURRENT_TIMESTAMP`，收敛 Prisma schema 与 migration 链差异。 |
-| 脚本修正 | 迁移状态检查统一收敛到 server 包内的 Prisma 命令，并使用稳定的 `DIRECT_URL` 作为校验连接，避免根级包装层带来的误报。 |
-| 验证结果 | Prisma migration 状态检查通过；`prisma migrate diff --from-url ... --to-schema-datamodel prisma/schema.prisma --script` 返回空 migration；构建与校验链路通过。 |
+| 脚本修正 | 迁移状态检查统一收敛到 server 包内的 Prisma 命令，并使用稳定的 `DIRECT_URL` 作为校验连接，避免根级包装层带来的误报。                                                                                                                         |
+| 验证结果 | Prisma migration 状态检查通过；`prisma migrate diff --from-url ... --to-schema-datamodel prisma/schema.prisma --script` 返回空 migration；构建与校验链路通过。                                                                               |
 | 当前结论 | 远端 Supabase 已与本地 Prisma schema / migration 历史对齐，具备上线前数据库一致性前提；后续只需补做真实账号写链路冒烟与生产环境变量核对。                                                                                                    |
 
 ### 2026-03-18（回退：移除 Learning Lab 翻译/文化入口）
@@ -462,15 +462,55 @@
 
 ### 2026-03-22（清理：删除非运行必需的脚本包装层）
 
-| 维度 | 记录 |
-| --- | --- |
-| 问题点 | 根目录 `scripts/verify.js`、`scripts/check-db-sync.js` 仅用于聚合校验与预检包装，不属于开发启动、部署启动或运行时必需脚本，维护成本高于价值。 |
-| 清理点 | 删除 `scripts/verify.js`、`scripts/check-db-sync.js` 及根 `package.json` 中对应 `verify`、`verify:server`、`verify:web`、`db:check-sync` 入口。 |
-| 保留项 | 保留 `scripts/dev.js` 作为开发启动入口，保留 `scripts/run-prisma.js` 作为 Prisma 统一加载根目录 `.env` 的必要脚本。 |
+| 维度     | 记录                                                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 问题点   | 根目录 `scripts/verify.js`、`scripts/check-db-sync.js` 仅用于聚合校验与预检包装，不属于开发启动、部署启动或运行时必需脚本，维护成本高于价值。    |
+| 清理点   | 删除 `scripts/verify.js`、`scripts/check-db-sync.js` 及根 `package.json` 中对应 `verify`、`verify:server`、`verify:web`、`db:check-sync` 入口。  |
+| 保留项   | 保留 `scripts/dev.js` 作为开发启动入口，保留 `scripts/run-prisma.js` 作为 Prisma 统一加载根目录 `.env` 的必要脚本。                              |
 | 文档同步 | `docs/deploy.md` 改为直接使用现存命令：`pnpm --filter server prisma:migrate:status` 以及 server / web 各自的 lint、build、test、typecheck 命令。 |
 
 | 维度     | 记录                                                                                                                                         |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --- |
 | 目标     | 避免每次都靠日志猜测数据库是否正常，提供一个可直接访问的状态接口。                                                                           |
 | 实现点   | 扩展现有 `HealthController`：`GET /api/health` 返回整体状态摘要；`GET /api/health/db` 返回 Prisma 连接、是否已调度重连、是否正在重连等信息。 |
-| 使用方式 | 当页面或功能看起来像在 fallback 时，优先访问健康接口确认是“数据库已连通”还是“当前正在自动重连”。                                             |
+| 使用方式 | 当页面或功能看起来像在 fallback 时，优先访问健康接口确认是”数据库已连通”还是”当前正在自动重连”。                                             |     |
+
+### 2026-03-23（MICRO-01~04：语言学习微动画与微功能）
+
+| 维度   | 记录                                                                                                                                                                                                                                           |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新增   | `WordOfDay`（每日一词卡片，从收藏/预设词库选词，玻璃态卡片，dismiss 持久化）；`StreakFlame`（连续天数火焰 SVG 微动画）；`ReviewFlipCard`（3D 翻转卡片替换原 show/hide）；`ProgressCelebration`（复习完成粒子庆祝，支持 reduced-motion 降级）。 |
+| 集成点 | WordOfDay → ConversationPage（header 下方）；StreakFlame → ProfilePage（streak 旁）；ReviewFlipCard + ProgressCelebration → DailyReviewPage。                                                                                                  |
+| 约束   | 全部遵循 `prefers-reduced-motion`；使用现有 Motion 库，不新增依赖；纯 CSS/SVG 粒子，无 canvas 库。                                                                                                                                             |
+| 价值点 | 用户体验从”可用”提升到”有惊喜”，学习过程更具互动感和成就感。                                                                                                                                                                                   |
+
+### 2026-03-23（Immersive Report / Profile History）
+
+| 维度     | 记录                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 问题点   | 沉浸式对话结束后缺少可复盘的结构化报告，用户无法系统回看发音、用词、语法和节奏问题。                                         |
+| 修复点   | 新增 `ConversationReport` 持久化模型、`/conversation/:id/report` 生成/查询接口、Profile 最近 10 份报告历史与详情展示。       |
+| 设计思路 | 复用已落库的 realtime transcript、score、pronunciation/grammar/rhythm tips，交给主模型生成结构化 JSON 报告，并提供本地回退。 |
+| 价值点   | 形成“沉浸式对话 -> AI 复盘报告 -> 个人中心历史追踪”的闭环，提升用户复盘效率与长期学习感知。                                  |
+
+### 2026-03-24（UX Polish：沉浸式复盘入口收口与独立浏览体验）
+
+| 维度   | 记录                                                                                                                                   |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点 | Chat 页顶部被报告入口挤占；沉浸式复盘与普通对话总结混在一起；个人中心存在“去 chat 生成报告”的歧义入口；报告卡片与 toast 视觉层级偏乱。 |
+| 修复点 | Chat 页保留原 `SessionSummaryCard`；沉浸式结束后改为独立复盘生成流与独立查看层；Profile 移除冗余生成按钮，仅保留最近 10 份历史浏览。   |
+| 视觉点 | `ConversationReportPanel` 收敛大面积彩色渐变，改为更克制的玻璃卡片、细边框、轻阴影；toast 统一为更紧凑的 Apple 风格浮层。              |
+| 验证   | `pnpm --filter server build`、`pnpm --filter web exec tsc -b`、`pnpm --filter web exec vite build` 全部通过。                          |
+
+过。
+
+### 2026-03-24（UX-27：ProfilePage 布局优化 + 字体解耦 + 游客报告验证）
+
+| 维度   | 记录                                                                                                                                                                                                  |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点 | ProfilePage 布局层级过多、padding/margin 不统一、字体大小散落为多种 `text-[Npx]` 无规律；游客模式下无 user 对象时 `isGuest` 为 false 导致看不到 mock 报告。                                           |
+| 修复点 | 1) 引入 `TXT` 常量解耦字体大小（title/section/value/body/caption 五级），全页统一使用 Tailwind 标准 scale。                                                                                           |
+|        | 2) Hero 区从垂直堆叠改为紧凑水平排列，avatar 从 96px 缩至 56px；stats 卡片 icon 从 40px 缩至 36px；学习目标将 donut + 进度条合并为一个紧凑行；Goal input 从 3 个 glass-card 简化为 3 个 label block。 |
+|        | 3) `isGuest` 从 `user?.app_metadata?.provider === 'anonymous'` 改为 `!user \|\| provider === 'anonymous'`，确保无 user 时也走游客路径，mock 报告可见。                                                |
+|        | 4) 清理未使用的 `Timer` import 和 `isGoalRefreshing` 变量。ProfilePage bundle 从 70kB 降到 66.6kB。                                                                                                   |
+| 验证   | `tsc --noEmit`（server + web）、`vite build` 全部通过。                                                                                                                                               |

@@ -1,49 +1,20 @@
-import { ChevronDown, ChevronUp, RefreshCw, Sparkles, Target, TrendingUp } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ChevronDown, RefreshCw, Sparkles } from 'lucide-react';
 import { useState } from 'react';
-import type { ReactNode } from 'react';
+import { useLocale } from '../../providers/LocaleContext';
 import type { SessionSummaryPayload } from '../../types/api';
 
 interface SessionSummaryCardProps {
-  title: string;
-  subtitle: string;
-  loadingText: string;
-  refreshText: string;
-  strengthsTitle: string;
-  improvementsTitle: string;
-  nextActionsTitle: string;
-  keyTermsTitle: string;
-  emptyText: string;
-  collapseText: string;
-  expandText: string;
-  averageLabel: string;
-  latestLabel: string;
-  turnsLabel: string;
-  minutesLabel: string;
   summary: SessionSummaryPayload | null;
   isLoading: boolean;
   onRefresh: () => void;
 }
 
 export default function SessionSummaryCard({
-  title,
-  subtitle,
-  loadingText,
-  refreshText,
-  strengthsTitle,
-  improvementsTitle,
-  nextActionsTitle,
-  keyTermsTitle,
-  collapseText,
-  expandText,
-  averageLabel,
-  latestLabel,
-  turnsLabel,
-  minutesLabel,
   summary,
   isLoading,
   onRefresh,
 }: SessionSummaryCardProps) {
+  const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
 
   if (!isLoading && !summary) {
@@ -51,157 +22,86 @@ export default function SessionSummaryCard({
   }
 
   return (
-    <section className="mx-3 sm:mx-4 mt-2 sm:mt-3 rounded-xl glass-card shadow-sm overflow-hidden w-auto max-w-full">
-      <div className="px-3 py-2.5 sm:px-4 sm:py-3 flex items-center gap-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-label min-w-0">
-            <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
-            <h3 className="text-sm sm:text-base font-semibold truncate">{title}</h3>
-          </div>
-          <p className="text-xs text-label-tertiary mt-0.5 truncate hidden sm:block">
-            {subtitle}
-          </p>
-        </div>
+    <section className="relative mx-3 mt-2 mb-1 overflow-hidden rounded-2xl border border-separator bg-white/92 shadow-[0_2px_8px_rgba(15,23,42,0.04)] backdrop-blur-[16px] sm:mx-4 dark:bg-[rgba(24,24,27,0.88)]">
+      {/* Header row: badge + metrics + controls */}
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5 sm:px-4">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-separator bg-white/70 px-2 py-0.5 text-xs text-label-secondary dark:bg-white/8">
+          <Sparkles className="h-3 w-3 text-primary" />
+          <span className="hidden sm:inline">{t('sessionSummaryTitle')}</span>
+        </span>
+
         {summary ? (
-          <div className="hidden md:flex items-center gap-1.5 shrink-0">
-            <Badge label={averageLabel} value={summary.averageScore?.toString() ?? '--'} />
-            <Badge label={minutesLabel} value={summary.durationMinutes.toString()} />
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 overflow-x-auto text-[13px] scrollbar-none">
+            <Metric label={t('sessionSummaryMetricAverage')} value={summary.averageScore ?? '--'} />
+            <Dot />
+            <Metric label={t('sessionSummaryMetricLatest')} value={summary.latestScore ?? '--'} />
+            <Dot />
+            <Metric label={t('sessionSummaryMetricTurns')} value={`${summary.userTurns}/${summary.aiTurns}`} />
+            <Dot />
+            <Metric label={t('sessionSummaryMetricMinutes')} value={summary.durationMinutes} />
           </div>
-        ) : null}
-        <div className="flex items-center gap-1.5 shrink-0">
+        ) : (
+          <span className="flex-1 text-[13px] text-label-tertiary">{t('sessionSummaryLoading')}</span>
+        )}
+
+        <div className="flex shrink-0 items-center gap-1">
           <button
-            onClick={() => setExpanded((prev) => !prev)}
-            className="inline-flex items-center justify-center gap-1 rounded-lg border border-separator px-2 py-1.5 text-xs sm:text-sm text-label-secondary hover:bg-fill-secondary"
-          >
-            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            <span className="hidden sm:inline">{expanded ? collapseText : expandText}</span>
-          </button>
-          <button
+            type="button"
             onClick={onRefresh}
             disabled={isLoading}
-            className="inline-flex items-center justify-center gap-1 rounded-lg border border-separator px-2 py-1.5 text-xs sm:text-sm text-label-secondary hover:bg-fill-secondary disabled:opacity-60"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-separator bg-white/60 text-label-tertiary transition hover:bg-white/80 disabled:opacity-50 dark:bg-white/5"
+            aria-label={t('commonRetry')}
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{refreshText}</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
+          {summary ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-separator bg-white/60 text-label-tertiary transition hover:bg-white/80 dark:bg-white/5"
+              aria-label={expanded ? t('sessionSummaryCollapse') : t('sessionSummaryExpand')}
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition ${expanded ? 'rotate-180' : ''}`} />
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {isLoading && !summary ? (
-        <div className="px-3 sm:px-4 pb-3 text-sm text-label-secondary">{loadingText}</div>
-      ) : null}
-
-      {summary ? (
-        <div className="px-3 sm:px-4 pb-2.5 sm:pb-3">
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-            <MetricChip
-              icon={<TrendingUp className="w-3.5 h-3.5" />}
-              label={averageLabel}
-              value={summary.averageScore?.toString() ?? '--'}
-            />
-            <MetricChip
-              icon={<Target className="w-3.5 h-3.5" />}
-              label={latestLabel}
-              value={summary.latestScore?.toString() ?? '--'}
-            />
-            <MetricChip
-              icon={<Sparkles className="w-3.5 h-3.5" />}
-              label={turnsLabel}
-              value={`${summary.userTurns}/${summary.aiTurns}`}
-            />
-            <MetricChip
-              icon={<RefreshCw className="w-3.5 h-3.5" />}
-              label={minutesLabel}
-              value={summary.durationMinutes.toString()}
-            />
-          </div>
-        </div>
-      ) : null}
-
-      {summary && expanded ? (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22 }}
-          className="px-3 sm:px-4 pb-3 sm:pb-4 space-y-2.5 border-t border-separator"
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <CompactPoint title={strengthsTitle} item={summary.strengths[0]} tone="good" />
-            <CompactPoint title={improvementsTitle} item={summary.improvements[0]} tone="warn" />
-            <CompactPoint
-              title={nextActionsTitle}
-              item={summary.recommendedNextActions[0]}
-              tone="accent"
-            />
-          </div>
-
-          {summary.keyTerms.length > 0 ? (
-            <div>
-              <p className="text-xs font-medium text-label-secondary mb-1.5">
-                {keyTermsTitle}
-              </p>
-              <div className="flex flex-wrap gap-2 min-w-0">
-                {summary.keyTerms.slice(0, 4).map((item) => (
-                  <span
-                    key={item.term}
-                    className="max-w-full truncate rounded-full border border-separator glass-card px-2.5 py-1 text-xs text-label-secondary"
-                    title={item.definition}
-                  >
-                    {item.term}
-                  </span>
-                ))}
-              </div>
-            </div>
+      {/* Expandable detail */}
+      {expanded && summary ? (
+        <div className="border-t border-separator/50 px-3.5 py-2.5 sm:px-4">
+          {summary.strengths[0] ? (
+            <p className="text-[13px] leading-relaxed text-label">
+              <span className="mr-1 font-medium text-emerald-600 dark:text-emerald-400">+</span>
+              {summary.strengths[0]}
+            </p>
           ) : null}
-        </motion.div>
+          {summary.improvements[0] ? (
+            <p className="mt-1 text-[13px] leading-relaxed text-label-secondary">
+              <span className="mr-1 font-medium text-amber-600 dark:text-amber-400">△</span>
+              {summary.improvements[0]}
+            </p>
+          ) : null}
+          {summary.keyTerms[0] ? (
+            <span className="mt-1.5 inline-block rounded-full border border-separator bg-white/72 px-2.5 py-0.5 text-xs text-label-secondary dark:bg-white/8">
+              {summary.keyTerms[0].term}
+            </span>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );
 }
 
-function MetricChip({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-separator glass-card py-1.5 px-1.5 sm:px-2 text-label-secondary min-w-0">
-      <div className="flex items-center justify-center gap-1 text-[11px] sm:text-xs text-label-tertiary min-w-0">
-        {icon}
-        <span className="truncate">{label}</span>
-      </div>
-      <p className="text-sm sm:text-base font-semibold mt-0.5 break-all text-center">{value}</p>
-    </div>
+    <span className="inline-flex shrink-0 items-baseline gap-1">
+      <span className="text-label-tertiary">{label}</span>
+      <span className="font-semibold tabular-nums text-label">{value}</span>
+    </span>
   );
 }
 
-function CompactPoint({
-  title,
-  item,
-  tone,
-}: {
-  title: string;
-  item: string | undefined;
-  tone: 'good' | 'warn' | 'accent';
-}) {
-  const toneClass =
-    tone === 'good'
-      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-      : tone === 'warn'
-        ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300'
-        : 'bg-primary/10 border-primary/30 text-primary';
-
-  return (
-    <div className={`rounded-lg border px-2.5 py-2 ${toneClass}`}>
-      <p className="text-[11px] font-semibold tracking-wide uppercase opacity-80">{title}</p>
-      <p className="text-xs sm:text-sm leading-relaxed mt-1 text-label-secondary break-words">
-        {item ?? '--'}
-      </p>
-    </div>
-  );
-}
-
-function Badge({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-separator glass-card px-2 py-1">
-      <span className="text-[11px] text-label-tertiary mr-1">{label}</span>
-      <span className="text-xs font-semibold text-label-secondary">{value}</span>
-    </div>
-  );
+function Dot() {
+  return <span className="text-xs text-separator">·</span>;
 }

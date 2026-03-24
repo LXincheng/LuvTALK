@@ -18,7 +18,7 @@
   --secondary: #F2F2F7;
   --secondary-foreground: #1C1C1E;
   --muted: #E5E5EA;
-  --muted-foreground: #8E8E93;
+  --muted-foreground: #7C7C82;
   --accent: #E5E5EA;
   --accent-foreground: #1C1C1E;
   --destructive: #FF3B30;
@@ -37,7 +37,7 @@
   --color-surface-elevated: #FFFFFF;
   --color-label: #000000;
   --color-label-secondary: rgba(60, 60, 67, 0.6);
-  --color-label-tertiary: rgba(60, 60, 67, 0.3);
+  --color-label-tertiary: rgba(60, 60, 67, 0.45);
   --color-separator: rgba(60, 60, 67, 0.22);
   --color-fill: rgba(120, 120, 128, 0.16);
   --color-fill-secondary: rgba(120, 120, 128, 0.12);
@@ -47,7 +47,7 @@
   /* Glass morphism tokens */
   --glass-bg: rgba(255, 255, 255, 0.92);
   --glass-bg-heavy: rgba(255, 255, 255, 0.97);
-  --glass-bg-light: rgba(255, 255, 255, 0.80);
+  --glass-bg-light: rgba(255, 255, 255, 0.85);
   --glass-border: rgba(0, 0, 0, 0.12);
   --glass-blur: 20px;
   --glass-blur-heavy: 30px;
@@ -102,6 +102,8 @@
   --status-track: rgba(120, 120, 128, 0.16);
   --status-accent: rgba(0, 122, 255, 0.58);
   --status-accent-soft: rgba(0, 122, 255, 0.2);
+  --toast-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 248, 250, 0.90));
+  --toast-border: rgba(255, 255, 255, 0.58);
 }
 
 .dark {
@@ -168,6 +170,8 @@
   --status-track: rgba(120, 120, 128, 0.24);
   --status-accent: rgba(10, 132, 255, 0.62);
   --status-accent-soft: rgba(10, 132, 255, 0.25);
+  --toast-bg: linear-gradient(180deg, rgba(28, 28, 30, 0.92), rgba(20, 20, 22, 0.88));
+  --toast-border: rgba(255, 255, 255, 0.08);
 }
 
 /* ─── Base Layer ─── */

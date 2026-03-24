@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, X, RotateCcw, Volume2 } from 'lucide-react';
+import { Check, X, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLocale } from '../providers/LocaleContext';
 import { fetchDailyReviewCached, submitReviewFeedback } from '../services/reviewService';
@@ -8,6 +8,8 @@ import {
   synthesizeConversationSpeech,
 } from '../services/conversationService';
 import AudioPlayer from '../components/chat/AudioPlayer';
+import ReviewFlipCard from '../components/micro/ReviewFlipCard';
+import ProgressCelebration from '../components/micro/ProgressCelebration';
 import type { DailyReviewPayload, LanguageCode, ReviewCard } from '../types/api';
 
 const getStoredTargetLanguage = (): LanguageCode => {
@@ -33,7 +35,6 @@ export default function DailyReviewPage() {
   const { t, locale } = useLocale();
   const [cards, setCards] = useState<ReviewCard[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showTranslation, setShowTranslation] = useState(false);
   const [reviewedCount, setReviewedCount] = useState(0);
   const [needPracticeCount, setNeedPracticeCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -94,7 +95,6 @@ export default function DailyReviewPage() {
   };
 
   const nextCard = () => {
-    setShowTranslation(false);
     resetAudio();
     if (currentIndex < cards.length - 1) {
       setCurrentIndex((prev) => prev + 1);
@@ -135,7 +135,6 @@ export default function DailyReviewPage() {
     setCurrentIndex(0);
     setReviewedCount(0);
     setNeedPracticeCount(0);
-    setShowTranslation(false);
     resetAudio();
   };
 
@@ -218,7 +217,8 @@ export default function DailyReviewPage() {
   if (isComplete) {
     return (
       <div className="h-full flex items-center justify-center px-4 bg-surface">
-        <div className="glass-card rounded-2xl shadow-lg p-8 max-w-md w-full text-center space-y-6">
+        <div className="relative glass-card rounded-2xl shadow-lg p-8 max-w-md w-full text-center space-y-6">
+          <ProgressCelebration trigger={isComplete} />
           <div className="w-20 h-20 bg-[var(--color-primary-soft)] rounded-full flex items-center justify-center mx-auto">
             <Check className="w-10 h-10 text-primary" />
           </div>
@@ -285,61 +285,19 @@ export default function DailyReviewPage() {
         </div>
       </div>
 
-      <div className="glass-card rounded-2xl shadow-xl p-8 max-w-lg w-full min-h-[420px] flex flex-col">
+      <div className="glass-card rounded-2xl shadow-xl p-6 sm:p-8 max-w-lg w-full min-h-[420px] flex flex-col">
         <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-          <div className="text-center space-y-3">
-            <p className="text-sm text-primary font-medium">
-              {t('reviewWordLabel')}
-            </p>
-            <h2 className="text-4xl font-semibold text-label">
-              {currentCard.term}
-            </h2>
-            {audioUrl ? (
-              <div className="max-w-xs mx-auto">
-                <AudioPlayer src={audioUrl} compact autoPlay />
-              </div>
-            ) : (
-              <button
-                onClick={handleSpeak}
-                disabled={isSpeaking}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-[var(--color-primary-soft)] text-primary hover:bg-[var(--color-primary-soft)] transition-colors disabled:opacity-60 font-medium"
-              >
-                <Volume2 className={`w-4 h-4 ${isSpeaking ? 'animate-pulse' : ''}`} />
-                {isSpeaking ? t('reviewLoading') : t('reviewSpeak')}
-              </button>
-            )}
-          </div>
-
-          <button
-            onClick={() => setShowTranslation(!showTranslation)}
-            className="text-sm text-primary hover:opacity-80 font-medium underline"
-          >
-            {showTranslation ? t('reviewHide') : t('reviewShow')}
-          </button>
-
-          {showTranslation && (
-            <div className="w-full space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-fill-secondary rounded-xl p-4 border border-separator">
-                <p className="text-sm text-label-secondary mb-1">
-                  {t('reviewTranslation')}
-                </p>
-                <p className="text-lg text-label">
-                  {getCardLabel(currentCard)}
-                </p>
-              </div>
-              <div className="bg-[var(--color-primary-soft)] rounded-xl p-4 border border-primary/20">
-                <p className="text-sm text-primary mb-2">
-                  {t('reviewExample')}
-                </p>
-                <p className="text-label mb-1">
-                  {getCardExample(currentCard)}
-                </p>
-                {currentCard.exampleTranslation && (
-                  <p className="text-sm text-label-secondary italic">
-                    {currentCard.exampleTranslation}
-                  </p>
-                )}
-              </div>
+          <ReviewFlipCard
+            term={currentCard.term}
+            translation={getCardLabel(currentCard)}
+            example={getCardExample(currentCard)}
+            onSpeak={handleSpeak}
+            speakLabel={isSpeaking ? t('reviewLoading') : t('reviewSpeak')}
+            flipHint={t('reviewFlipHint')}
+          />
+          {audioUrl && (
+            <div className="max-w-xs mx-auto w-full">
+              <AudioPlayer src={audioUrl} compact autoPlay />
             </div>
           )}
         </div>

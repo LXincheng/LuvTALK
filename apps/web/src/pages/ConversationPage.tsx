@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { History } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
-import ChatHistoryDrawer from '../components/chat/ChatHistoryDrawer';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
 import VoiceStyleSelector from '../components/chat/VoiceStyleSelector';
 import ConversationRecoveryBanner from '../components/chat/ConversationRecoveryBanner';
 import SessionSummaryCard from '../components/chat/SessionSummaryCard';
 import type { ConversationRecoveryState } from '../components/chat/ConversationRecoveryBanner';
-import ImmersiveMode from '../components/immersive/ImmersiveMode';
 import { API_BASE_URL } from '../services/apiClient';
 import {
   storeConversationAccessKey,
@@ -18,6 +17,7 @@ import {
   fetchConversationById,
   fetchConversationHistory,
   fetchVoiceOperationStatus,
+  generateConversationReport,
   resumeConversation,
   sendConversationMessage,
   startConversation,
@@ -29,7 +29,9 @@ import {
 import { createFavorite } from '../services/favoritesService';
 import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
+import type { LocaleKey } from '../providers/LocaleContext';
 import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
+import { CONVERSATION_REPORT_TOAST_ID } from '../constants/report';
 import type { Annotation, ChatMode, Message, MessageStatusTone } from '../types/chat';
 import type {
   ConversationHistorySummary,
@@ -52,6 +54,13 @@ interface ActiveVoiceOperation {
   conversationId: string;
   operationId: string;
 }
+
+const LazyChatHistoryDrawer = lazy(
+  () => import('../components/chat/ChatHistoryDrawer'),
+);
+const LazyImmersiveMode = lazy(
+  () => import('../components/immersive/ImmersiveMode'),
+);
 
 const getInitialTargetLanguage = (): LanguageCode => {
   if (typeof window === 'undefined') {
@@ -314,6 +323,7 @@ const normalizeHistoryList = (
 
 const buildLocalSessionSummary = (
   currentSession: ConversationSession | null,
+  t: (key: LocaleKey) => string,
 ): SessionSummaryPayload | null => {
   if (!currentSession) {
     return null;
@@ -351,15 +361,16 @@ const buildLocalSessionSummary = (
     aiTurns: aiMessages.length,
     averageScore,
     latestScore,
-    strengths: ['保持了连续对话，输出节奏稳定。'],
-    improvements: ['可继续优化语法与发音细节。'],
-    recommendedNextActions: ['继续下一轮对话并复用本轮关键词。'],
+    strengths: [t('sessionSummaryDefaultStrength')],
+    improvements: [t('sessionSummaryDefaultImprovement')],
+    recommendedNextActions: [t('sessionSummaryDefaultNextAction')],
     keyTerms,
   };
 };
 
 export default function ConversationPage() {
   const { t, locale } = useLocale();
+  const navigate = useNavigate();
   const [session, setSession] = useState<ConversationSession | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -382,6 +393,7 @@ export default function ConversationPage() {
     return (localStorage.getItem('chatMode') as ChatMode) || 'voice';
   });
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [historyDrawerMounted, setHistoryDrawerMounted] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<
     ConversationHistorySummary[]
   >([]);
@@ -418,6 +430,7 @@ export default function ConversationPage() {
   const pendingTutorReplyRef = useRef<PendingTutorReply | null>(null);
   const focusBufferRef = useRef(0);
   const summaryFetchSeqRef = useRef(0);
+  const reportFetchSeqRef = useRef(0);
   const lastSummaryAiCountRef = useRef(0);
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
@@ -832,7 +845,7 @@ export default function ConversationPage() {
     const seq = ++summaryFetchSeqRef.current;
     setIsSummaryLoading(true);
     try {
-      const payload = await fetchConversationSummary(session.id);
+      const payload = await fetchConversationSummary(session.id, locale);
       if (seq !== summaryFetchSeqRef.current) {
         return;
       }
@@ -841,13 +854,96 @@ export default function ConversationPage() {
       if (seq !== summaryFetchSeqRef.current) {
         return;
       }
-      setSessionSummary((prev) => prev ?? buildLocalSessionSummary(session));
+      setSessionSummary((prev) => prev ?? buildLocalSessionSummary(session, t));
     } finally {
       if (seq === summaryFetchSeqRef.current) {
         setIsSummaryLoading(false);
       }
     }
-  }, [session]);
+  }, [locale, session]);
+
+  const refreshConversationReport = useCallback(async (
+    options?: {
+      generate?: boolean;
+      force?: boolean;
+      sourceMode?: 'immersive' | 'voice' | 'text';
+      voiceStyle?: string;
+    },
+  ) => {
+    if (!session?.id) {
+      return;
+    }
+    const seq = ++reportFetchSeqRef.current;
+    if (options?.generate) {
+      toast.loading(t('reportGeneratingToastTitle'), {
+        id: CONVERSATION_REPORT_TOAST_ID,
+        description: t('reportGeneratingToastBody'),
+      });
+    }
+    try {
+      if (options?.generate) {
+        await generateConversationReport(session.id, {
+            force: options.force ?? true,
+            sourceMode: options.sourceMode,
+            voiceStyle: options.voiceStyle,
+          });
+      }
+      if (seq !== reportFetchSeqRef.current) {
+        return;
+      }
+      if (options?.generate) {
+        toast.success(t('reportReadyToast'), {
+          id: CONVERSATION_REPORT_TOAST_ID,
+          description: t('reportReadyToastBody'),
+          action: {
+            label: t('immersiveReportGoProfile'),
+            onClick: () => navigate('/profile'),
+          },
+        });
+      }
+    } catch {
+      if (seq !== reportFetchSeqRef.current) {
+        return;
+      }
+      if (options?.generate) {
+        toast.error(t('reportGenerateError'), {
+          id: CONVERSATION_REPORT_TOAST_ID,
+          description: t('reportGenerateErrorBody'),
+          action: {
+            label: t('commonRetry'),
+            onClick: () => {
+              void refreshConversationReport(options);
+            },
+          },
+        });
+      }
+    }
+  }, [navigate, session?.id, t]);
+
+  const promptConversationReport = useCallback(
+    (conversationId: string, voiceStyle: string) => {
+      toast(t('immersiveReportPromptTitle'), {
+        id: CONVERSATION_REPORT_TOAST_ID,
+        description: t('immersiveReportPromptBody'),
+        duration: 6000,
+        action: {
+          label: t('immersiveReportGenerateNow'),
+          onClick: () => {
+            if (currentSessionIdRef.current !== conversationId) {
+              return;
+            }
+            void refreshConversationReport({
+              generate: true,
+              force: true,
+              sourceMode: 'immersive',
+              voiceStyle,
+            });
+          },
+        },
+      });
+    },
+    [refreshConversationReport, t],
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1627,34 +1723,71 @@ export default function ConversationPage() {
       );
     }
     return (
-      <ImmersiveMode
-        conversationId={session.id}
-        voice={ttsVoice}
-        onVoiceChange={setTtsVoice}
-        onExit={() => {
-          // Skip existing messages but allow new incoming AI messages after exit.
-          ttsBaselineRef.current = session.messages.length;
-          setChatMode('voice');
-        }}
-        onFallbackToText={() => {
-          ttsBaselineRef.current = session.messages.length;
-          setChatMode('voice');
-        }}
-      />
+      <Suspense
+        fallback={(
+          <div className="fixed inset-0 z-50 bg-surface flex items-center justify-center">
+            <div className="rounded-xl glass-card px-4 py-3 text-sm text-label-secondary">
+              {t('immersiveConnecting')}
+            </div>
+          </div>
+        )}
+      >
+        <LazyImmersiveMode
+          conversationId={session.id}
+          voice={ttsVoice}
+          onVoiceChange={setTtsVoice}
+          onExit={() => {
+            const nextConversationId = session.id;
+            const nextVoiceStyle = ttsVoice;
+            // Skip existing messages but allow new incoming AI messages after exit.
+            ttsBaselineRef.current = session.messages.length;
+            setChatMode('voice');
+            window.setTimeout(() => {
+              if (currentSessionIdRef.current !== nextConversationId) {
+                return;
+              }
+              promptConversationReport(nextConversationId, nextVoiceStyle);
+            }, 220);
+          }}
+          onFallbackToText={() => {
+            ttsBaselineRef.current = session.messages.length;
+            setChatMode('voice');
+          }}
+        />
+      </Suspense>
     );
   }
 
   return (
     <div className="h-full flex flex-col bg-surface">
-      <ChatHistoryDrawer
-        isOpen={historyDrawerOpen}
-        onClose={() => setHistoryDrawerOpen(false)}
-        conversations={conversationHistory}
-        activeConversationId={session?.id}
-        onSelectConversation={handleSelectConversation}
-        onNewChat={handleNewChat}
-        isLoading={isLoadingHistory}
-      />
+      {historyDrawerMounted && (
+        <Suspense
+          fallback={(
+            <div className="fixed inset-0 z-50">
+              <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" />
+              <div className="absolute left-0 top-0 bottom-0 w-[84vw] max-w-sm border-r border-separator glass-sidebar p-4">
+                <div className="animate-pulse space-y-3">
+                  <div className="h-5 w-24 rounded bg-fill" />
+                  <div className="h-10 rounded-xl bg-fill" />
+                  <div className="h-20 rounded-2xl bg-fill" />
+                  <div className="h-20 rounded-2xl bg-fill" />
+                  <div className="h-20 rounded-2xl bg-fill" />
+                </div>
+              </div>
+            </div>
+          )}
+        >
+          <LazyChatHistoryDrawer
+            isOpen={historyDrawerOpen}
+            onClose={() => setHistoryDrawerOpen(false)}
+            conversations={conversationHistory}
+            activeConversationId={session?.id}
+            onSelectConversation={handleSelectConversation}
+            onNewChat={handleNewChat}
+            isLoading={isLoadingHistory}
+          />
+        </Suspense>
+      )}
 
       <div className="border-b border-separator glass-card">
         {/* Mobile */}
@@ -1662,6 +1795,7 @@ export default function ConversationPage() {
           <div className="flex items-center gap-1.5 px-2 py-2 min-w-0">
             <button
               onClick={() => {
+                setHistoryDrawerMounted(true);
                 setHistoryDrawerOpen(true);
                 void loadHistory();
               }}
@@ -1718,6 +1852,7 @@ export default function ConversationPage() {
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <button
               onClick={() => {
+                setHistoryDrawerMounted(true);
                 setHistoryDrawerOpen(true);
                 void loadHistory();
               }}
@@ -1778,21 +1913,6 @@ export default function ConversationPage() {
       </AnimatePresence>
 
       <SessionSummaryCard
-        title={t('sessionSummaryTitle')}
-        subtitle={t('sessionSummarySubtitle')}
-        loadingText={t('sessionSummaryLoading')}
-        refreshText={t('commonRetry')}
-        strengthsTitle={t('sessionSummaryStrengths')}
-        improvementsTitle={t('sessionSummaryImprovements')}
-        nextActionsTitle={t('sessionSummaryNextActions')}
-        keyTermsTitle={t('sessionSummaryKeyTerms')}
-        emptyText={t('sessionSummaryEmpty')}
-        collapseText={t('sessionSummaryCollapse')}
-        expandText={t('sessionSummaryExpand')}
-        averageLabel={t('sessionSummaryMetricAverage')}
-        latestLabel={t('sessionSummaryMetricLatest')}
-        turnsLabel={t('sessionSummaryMetricTurns')}
-        minutesLabel={t('sessionSummaryMetricMinutes')}
         summary={sessionSummary}
         isLoading={isSummaryLoading}
         onRefresh={() => {
