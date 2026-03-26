@@ -1,7 +1,6 @@
 import {
   Activity,
   AudioLines,
-  ChevronDown,
   Languages,
   RefreshCw,
   Sparkles,
@@ -9,8 +8,7 @@ import {
   TrendingUp,
   Waves,
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useLocale } from '../../providers/LocaleContext';
 import type { ConversationReportPayload, LanguageCode } from '../../types/api';
@@ -49,8 +47,6 @@ export default function ConversationReportPanel({
   className = '',
 }: ConversationReportPanelProps) {
   const { t, locale } = useLocale();
-  const [analysisOpen, setAnalysisOpen] = useState(true);
-  const [planOpen, setPlanOpen] = useState(false);
 
   const formattedTime = useMemo(() => {
     if (!report?.updatedAt) return '';
@@ -64,14 +60,17 @@ export default function ConversationReportPanel({
     }).format(date);
   }, [locale, report?.updatedAt]);
 
-  /* ─── Empty state ─── */
   if (!report && !isLoading) {
     return (
-      <div className={`flex flex-col items-start gap-4 py-2 ${className}`}>
+      <div className={`flex flex-col items-start gap-3 py-1 ${className}`}>
         <div className="space-y-1.5">
           <ReportBadge label={t('reportBadge')} />
-          <h3 className="text-lg font-semibold tracking-tight text-label">{t('reportTitle')}</h3>
-          <p className="text-sm leading-5 text-label-secondary">{t('reportEmpty')}</p>
+          <h3 className="text-lg font-semibold tracking-tight text-label">
+            {t('reportTitle')}
+          </h3>
+          <p className="max-w-2xl text-sm leading-5 text-label-secondary">
+            {t('reportEmpty')}
+          </p>
         </div>
         {onGenerate ? (
           <button
@@ -87,52 +86,52 @@ export default function ConversationReportPanel({
     );
   }
 
-  /* ─── Main layout ─── */
   return (
     <div className={`space-y-3 ${className}`}>
+      <section className="rounded-2xl border border-separator bg-surface-elevated/92 p-3.5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <ReportBadge label={t('reportBadge')} />
+            <h3 className="text-[16px] font-semibold tracking-tight text-label break-words">
+              {report?.report.headline ?? t('reportTitle')}
+            </h3>
+            {(report?.report.overallSummary || isLoading) ? (
+              <p className="max-w-2xl text-[13px] leading-5 text-label-secondary">
+                {isLoading && !report ? t('reportGenerating') : report?.report.overallSummary}
+              </p>
+            ) : null}
+          </div>
 
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <ReportBadge label={t('reportBadge')} />
-          <h3 className="text-[17px] font-semibold tracking-tight text-label">
-            {report?.report.headline ?? t('reportTitle')}
-          </h3>
-          {(report?.report.overallSummary || isLoading) ? (
-            <p className="text-sm leading-5 text-label-secondary">
-              {isLoading && !report ? t('reportGenerating') : report?.report.overallSummary}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
           {onRefresh ? (
             <button
               type="button"
               onClick={onRefresh}
               disabled={isLoading}
-              className="inline-flex items-center gap-1.5 rounded-full border border-separator bg-fill px-3 py-1.5 text-[11px] text-label-secondary transition hover:bg-fill-secondary disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-separator bg-fill px-3 py-1.5 text-[11px] text-label-secondary transition hover:bg-fill-secondary disabled:opacity-50"
             >
               <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
               {t('reportRefresh')}
             </button>
           ) : null}
-          {report ? (
-            <div className="flex flex-wrap items-center justify-end gap-1">
-              <MetaPill icon={<Languages className="h-3 w-3" />} label={t(resolveLanguageLabelKey(report.targetLanguage))} />
-              <MetaPill
-                icon={<AudioLines className="h-3 w-3" />}
-                label={report.voiceStyle ? t(resolveVoiceLabelKey(report.voiceStyle)) : t('reportVoiceAuto')}
-              />
-              {formattedTime ? (
-                <MetaPill icon={<Timer className="h-3 w-3" />} label={formattedTime} />
-              ) : null}
-            </div>
-          ) : null}
         </div>
-      </div>
 
-      {/* ── Metrics 2×2 on mobile, 4×1 on sm+ ── */}
+        {report ? (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <MetaPill
+              icon={<Languages className="h-3 w-3" />}
+              label={t(resolveLanguageLabelKey(report.targetLanguage))}
+            />
+            <MetaPill
+              icon={<AudioLines className="h-3 w-3" />}
+              label={report.voiceStyle ? t(resolveVoiceLabelKey(report.voiceStyle)) : t('reportVoiceAuto')}
+            />
+            {formattedTime ? (
+              <MetaPill icon={<Timer className="h-3 w-3" />} label={formattedTime} />
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
       {report ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <MetricCard
@@ -160,78 +159,49 @@ export default function ConversationReportPanel({
 
       {report ? (
         <>
-          {/* ── Learner snapshot ── */}
-          <div className="rounded-xl bg-fill px-3.5 py-3">
-            <p className="mb-1 text-[10px] uppercase tracking-[0.14em] text-label-tertiary">
-              {t('reportSnapshot')}
-            </p>
-            <p className="text-sm leading-5 text-label-secondary">
-              {report.report.learnerSnapshot}
-            </p>
+          <section className="grid gap-2.5">
+            <CompactCard title={t('reportSnapshot')}>
+              <p className="text-[13px] leading-5 text-label-secondary">
+                {report.report.learnerSnapshot}
+              </p>
+            </CompactCard>
+          </section>
+
+          <div className="grid gap-2.5 lg:grid-cols-2">
+            <PointGroup title={t('reportStrengths')} items={report.report.strengths} tone="good" />
+            <PointGroup title={t('reportOpportunities')} items={report.report.opportunities} tone="warn" />
           </div>
 
-          {/* ── Section toggles ── */}
-          <div className="flex gap-2">
-            <ToggleButton label={t('reportAnalysisToggle')} open={analysisOpen} onToggle={() => setAnalysisOpen((v) => !v)} />
-            <ToggleButton label={t('reportPlanToggle')} open={planOpen} onToggle={() => setPlanOpen((v) => !v)} />
+          <div className="grid gap-2.5 lg:grid-cols-2">
+            <SectionCard title={t('reportPronunciation')} section={report.report.pronunciation} />
+            <SectionCard title={t('reportVocabulary')} section={report.report.vocabulary} />
+            <SectionCard title={t('reportGrammar')} section={report.report.grammar} />
+            <SectionCard title={t('reportRhythm')} section={report.report.rhythm} />
           </div>
 
-          {/* ── Analysis ── */}
-          {analysisOpen ? (
-            <div className="space-y-2.5">
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                <PointGroup title={t('reportStrengths')} items={report.report.strengths} tone="good" />
-                <PointGroup title={t('reportOpportunities')} items={report.report.opportunities} tone="warn" />
-              </div>
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                <SectionCard title={t('reportPronunciation')} section={report.report.pronunciation} accent="bg-sky-500/10" />
-                <SectionCard title={t('reportVocabulary')} section={report.report.vocabulary} accent="bg-emerald-500/10" />
-                <SectionCard title={t('reportGrammar')} section={report.report.grammar} accent="bg-fuchsia-500/10" />
-                <SectionCard title={t('reportRhythm')} section={report.report.rhythm} accent="bg-amber-500/10" />
-              </div>
-            </div>
-          ) : null}
-
-          {/* ── Next session plan + key moments ── */}
-          {planOpen ? (
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              <div className="rounded-xl border border-separator bg-fill p-3.5">
-                <p className="text-sm font-semibold text-label">{t('reportNextSession')}</p>
-                <p className="mt-1.5 text-xs leading-5 text-label-secondary">
-                  {report.report.nextSessionPlan.focus}
-                </p>
-                <div className="mt-2.5 space-y-1.5">
-                  {report.report.nextSessionPlan.drills.map((item) => (
-                    <div key={item} className="rounded-lg border border-separator bg-surface-elevated px-3 py-1.5 text-xs leading-5 text-label-secondary">
-                      {item}
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-2.5 rounded-lg border border-primary/25 bg-primary/8 px-3 py-2 text-xs leading-5 text-primary">
-                  {report.report.nextSessionPlan.checkpoint}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-separator bg-fill p-3.5">
-                <p className="text-sm font-semibold text-label">{t('reportKeyMoments')}</p>
-                <div className="mt-2.5 space-y-2">
-                  {report.report.keyMoments.map((moment) => (
-                    <motion.div
-                      key={`${moment.speaker}-${moment.quote}`}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="rounded-lg border border-separator bg-surface-elevated p-2.5"
-                    >
-                      <span className="mb-1.5 inline-flex rounded-full border border-separator bg-fill px-2 py-0.5 text-[10px] text-label-tertiary">
+          {report.report.keyMoments.length > 0 ? (
+            <CompactCard title={t('reportKeyMoments')}>
+              <div className="grid gap-2">
+                {report.report.keyMoments.map((moment) => (
+                  <div
+                    key={`${moment.speaker}-${moment.quote}`}
+                    className="rounded-xl border border-separator bg-fill px-3 py-2.5"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex rounded-full bg-surface-elevated px-2 py-0.5 text-[10px] text-label-secondary">
                         {moment.speaker === 'user' ? t('reportSpeakerLearner') : t('reportSpeakerTutor')}
                       </span>
-                      <p className="text-xs leading-5 text-label">"{moment.quote}"</p>
-                      <p className="mt-1 text-[11px] leading-4 text-label-secondary">{moment.note}</p>
-                    </motion.div>
-                  ))}
-                </div>
+                    </div>
+                    <p className="mt-1.5 text-[13px] leading-5 text-label break-words">
+                      {moment.quote}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-label-secondary break-words">
+                      {moment.note}
+                    </p>
+                  </div>
+                ))}
               </div>
-            </div>
+            </CompactCard>
           ) : null}
         </>
       ) : (
@@ -241,11 +211,9 @@ export default function ConversationReportPanel({
   );
 }
 
-/* ─── Sub-components ─── */
-
 function ReportBadge({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-separator bg-fill px-2.5 py-1 text-[11px] text-label-secondary">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/15 bg-[var(--color-primary-soft)] px-2.5 py-1 text-[10px] text-label-secondary">
       <Sparkles className="h-3 w-3 text-primary" />
       {label}
     </span>
@@ -254,51 +222,47 @@ function ReportBadge({ label }: { label: string }) {
 
 function MetaPill({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-separator bg-fill px-2 py-0.5 text-[10px] text-label-secondary">
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-separator bg-fill px-2.5 py-1 text-[10px] leading-none text-label-secondary">
       {icon}
-      {label}
+      <span className="break-words">{label}</span>
     </span>
   );
 }
 
 function MetricCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-separator bg-surface-elevated px-3 py-2.5 shadow-sm">
-      <div className="flex items-center gap-1 text-[10px] text-label-tertiary">
+    <div className="rounded-2xl border border-separator bg-surface-elevated px-3 py-2.5 shadow-sm">
+      <div className="flex items-center gap-1 text-[10px] leading-none text-label-tertiary">
         {icon}
         <span className="truncate">{label}</span>
       </div>
-      <div className="mt-1 text-base font-semibold tracking-tight text-label">
+      <div className="mt-1.5 text-[15px] font-semibold tracking-tight text-label">
         {value}
       </div>
     </div>
   );
 }
 
-function ToggleButton({ label, open, onToggle }: { label: string; open: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="inline-flex items-center gap-1.5 rounded-full border border-separator bg-fill px-3 py-1.5 text-xs text-label-secondary transition hover:bg-fill-secondary"
-    >
-      {label}
-      <ChevronDown className={`h-3 w-3 transition ${open ? 'rotate-180' : ''}`} />
-    </button>
-  );
-}
-
-function PointGroup({ title, items, tone }: { title: string; items: string[]; tone: 'good' | 'warn' }) {
+function PointGroup({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: 'good' | 'warn';
+}) {
   const cls =
     tone === 'good'
       ? 'border-emerald-500/20 bg-emerald-500/8 dark:bg-emerald-500/12'
       : 'border-amber-500/20 bg-amber-500/8 dark:bg-amber-500/12';
+
   return (
-    <div className={`rounded-xl border p-3 ${cls}`}>
-      <p className="text-xs font-semibold text-label">{title}</p>
-      <div className="mt-2 space-y-1.5">
+    <div className={`rounded-2xl border p-3.5 shadow-sm ${cls}`}>
+      <p className="text-sm font-semibold text-label">{title}</p>
+      <div className="mt-2.5 space-y-1.5">
         {items.map((item) => (
-          <div key={item} className="rounded-lg bg-fill px-3 py-2 text-xs leading-5 text-label-secondary">
+          <div key={item} className="rounded-xl bg-surface-elevated/90 px-3 py-2 text-[13px] leading-5 text-label-secondary">
             {item}
           </div>
         ))}
@@ -310,25 +274,23 @@ function PointGroup({ title, items, tone }: { title: string; items: string[]; to
 function SectionCard({
   title,
   section,
-  accent,
 }: {
   title: string;
   section: ConversationReportPayload['report']['pronunciation'];
-  accent: string;
 }) {
   const { t } = useLocale();
+
   return (
-    <div className="rounded-xl border border-separator bg-surface-elevated p-3">
-      <div className={`-mx-3 -mt-3 mb-3 h-1.5 rounded-t-xl ${accent}`} />
-      <p className="text-xs font-semibold text-label">{title}</p>
-      <p className="mt-1.5 text-xs leading-5 text-label-secondary">{section.summary}</p>
+    <div className="rounded-2xl border border-separator bg-surface-elevated p-3.5 shadow-sm">
+      <p className="text-sm font-semibold text-label">{title}</p>
+      <p className="mt-1.5 text-[13px] leading-5 text-label-secondary">{section.summary}</p>
 
       {section.highlights.length > 0 ? (
-        <div className="mt-2">
+        <div className="mt-2.5">
           <p className="text-[10px] uppercase tracking-[0.12em] text-label-tertiary">{t('reportHighlights')}</p>
-          <div className="mt-1.5 flex flex-wrap gap-1">
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
             {section.highlights.map((item) => (
-              <span key={item} className="rounded-full border border-separator bg-fill px-2 py-0.5 text-[10px] text-label-secondary">
+              <span key={item} className="rounded-full border border-separator bg-fill px-2.5 py-1 text-[10px] text-label-secondary">
                 {item}
               </span>
             ))}
@@ -337,14 +299,31 @@ function SectionCard({
       ) : null}
 
       {section.actionPlan.length > 0 ? (
-        <div className="mt-2 space-y-1.5">
+        <div className="mt-2.5 space-y-1.5">
           {section.actionPlan.map((item) => (
-            <div key={item} className="rounded-lg border border-separator bg-fill px-2.5 py-1.5 text-[11px] leading-5 text-label-secondary">
+            <div key={item} className="rounded-xl border border-separator bg-fill px-3 py-2 text-xs leading-5 text-label-secondary">
               {item}
             </div>
           ))}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function CompactCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-separator bg-surface-elevated p-3.5 shadow-sm">
+      <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-label-tertiary">
+        {title}
+      </p>
+      {children}
+    </section>
   );
 }

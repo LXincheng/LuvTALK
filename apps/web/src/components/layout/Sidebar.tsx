@@ -24,12 +24,9 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   return (
     <aside className="w-64 lg:w-72 h-full glass-sidebar border-r border-separator flex flex-col">
       <div className="p-6 border-b border-separator">
-        <h1 className="text-2xl font-semibold text-primary">
-          {t('appName')}
+        <h1 className="text-[1.1rem] font-semibold tracking-[-0.03em] text-label leading-none">
+          LuvTALK
         </h1>
-        <p className="text-sm text-label-secondary mt-1">
-          {t('appSubtitle')}
-        </p>
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-none">

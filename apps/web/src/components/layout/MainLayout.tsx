@@ -10,6 +10,7 @@ export default function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { t } = useLocale();
+  const isChatRoute = location.pathname.startsWith('/chat');
   const currentItem = useMemo(() => {
     return (
       navItems.find((item) => location.pathname.startsWith(item.path)) ??
@@ -36,20 +37,20 @@ export default function MainLayout() {
       )}
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <header className="md:hidden glass-sidebar border-b border-separator px-4 py-3 flex items-center justify-between safe-area-inset-top flex-shrink-0">
+        <header className="md:hidden glass-sidebar border-b border-separator px-4 py-2.5 flex items-center justify-between safe-area-inset-top flex-shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 hover:bg-fill rounded-lg transition-colors flex-shrink-0"
           >
             <Menu className="w-6 h-6 text-label-secondary" />
           </button>
-          <h1 className="text-lg font-semibold text-primary truncate mx-2">
+          <h1 className="mx-2 min-w-0 truncate text-base font-semibold text-primary">
             {t(currentItem.labelKey)}
           </h1>
           <div className="w-10 flex-shrink-0" />
         </header>
 
-        <main className="flex-1 overflow-hidden pb-[var(--bottom-bar-h)] md:pb-0">
+        <main className={`flex-1 overflow-hidden ${isChatRoute ? 'pb-0' : 'pb-[var(--bottom-bar-h)]'} md:pb-0`}>
           <Outlet />
         </main>
       </div>

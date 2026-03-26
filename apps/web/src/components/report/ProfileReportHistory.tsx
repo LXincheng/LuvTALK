@@ -59,7 +59,7 @@ export default function ProfileReportHistory({
   return (
     <>
       {/* ── List card ── */}
-      <section className="glass-card mb-6 rounded-2xl border border-separator p-4 shadow-sm sm:p-5">
+      <section className="glass-card mb-6 rounded-2xl border border-separator p-4 shadow-sm sm:p-[18px]">
         {/* Header */}
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -79,27 +79,30 @@ export default function ProfileReportHistory({
             {isGuest ? t('profileReportsGuestHint') : t('profileReportsEmpty')}
           </p>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {listItems.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => openViewer(item.id)}
-                className="group flex w-full items-center gap-3 rounded-xl border border-separator bg-fill px-3 py-2.5 text-left transition hover:bg-fill-secondary"
+                className="group flex w-full items-center gap-3 rounded-2xl border border-separator bg-surface-elevated px-3.5 py-3 text-left shadow-sm transition hover:border-primary/20 hover:bg-[var(--color-primary-soft)]/40"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-label line-clamp-1">{item.headline}</p>
-                  <div className="mt-1 flex items-center gap-1.5 text-xs text-label-tertiary">
-                    <span>{t(getReportModeLabelKey(item.sourceMode))}</span>
-                    <span>·</span>
-                    <span className="tabular-nums">{formatScoreValue(t, item.averageScore, 'reportScore')}</span>
-                    <span>·</span>
-                    <span className="tabular-nums">{formatReportTimestamp(locale, t, item.updatedAt)}</span>
+                  <p className="text-sm font-semibold text-label break-words">{item.headline}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-label-secondary">
+                    <span className="rounded-full bg-fill px-2 py-0.5">
+                      {t(getReportModeLabelKey(item.sourceMode))}
+                    </span>
+                    <span className="rounded-full bg-fill px-2 py-0.5 tabular-nums">
+                      {formatScoreValue(t, item.averageScore, 'reportScore')}
+                    </span>
+                    <span className="rounded-full bg-fill px-2 py-0.5 tabular-nums">
+                      {formatReportTimestamp(locale, t, item.updatedAt)}
+                    </span>
                     {isGuest ? (
-                      <>
-                        <span>·</span>
-                        <span className="text-primary">{t('profileReportsSampleBadge')}</span>
-                      </>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+                        {t('profileReportsSampleBadge')}
+                      </span>
                     ) : null}
                   </div>
                 </div>
@@ -148,7 +151,7 @@ export default function ProfileReportHistory({
               </div>
 
               {/* Modal header */}
-              <div className="flex items-center justify-between gap-3 border-b border-separator px-4 py-3">
+              <div className="flex items-center justify-between gap-3 border-b border-separator px-4 py-2.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[15px] font-semibold text-label">
                     {activeReport?.report.headline ?? t('reportTitle')}
@@ -167,7 +170,7 @@ export default function ProfileReportHistory({
                       className="inline-flex items-center gap-1.5 rounded-lg border border-separator bg-fill px-3 py-1.5 text-xs font-medium text-label-secondary transition hover:bg-fill-secondary"
                     >
                       <Download className="h-3.5 w-3.5" />
-                      PDF
+                      {t('reportExport')}
                     </button>
                   ) : null}
                   <button
@@ -181,7 +184,7 @@ export default function ProfileReportHistory({
               </div>
 
               {/* Modal body */}
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex-1 overflow-y-auto px-4 py-3">
                 <ConversationReportPanel
                   report={activeReport}
                   isLoading={isGuest ? false : isLoading}

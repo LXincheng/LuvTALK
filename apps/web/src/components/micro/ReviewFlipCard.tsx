@@ -47,9 +47,9 @@ export default function ReviewFlipCard({
                 e.stopPropagation();
                 onSpeak();
               }}
-              className="mt-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-separator text-sm text-label-secondary hover:bg-fill-secondary transition-colors"
+              className="mt-1 inline-flex items-center gap-1.5 rounded-[14px] border border-primary/20 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.96))] px-3.5 py-2 text-sm font-medium text-label shadow-[0_8px_18px_rgba(22,120,255,0.14)] transition hover:bg-[linear-gradient(180deg,rgba(255,255,255,1),rgba(232,242,255,0.98))] dark:bg-[var(--color-primary-soft)] dark:shadow-[0_8px_18px_rgba(0,0,0,0.24)]"
             >
-              <Volume2 className="w-4 h-4" />
+              <Volume2 className="w-4 h-4 text-primary" />
               {speakLabel}
             </button>
           )}

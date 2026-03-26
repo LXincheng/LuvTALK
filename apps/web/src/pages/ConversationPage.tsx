@@ -1,8 +1,9 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { History } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import ChatQuickReplies, { type QuickReplyOption } from '../components/chat/ChatQuickReplies';
 import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
@@ -92,6 +93,8 @@ const GUEST_MAX_HISTORY = 5;
 const MEMORY_PREFERENCE_PREFIX = 'conversationMemoryEnabled:';
 const ACTIVE_CONVERSATION_BY_LANGUAGE_KEY = 'activeConversationIdByLanguage';
 const MEANINGFUL_HISTORY_MIN_MESSAGES = 2;
+const NEW_CHAT_QUICK_REPLY_DELAY_MS = 1400;
+const EXISTING_CHAT_QUICK_REPLY_DELAY_MS = 5000;
 
 let startupSessionPromise: Promise<ConversationSession> | null = null;
 
@@ -368,6 +371,96 @@ const buildLocalSessionSummary = (
   };
 };
 
+const STARTER_QUICK_REPLIES: Record<LanguageCode, string[]> = {
+  cantonese: [
+    '你好呀，我想練習日常對話。',
+    '你可唔可以先問我幾條簡單問題？',
+    '今日我想練餐廳同點餐表達。',
+  ],
+  mandarin: [
+    '你好，我想练习日常聊天。',
+    '你可以先问我几个简单问题吗？',
+    '今天我想练习点餐和购物表达。',
+  ],
+  english: [
+    'Hi, I want to practice everyday conversation.',
+    'Can you ask me a few simple questions first?',
+    'Today I want to practice ordering food and shopping.',
+  ],
+};
+
+const cleanSnippet = (value?: string): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (!compact) {
+    return undefined;
+  }
+  return compact.length > 48 ? `${compact.slice(0, 48).trim()}...` : compact;
+};
+
+const buildContextAwareReplies = (
+  session: ConversationSession,
+  language: LanguageCode,
+): QuickReplyOption[] => {
+  const messages = session.messages;
+  const lastAiMessage = [...messages].reverse().find((message) => message.sender === 'ai');
+  const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
+
+  if (!lastAiMessage) {
+    return STARTER_QUICK_REPLIES[language].map((text, index) => ({
+      id: `starter-${language}-${index}`,
+      text,
+    }));
+  }
+
+  const aiText = lastAiMessage.text.trim();
+  const topic = cleanSnippet(lastUserMessage?.text ?? aiText);
+  const aiAskedQuestion = /[?？]$/.test(aiText) || /^(what|why|how|when|where|which|do|did|can|could|would|will|are|is)\b/i.test(aiText);
+
+  const byLanguage: Record<LanguageCode, string[]> = aiAskedQuestion
+    ? {
+        cantonese: [
+          topic ? `對我嚟講，${topic}都算幾常見。` : '對我嚟講，呢種情況都幾常見。',
+          '如果係我，我通常會先確認一下。',
+          '呢句可唔可以講得再自然啲？',
+        ],
+        mandarin: [
+          topic ? `对我来说，${topic}这种情况挺常见的。` : '对我来说，这种情况挺常见的。',
+          '如果是我，我通常会先确认一下。',
+          '这个说法有没有更自然的表达？',
+        ],
+        english: [
+          topic ? `For me, ${topic.toLowerCase()} is pretty common.` : 'For me, that situation is pretty common.',
+          'If it were me, I would usually confirm it first.',
+          'How can I say that in a more natural way?',
+        ],
+      }
+    : {
+        cantonese: [
+          '你可唔可以再俾我一個例句？',
+          '如果用母語者口吻，通常會點講？',
+          '我想就呢個話題再練多一輪。',
+        ],
+        mandarin: [
+          '你可以再给我一个例句吗？',
+          '如果用母语者口吻，通常会怎么说？',
+          '我想围绕这个话题再练一轮。',
+        ],
+        english: [
+          'Can you give me one more example?',
+          'How would a native speaker say this?',
+          'Can we practice one more turn on this topic?',
+        ],
+      };
+
+  return byLanguage[language].map((text, index) => ({
+    id: `reply-${session.id}-${lastAiMessage.id}-${index}`,
+    text,
+  }));
+};
+
 export default function ConversationPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
@@ -435,8 +528,12 @@ export default function ConversationPage() {
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [isMemorySaving, setIsMemorySaving] = useState(false);
+  const [quickReplyOptions, setQuickReplyOptions] = useState<QuickReplyOption[]>([]);
+  const [quickRepliesVisible, setQuickRepliesVisible] = useState(false);
+  const [dismissedQuickReplyKey, setDismissedQuickReplyKey] = useState<string | null>(null);
   const targetLanguageRef = useRef<LanguageCode>(targetLanguage);
   const nativeLanguageRef = useRef<LanguageCode>(nativeLanguage);
+  const quickReplyTimerRef = useRef<number | null>(null);
 
   const syncActiveSession = useCallback((nextSession: ConversationSession) => {
     setSession(nextSession);
@@ -482,6 +579,13 @@ export default function ConversationPage() {
     if (voiceCompletionSyncTimerRef.current !== null) {
       window.clearTimeout(voiceCompletionSyncTimerRef.current);
       voiceCompletionSyncTimerRef.current = null;
+    }
+  }, []);
+
+  const clearQuickReplyTimer = useCallback(() => {
+    if (quickReplyTimerRef.current !== null) {
+      window.clearTimeout(quickReplyTimerRef.current);
+      quickReplyTimerRef.current = null;
     }
   }, []);
 
@@ -836,7 +940,25 @@ export default function ConversationPage() {
     () => [...sessionMessages, ...optimisticMessages],
     [sessionMessages, optimisticMessages],
   );
-
+  const isNewChatSession = useMemo(() => isFreshSession(session), [session]);
+  const quickReplySuggestionKey = useMemo(() => {
+    if (!session?.id) {
+      return null;
+    }
+    return `${session.id}:${session.messages.length}:${isNewChatSession ? 'starter' : 'reply'}`;
+  }, [isNewChatSession, session?.id, session?.messages.length]);
+  const quickReplyContent = useMemo(() => {
+    if (!session) {
+      return [];
+    }
+    if (isNewChatSession) {
+      return STARTER_QUICK_REPLIES[session.targetLanguage].map((text, index) => ({
+        id: `starter-${session.targetLanguage}-${index}`,
+        text,
+      }));
+    }
+    return buildContextAwareReplies(session, session.targetLanguage);
+  }, [isNewChatSession, session]);
   const refreshSessionSummary = useCallback(async () => {
     if (!session?.id) {
       setSessionSummary(null);
@@ -948,6 +1070,90 @@ export default function ConversationPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [mergedMessages]);
+
+  useEffect(() => {
+    if (!session?.id) {
+      clearQuickReplyTimer();
+      startTransition(() => {
+        setQuickRepliesVisible(false);
+        setQuickReplyOptions([]);
+      });
+      return;
+    }
+
+    const shouldHideImmediately =
+      Boolean(inputValue.trim()) ||
+      isRecording ||
+      isSending ||
+      historyDrawerOpen ||
+      chatMode === 'immersive' ||
+      recoveryState === 'recovering' ||
+      recoveryState === 'error' ||
+      quickReplyContent.length === 0 ||
+      dismissedQuickReplyKey === quickReplySuggestionKey;
+
+    if (shouldHideImmediately) {
+      clearQuickReplyTimer();
+      if (quickRepliesVisible) {
+        startTransition(() => {
+          setQuickRepliesVisible(false);
+        });
+      }
+      return;
+    }
+
+    if (document.visibilityState !== 'visible') {
+      clearQuickReplyTimer();
+      startTransition(() => {
+        setQuickRepliesVisible(false);
+      });
+      return;
+    }
+
+    clearQuickReplyTimer();
+    quickReplyTimerRef.current = window.setTimeout(() => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      startTransition(() => {
+        setQuickReplyOptions(quickReplyContent);
+        setQuickRepliesVisible(true);
+      });
+    }, isNewChatSession ? NEW_CHAT_QUICK_REPLY_DELAY_MS : EXISTING_CHAT_QUICK_REPLY_DELAY_MS);
+
+    return () => {
+      clearQuickReplyTimer();
+    };
+  }, [
+    chatMode,
+    clearQuickReplyTimer,
+    dismissedQuickReplyKey,
+    historyDrawerOpen,
+    inputValue,
+    isNewChatSession,
+    isRecording,
+    isSending,
+    quickReplyContent,
+    quickReplySuggestionKey,
+    quickRepliesVisible,
+    recoveryState,
+    session,
+  ]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        clearQuickReplyTimer();
+        startTransition(() => {
+          setQuickRepliesVisible(false);
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [clearQuickReplyTimer]);
 
   const loadHistory = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -1470,13 +1676,16 @@ export default function ConversationPage() {
     }
   }, [isMemorySaving, session, t]);
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || !session || isSending) {
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const messageText = (overrideText ?? inputValue).trim();
+    if (!messageText || !session || isSending) {
       return;
     }
+    clearQuickReplyTimer();
+    setQuickRepliesVisible(false);
+    setDismissedQuickReplyKey(quickReplySuggestionKey);
     // Only synthesize replies appended after this send action.
     ttsBaselineRef.current = session.messages.length;
-    const messageText = inputValue.trim();
     setInputValue('');
     setIsSending(true);
     const optimisticUser = buildOptimisticUserMessage(messageText);
@@ -1505,7 +1714,24 @@ export default function ConversationPage() {
     } finally {
       setIsSending(false);
     }
-  };
+  }, [
+    beginPendingTutorReply,
+    chatMode,
+    clearPendingTutorReply,
+    clearQuickReplyTimer,
+    inputValue,
+    isSending,
+    quickReplySuggestionKey,
+    session,
+    t,
+  ]);
+
+  const handleQuickReplySelect = useCallback((text: string) => {
+    if (!text.trim() || isSending) {
+      return;
+    }
+    void handleSend(text);
+  }, [handleSend, isSending]);
 
   const handleSaveVocabulary = async (payload: Annotation) => {
     if (!session) {
@@ -1673,7 +1899,9 @@ export default function ConversationPage() {
       placeholder={t('placeholder')}
       recordingLabel={t('recording')}
       onChange={setInputValue}
-      onSend={handleSend}
+      onSend={() => {
+        void handleSend();
+      }}
       onToggleRecording={toggleRecording}
     />
   );
@@ -1921,7 +2149,25 @@ export default function ConversationPage() {
       />
 
       {messageList}
-      {inputArea}
+      <div className="sticky bottom-[var(--bottom-bar-h)] z-30 -mb-px md:static md:mb-0">
+        <div className="relative">
+          <div className="pointer-events-none absolute inset-x-0 bottom-full px-3 pb-2 sm:px-4">
+            <div className="mx-auto flex max-w-4xl justify-start">
+              <ChatQuickReplies
+                visible={quickRepliesVisible}
+                options={quickReplyOptions}
+                disabled={isSending || isRecording}
+                onSelect={handleQuickReplySelect}
+                onClose={() => {
+                  setQuickRepliesVisible(false);
+                  setDismissedQuickReplyKey(quickReplySuggestionKey);
+                }}
+              />
+            </div>
+          </div>
+          {inputArea}
+        </div>
+      </div>
     </div>
   );
 }

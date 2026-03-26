@@ -35,11 +35,19 @@ const REVIEW_NOISE_PATTERNS = [
   /\bencourage you to try\b/i,
   /\byour sentence\b/i,
   /\bour sentence\b/i,
+  /\bdetected english\b/i,
+  /\bmeaning is unclear\b/i,
+  /\bneeds a full question\b/i,
+  /\bincomplete word\b/i,
+  /\bonly one incomplete word\b/i,
+  /\bunclear and needs\b/i,
   /测试/,
   /占位/,
   /示例文本/,
   /系统提示/,
   /请尝试/,
+  /语义不清/,
+  /不完整词/,
 ];
 
 interface ReviewQueueSnapshot {
@@ -85,29 +93,14 @@ export class ReviewService {
     ) {
       this.prisma.ensurePersistentStorageAvailable();
     }
-    const favorites = await this.favoritesService.list(userId);
-    const favoriteCards = this.buildFavoriteCards(favorites);
-    const lowScoreCards = await this.buildLowScoreCards(userId);
-
-    const merged = [
-      ...lowScoreCards.slice(0, MAX_LOW_SCORE_CARDS),
-      ...favoriteCards,
-    ];
-
-    const deduped = this.deduplicateCards(merged);
-    let cards = deduped.slice(0, MAX_DAILY_CARDS);
-
-    if (userId && (await this.canUseReviewTables())) {
-      await this.syncQueueFromCards(userId, deduped);
-      const dueCards = await this.fetchDueQueueCards(userId, MAX_DAILY_CARDS);
-      if (dueCards.length > 0) {
-        cards = dueCards;
-      }
-    }
+    const cards = userId
+      ? (await this.buildDailyReviewFromQueue(userId)) ??
+        (await this.buildReviewCardsFromSources(userId))
+      : await this.buildReviewCardsFromSources();
 
     return {
       date: new Date().toISOString().split("T")[0],
-      cards,
+      cards: cards.slice(0, MAX_DAILY_CARDS),
     };
   }
 
@@ -161,6 +154,46 @@ export class ReviewService {
 
     this.achievementService.queueUserProgressSync(userId);
     return { status: "ok" };
+  }
+
+  private async buildDailyReviewFromQueue(
+    userId: string,
+  ): Promise<ReviewCard[] | null> {
+    const queueState = await this.getQueueState(userId);
+    const queueReady = queueState.count > 0;
+    const tablesReady = await this.canUseReviewTables();
+
+    if (queueReady) {
+      const needsReseed = tablesReady
+        ? await this.hasNewReviewSources(userId, queueState.latestUpdatedAt)
+        : false;
+      if (!needsReseed) {
+        return this.fetchDueQueueCards(userId, MAX_DAILY_CARDS);
+      }
+    }
+
+    const cards = await this.buildReviewCardsFromSources(userId);
+    if (!cards.length) {
+      return queueReady
+        ? this.fetchDueQueueCards(userId, MAX_DAILY_CARDS)
+        : null;
+    }
+
+    await this.syncQueueFromCards(userId, cards);
+    return this.fetchDueQueueCards(userId, MAX_DAILY_CARDS);
+  }
+
+  private async buildReviewCardsFromSources(
+    userId?: string,
+  ): Promise<ReviewCard[]> {
+    const favorites = await this.favoritesService.list(userId);
+    const favoriteCards = this.buildFavoriteCards(favorites);
+    const lowScoreCards = await this.buildLowScoreCards(userId);
+
+    return this.deduplicateCards([
+      ...lowScoreCards.slice(0, MAX_LOW_SCORE_CARDS),
+      ...favoriteCards,
+    ]).slice(0, MAX_DAILY_CARDS);
   }
 
   private async buildLowScoreCards(userId?: string): Promise<ReviewCard[]> {
@@ -352,7 +385,9 @@ export class ReviewService {
     score?: number,
   ): ReviewCard | null {
     const term = this.pickReviewTerm(learnerText);
-    const definition = this.pickReviewDefinition(scoreReason);
+    const definition =
+      this.pickReviewDefinition(scoreReason) ??
+      this.pickReviewDefinition(this.buildFallbackDefinitionFromReply(tutorReply));
     const example =
       this.pickReviewExample([learnerText]) ??
       this.pickReviewExample([tutorReply]);
@@ -397,6 +432,20 @@ export class ReviewService {
       return undefined;
     }
     return cleaned;
+  }
+
+  private buildFallbackDefinitionFromReply(
+    tutorReply?: string,
+  ): string | undefined {
+    const cleaned = this.cleanReviewText(tutorReply);
+    if (!cleaned || this.isReviewNoise(cleaned)) {
+      return undefined;
+    }
+    const [firstSentence] = cleaned.split(/(?<=[.!?。！？])\s+/);
+    if (!firstSentence || firstSentence.length < 6 || firstSentence.length > 120) {
+      return undefined;
+    }
+    return firstSentence;
   }
 
   private pickReviewExample(
@@ -451,6 +500,71 @@ export class ReviewService {
       output.push(card);
     });
     return output;
+  }
+
+  private async getQueueState(userId: string): Promise<{
+    count: number;
+    latestUpdatedAt?: Date;
+  }> {
+    if (await this.canUseReviewTables()) {
+      const aggregate = await this.prisma.reviewQueueItem.aggregate({
+        where: { userId },
+        _count: { id: true },
+        _max: { updatedAt: true },
+      });
+      return {
+        count: aggregate._count.id,
+        latestUpdatedAt: aggregate._max.updatedAt ?? undefined,
+      };
+    }
+
+    const items = Array.from(this.queueFallback.values()).filter(
+      (item) => item.userId === userId,
+    );
+    const latestUpdatedAt = items
+      .map((item) => item.lastReviewedAt ?? item.nextReviewAt)
+      .filter((value): value is string => Boolean(value))
+      .map((value) => new Date(value))
+      .filter((value) => !Number.isNaN(value.getTime()))
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+
+    return {
+      count: items.length,
+      latestUpdatedAt,
+    };
+  }
+
+  private async hasNewReviewSources(
+    userId: string,
+    latestQueueUpdatedAt?: Date,
+  ): Promise<boolean> {
+    if (!(await this.canUseReviewTables())) {
+      return false;
+    }
+    if (!latestQueueUpdatedAt) {
+      return true;
+    }
+
+    const [latestFavorite, latestConversation] = await Promise.all([
+      this.prisma.favorite.findFirst({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+      this.prisma.conversation.findFirst({
+        where: { userId },
+        orderBy: { updatedAt: "desc" },
+        select: { updatedAt: true },
+      }),
+    ]);
+
+    return Boolean(
+      (latestFavorite?.createdAt &&
+        latestFavorite.createdAt.getTime() > latestQueueUpdatedAt.getTime()) ||
+        (latestConversation?.updatedAt &&
+          latestConversation.updatedAt.getTime() >
+            latestQueueUpdatedAt.getTime()),
+    );
   }
 
   private async canUseReviewTables(): Promise<boolean> {
@@ -600,6 +714,12 @@ export class ReviewService {
 
     return Array.from(this.queueFallback.values())
       .filter((item) => item.userId === userId)
+      .filter((item) => {
+        if (!item.nextReviewAt) {
+          return true;
+        }
+        return new Date(item.nextReviewAt).getTime() <= now.getTime();
+      })
       .sort((a, b) => {
         const nextA = a.nextReviewAt ?? "";
         const nextB = b.nextReviewAt ?? "";

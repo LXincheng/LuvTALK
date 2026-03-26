@@ -20,17 +20,10 @@ const isZh = (report: ConversationReportPayload) => report.reportLanguage === 'z
 const label = (report: ConversationReportPayload, zh: string, en: string) =>
   isZh(report) ? zh : en;
 
-export const downloadConversationReportPdf = (
-  report: ConversationReportPayload,
-) => {
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=960,height=900');
-  if (!popup) {
-    return;
-  }
-
+const buildReportDocument = (report: ConversationReportPayload) => {
   const l = (zh: string, en: string) => label(report, zh, en);
 
-  popup.document.write(`<!doctype html>
+  return `<!doctype html>
 <html lang="${isZh(report) ? 'zh-CN' : 'en'}">
   <head>
     <meta charset="utf-8" />
@@ -180,8 +173,31 @@ export const downloadConversationReportPdf = (
       <div class="footer">LuvTALK · AI Language Tutor</div>
     </main>
   </body>
-</html>`);
-  popup.document.close();
-  popup.focus();
-  popup.print();
+</html>`;
+};
+
+const sanitizeFileName = (value: string) =>
+  value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .slice(0, 64);
+
+export const downloadConversationReportPdf = (
+  report: ConversationReportPayload,
+) => {
+  const html = buildReportDocument(report);
+  const blob = new Blob([html], {
+    type: 'text/html;charset=utf-8',
+  });
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  const stamp = report.updatedAt.slice(0, 10);
+  anchor.href = objectUrl;
+  anchor.download = `${sanitizeFileName(report.report.headline || 'luvtalk-report')}-${stamp}.html`;
+  anchor.rel = 'noopener';
+  anchor.click();
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(objectUrl);
+  }, 1_000);
 };

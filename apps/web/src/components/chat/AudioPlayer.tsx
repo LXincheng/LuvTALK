@@ -103,7 +103,9 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
 
   return (
     <div
-      className={`flex items-center gap-2 rounded-xl glass-card px-3 ${compact ? 'py-1.5' : 'py-2'}`}
+      className={`audio-player-shell flex items-center gap-2 rounded-xl px-2.5 ${
+        compact ? 'py-1.5' : 'py-2'
+      }`}
     >
       <audio
         ref={audioRef}
@@ -116,7 +118,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
       />
       <button
         onClick={togglePlay}
-        className="press-scale flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-primary/80 text-white hover:bg-primary/90 transition-colors"
+        className="audio-play-button press-scale flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full transition-all"
       >
         {isPlaying ? (
           <Pause className="w-3.5 h-3.5" />
@@ -125,7 +127,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
         )}
       </button>
       <div
-        className="flex-1 h-1.5 rounded-full bg-fill cursor-pointer relative overflow-hidden group"
+        className="audio-progress-track relative h-1.5 flex-1 cursor-pointer overflow-hidden rounded-full group"
         onClick={handleSeek}
       >
         <div
@@ -137,7 +139,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
           style={{ left: `calc(${progress * 100}% - 6px)` }}
         />
       </div>
-      <span className="text-[10px] tabular-nums text-label-tertiary flex-shrink-0 min-w-[3.2rem] text-right">
+      <span className="audio-time-chip min-w-[3.25rem] flex-shrink-0 rounded-full px-1.5 py-0.5 text-right text-[10px] tabular-nums text-label-secondary">
         {timeLabel}
       </span>
     </div>

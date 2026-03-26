@@ -305,7 +305,7 @@ export default function DailyReviewPage() {
         <div className="grid grid-cols-2 gap-3 mt-6">
           <button
             onClick={handlePractice}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-fill hover:bg-fill text-label-secondary rounded-xl font-medium transition-colors"
+            className="flex items-center justify-center gap-2 rounded-xl border border-separator bg-surface-elevated px-6 py-3 font-medium text-label-secondary shadow-sm transition hover:bg-[var(--color-primary-soft)]/45"
           >
             <X className="w-5 h-5" />
             {t('reviewNeedPractice')}

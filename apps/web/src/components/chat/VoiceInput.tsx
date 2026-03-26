@@ -31,7 +31,7 @@ export default function VoiceInput({
   const hasDraft = value.trim().length > 0;
 
   return (
-    <div className="glass-card border-t border-separator px-3 py-2 sm:px-4 sm:py-3">
+    <div className="glass-sidebar border-t border-separator px-3 py-2 sm:px-4 sm:py-3 md:glass-card">
       <div className="max-w-4xl mx-auto space-y-2">
         {isRecording && (
           <div className="relative overflow-hidden rounded-xl glass-status px-3 py-1.5">

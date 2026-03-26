@@ -143,7 +143,7 @@
   "profileLearningGoalSubtitle": "Set practical daily/weekly targets and track progress live",
   "profileGoalDailyMinutes": "Daily Minutes",
   "profileGoalWeeklyWords": "Weekly Words",
-  "profileGoalWeeklySpeaking": "Weekly Speaking Turns",
+  "profileGoalWeeklySpeaking": "Weekly Turns",
   "profileGoalProgress": "Current Progress",
   "profileGoalOverall": "Overall Completion",
   "profileGoalSave": "Save Goals",
@@ -273,6 +273,7 @@
   "reportGenerateError": "Failed to generate the report. Please retry.",
   "reportGenerateErrorBody": "Retry now or check your profile history later.",
   "reportRefresh": "Regenerate",
+  "reportExport": "Export",
   "reportOpen": "Open Review",
   "reportClose": "Close Review",
   "reportShort": "Review",
@@ -334,5 +335,9 @@
   "timeMinutesAgo": "{n}m ago",
   "timeHoursAgo": "{n}h ago",
   "timeDaysAgo": "{n}d ago",
-  "messageCountUnit": "msgs"
+  "messageCountUnit": "msgs",
+  "quickRepliesStarterTitle": "Try one of these",
+  "quickRepliesStarterSubtitle": "Simple openers for a fresh conversation",
+  "quickRepliesReplyTitle": "You could reply with",
+  "quickRepliesReplySubtitle": "Context-aware reply ideas appear after a short pause"
 }

@@ -218,7 +218,7 @@ export default function ProfilePage() {
               {user ? (
                 <button
                   onClick={async () => { await signOut(); }}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-fill px-3.5 py-2 text-sm font-medium text-label-secondary transition hover:bg-fill-secondary"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-separator bg-surface-elevated px-3.5 py-2 text-sm font-medium text-label-secondary shadow-sm transition hover:bg-[var(--color-primary-soft)]/50"
                 >
                   <LogOut className="h-4 w-4" />
                   {t('profileLogout')}
@@ -277,7 +277,6 @@ export default function ProfilePage() {
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className={`${TXT.section} text-label`}>{t('profileLearningGoalTitle')}</h2>
-              <p className={`${TXT.caption} mt-0.5 text-label-tertiary`}>{t('profileLearningGoalSubtitle')}</p>
             </div>
             <span className={`${TXT.caption} shrink-0 text-label-tertiary`}>
               {t('profileGoalUpdatedAt')} {goalUpdatedText}
@@ -377,7 +376,7 @@ function GoalInput({ label, min, max, value, onChange }: {
         max={max}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-lg border border-separator bg-fill px-3 py-2 text-sm text-label outline-none transition focus:border-primary"
+        className="w-full rounded-xl border border-separator bg-surface-elevated px-3 py-2 text-sm text-label shadow-sm outline-none transition focus:border-primary focus:bg-white"
       />
     </label>
   );

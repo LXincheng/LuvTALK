@@ -1,5 +1,6 @@
 import { apiClient, cachedGet, invalidateCache } from './apiClient';
 import type { FavoriteItem, FavoriteType } from '../types/api';
+import { invalidateDailyReviewCache } from './reviewService';
 
 export interface CreateFavoritePayload {
   title: string;
@@ -19,6 +20,7 @@ export function fetchFavoritesCached() {
 
 export function createFavorite(payload: CreateFavoritePayload) {
   invalidateCache('favorites');
+  invalidateDailyReviewCache();
   return apiClient.post<FavoriteItem, CreateFavoritePayload>(
     '/favorites',
     payload,
@@ -27,5 +29,6 @@ export function createFavorite(payload: CreateFavoritePayload) {
 
 export function removeFavorite(id: string) {
   invalidateCache('favorites');
+  invalidateDailyReviewCache();
   return apiClient.delete<void>(`/favorites/${id}`);
 }

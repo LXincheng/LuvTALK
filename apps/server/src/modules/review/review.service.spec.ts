@@ -135,4 +135,56 @@ describe("ReviewService", () => {
 
     expect(cards).toEqual([]);
   });
+
+  it("filters diagnostic-only score reasons that are not usable definitions", () => {
+    const service = createService() as unknown as {
+      extractLowScoreCards: (
+        conversationId: string,
+        messages: ConversationMessage[],
+      ) => Array<{
+        term: string;
+        definition?: string;
+      }>;
+    };
+
+    const messages: ConversationMessage[] = [
+      {
+        id: "ai-welcome",
+        sender: "ai",
+        text: "Welcome",
+        language: LanguageCode.English,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "user-1",
+        sender: "user",
+        text: "go work now",
+        language: LanguageCode.English,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: "ai-1",
+        sender: "ai",
+        text: "I am going to work now.",
+        language: LanguageCode.English,
+        createdAt: new Date().toISOString(),
+        meta: {
+          score: 42,
+          scoreReason:
+            "Detected English with only one incomplete word, so meaning is unclear and needs a full question.",
+          translation: "我现在要去上班。",
+          keyTerms: [],
+        },
+      },
+    ];
+
+    const cards = service.extractLowScoreCards("conv-2", messages);
+
+    expect(cards).toEqual([
+      expect.objectContaining({
+        term: "go work now",
+        definition: "I am going to work now.",
+      }),
+    ]);
+  });
 });

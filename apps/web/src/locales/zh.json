@@ -273,6 +273,7 @@
   "reportGenerateError": "报告生成失败，请稍后重试。",
   "reportGenerateErrorBody": "可立即重试或稍后在个人中心查看。",
   "reportRefresh": "重新生成",
+  "reportExport": "导出报告",
   "reportOpen": "查看复盘",
   "reportClose": "关闭复盘",
   "reportShort": "复盘",
@@ -334,5 +335,9 @@
   "timeMinutesAgo": "{n} 分钟前",
   "timeHoursAgo": "{n} 小时前",
   "timeDaysAgo": "{n} 天前",
-  "messageCountUnit": "条"
+  "messageCountUnit": "条",
+  "quickRepliesStarterTitle": "试试这些开场",
+  "quickRepliesStarterSubtitle": "新对话时给你几个自然、实用的起手句",
+  "quickRepliesReplyTitle": "你可以这样接",
+  "quickRepliesReplySubtitle": "停留片刻后给你更贴合当前语境的回复建议"
 }
