@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
 import { useRealtimeSession } from '../../hooks/useRealtimeSession';
+import { toast } from '../../utils/toast';
 import AudioOrb from './AudioOrb';
 import TranscriptSubtitles from './TranscriptSubtitles';
 import ImmersiveControls from './ImmersiveControls';

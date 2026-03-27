@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Target, Award, TrendingUp, Calendar, Trophy, LogOut } from 'lucide-react';
 import { motion } from 'motion/react';
-import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { signOut } from '../services/authService';
 import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
+import { toast } from '../utils/toast';
 import StreakFlame from '../components/micro/StreakFlame';
 import ProfileReportHistory from '../components/report/ProfileReportHistory';
 import { STAT_COLOR_CLASSES, PROGRESS_COLORS } from '../constants/ui';
@@ -91,7 +91,7 @@ export default function ProfilePage() {
       );
       if (!history.length) setSelectedReport(null);
     } catch {
-      toast.error(t('profileReportsLoadError'));
+      toast.error(t('profileReportsLoadError'), { id: 'profile-reports' });
     } finally {
       setIsReportsLoading(false);
     }
@@ -108,7 +108,7 @@ export default function ProfilePage() {
     try {
       setSelectedReport(await fetchConversationReportById(selectedReportId));
     } catch {
-      toast.error(t('profileReportsLoadError'));
+      toast.error(t('profileReportsLoadError'), { id: 'profile-reports' });
     } finally {
       setIsReportsLoading(false);
     }
@@ -123,7 +123,7 @@ export default function ProfilePage() {
       setGoalData(next);
       setGoalDraft({ dailyMinutes: next.goal.dailyMinutes, weeklyWords: next.goal.weeklyWords, weeklySpeaking: next.goal.weeklySpeaking });
     } catch {
-      if (showError) toast.error(t('profileGoalLoadError'));
+      if (showError) toast.error(t('profileGoalLoadError'), { id: 'profile-goal' });
     } finally {
       setIsGoalRefreshing(false);
     }
@@ -138,7 +138,7 @@ export default function ProfilePage() {
     fresh.then((d) => {
       setGoalData(d);
       setGoalDraft({ dailyMinutes: d.goal.dailyMinutes, weeklyWords: d.goal.weeklyWords, weeklySpeaking: d.goal.weeklySpeaking });
-    }).catch(() => { toast.error(t('profileGoalLoadError')); });
+    }).catch(() => { toast.error(t('profileGoalLoadError'), { id: 'profile-goal' }); });
   }, [t]);
 
   useEffect(() => {
@@ -182,9 +182,9 @@ export default function ProfilePage() {
       const next = await saveLearningGoal(payload);
       setGoalData(next);
       setGoalDraft({ dailyMinutes: next.goal.dailyMinutes, weeklyWords: next.goal.weeklyWords, weeklySpeaking: next.goal.weeklySpeaking });
-      toast.success(t('profileGoalSaved'));
+      toast.success(t('profileGoalSaved'), { id: 'profile-goal-save' });
     } catch {
-      toast.error(t('profileGoalSaveError'));
+      toast.error(t('profileGoalSaveError'), { id: 'profile-goal-save' });
     } finally {
       setIsSavingGoal(false);
     }

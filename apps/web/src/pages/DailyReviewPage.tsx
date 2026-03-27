@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, X, RotateCcw } from 'lucide-react';
-import { toast } from 'sonner';
 import { useLocale } from '../providers/LocaleContext';
 import { fetchDailyReviewCached, submitReviewFeedback } from '../services/reviewService';
+import { toast } from '../utils/toast';
 import {
   startConversation,
   synthesizeConversationSpeech,
@@ -163,7 +163,7 @@ export default function DailyReviewPage() {
       currentCard.conversationId ?? (await ensureTtsConversationId());
     if (!conversationId) {
       setIsSpeaking(false);
-      toast.error(t('reviewTtsUnavailable'), { id: 'tts' });
+      toast.warning(t('reviewTtsUnavailable'), { id: 'tts' });
       return;
     }
     try {

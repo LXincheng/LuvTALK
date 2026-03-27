@@ -1,9 +1,9 @@
 import { Star, Trash2, Copy, Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
 import { fetchFavoritesCached, removeFavorite } from '../services/favoritesService';
 import type { FavoriteItem, FavoriteType } from '../types/api';
 import { useLocale } from '../providers/LocaleContext';
+import { toast } from '../utils/toast';
 
 export default function FavoritesPage() {
   const { t, locale } = useLocale();
@@ -86,7 +86,7 @@ export default function FavoritesPage() {
 
   const handleCopy = (phrase: string, id: string) => {
     if (!navigator.clipboard) {
-      toast.error(t('favoritesClipboardUnsupported'), { id: 'clipboard' });
+      toast.warning(t('favoritesClipboardUnsupported'), { id: 'clipboard' });
       return;
     }
     navigator.clipboard.writeText(phrase).catch(() => {

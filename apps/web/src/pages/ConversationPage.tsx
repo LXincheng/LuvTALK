@@ -1,7 +1,6 @@
 import { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { History } from 'lucide-react';
-import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import ChatQuickReplies, { type QuickReplyOption } from '../components/chat/ChatQuickReplies';
 import MessageBubble from '../components/chat/MessageBubble';
@@ -31,6 +30,7 @@ import { createFavorite } from '../services/favoritesService';
 import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
+import { toast } from '../utils/toast';
 import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
 import { CONVERSATION_REPORT_TOAST_ID } from '../constants/report';
 import type { Annotation, ChatMode, Message, MessageStatusTone } from '../types/chat';
@@ -999,7 +999,7 @@ export default function ConversationPage() {
     if (options?.generate) {
       toast.loading(t('reportGeneratingToastTitle'), {
         id: CONVERSATION_REPORT_TOAST_ID,
-        description: t('reportGeneratingToastBody'),
+        throttleMs: 0,
       });
     }
     try {
@@ -1016,7 +1016,7 @@ export default function ConversationPage() {
       if (options?.generate) {
         toast.success(t('reportReadyToast'), {
           id: CONVERSATION_REPORT_TOAST_ID,
-          description: t('reportReadyToastBody'),
+          throttleMs: 0,
           action: {
             label: t('immersiveReportGoProfile'),
             onClick: () => navigate('/profile'),
@@ -1030,7 +1030,7 @@ export default function ConversationPage() {
       if (options?.generate) {
         toast.error(t('reportGenerateError'), {
           id: CONVERSATION_REPORT_TOAST_ID,
-          description: t('reportGenerateErrorBody'),
+          throttleMs: 0,
           action: {
             label: t('commonRetry'),
             onClick: () => {
@@ -1044,10 +1044,10 @@ export default function ConversationPage() {
 
   const promptConversationReport = useCallback(
     (conversationId: string, voiceStyle: string) => {
-      toast(t('immersiveReportPromptTitle'), {
+      toast.info(t('immersiveReportPromptTitle'), {
         id: CONVERSATION_REPORT_TOAST_ID,
-        description: t('immersiveReportPromptBody'),
         duration: 6000,
+        throttleMs: 0,
         action: {
           label: t('immersiveReportGenerateNow'),
           onClick: () => {
@@ -1295,7 +1295,7 @@ export default function ConversationPage() {
         return;
       }
       if (!navigator.onLine) {
-        toast.error(t('streamError'), { id: 'stream' });
+        toast.warning(t('streamError'), { id: 'stream' });
       }
       setRecoveryState('recovering');
       setRecoveryReason('stream_recovering');
@@ -1312,7 +1312,7 @@ export default function ConversationPage() {
       setRecoveryReason(undefined);
     };
     const handleOffline = () => {
-      toast.error(t('streamError'), { id: 'stream' });
+      toast.warning(t('streamError'), { id: 'stream' });
       setRecoveryState('recovering');
       setRecoveryReason('stream_recovering');
     };
@@ -1778,7 +1778,7 @@ export default function ConversationPage() {
 
   const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      toast.error(t('voiceUnsupported'), { id: 'voice' });
+      toast.warning(t('voiceUnsupported'), { id: 'voice' });
       return;
     }
     if (isRecording || isSending || !session) {
@@ -1809,7 +1809,7 @@ export default function ConversationPage() {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         if (!chunks.length) {
-          toast.error(t('voiceNoCapture'), { id: 'voice' });
+          toast.warning(t('voiceNoCapture'), { id: 'voice' });
           return;
         }
         const mimeType = recorder.mimeType || 'audio/webm';
@@ -1837,7 +1837,7 @@ export default function ConversationPage() {
       recorder.start();
       setIsRecording(true);
     } catch {
-      toast.error(t('voicePermissionDenied'), { id: 'voice' });
+      toast.warning(t('voicePermissionDenied'), { id: 'voice' });
     }
   };
 
