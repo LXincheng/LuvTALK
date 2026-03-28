@@ -390,6 +390,26 @@ html {
     transform: scale(0.98);
   }
 
+  .app-toast--report-preview {
+    width: min(92vw, 340px);
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .app-toast--report-preview .app-toast__content {
+    flex: 0 1 auto;
+    justify-content: center;
+  }
+
+  .app-toast--report-preview .app-toast__title {
+    text-align: center;
+  }
+
+  .app-toast--report-preview .app-toast__action {
+    max-width: 84px;
+    padding-inline: 12px;
+  }
+
   .app-toast-status {
     position: relative;
     display: inline-flex;

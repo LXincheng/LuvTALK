@@ -1046,6 +1046,7 @@ export default function ConversationPage() {
     (conversationId: string, voiceStyle: string) => {
       toast.info(t('immersiveReportPromptTitle'), {
         id: CONVERSATION_REPORT_TOAST_ID,
+        className: 'app-toast--report-preview',
         duration: 6000,
         throttleMs: 0,
         action: {
