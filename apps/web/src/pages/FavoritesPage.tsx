@@ -109,20 +109,22 @@ export default function FavoritesPage() {
           </p>
         </div>
 
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+        <div className="mb-6 overflow-x-auto pb-2">
+          <div className="inline-flex min-w-full gap-1 rounded-xl border border-separator bg-fill-secondary p-1 sm:min-w-0">
           {categories.map((category) => (
             <button
               key={category.id}
               onClick={() => setSelectedCategory(category.id)}
-              className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-all ${
+              className={`min-w-[88px] rounded-[10px] px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors ${
                 selectedCategory === category.id
-                  ? 'glass-button text-white'
-                  : 'glass-card text-label-secondary hover:bg-fill'
+                  ? 'bg-primary text-white'
+                  : 'text-label-secondary hover:bg-white/70 dark:hover:bg-white/5'
               }`}
             >
               {category.label}
             </button>
           ))}
+          </div>
         </div>
 
         {isLoading ? (
@@ -198,7 +200,7 @@ function FavoriteCard({
   createdAtLabel,
 }: FavoriteCardProps) {
   return (
-    <div className="glass-card rounded-xl p-4 hover:shadow-md transition-shadow group">
+    <div className="glass-card rounded-xl p-4 group">
       <div className="flex items-start justify-between mb-3">
         <span className="inline-flex items-center gap-1 px-2 py-1 bg-[var(--color-primary-soft)] text-primary text-xs font-medium rounded-md">
           <Star className="w-3 h-3 fill-[var(--color-primary)]" />

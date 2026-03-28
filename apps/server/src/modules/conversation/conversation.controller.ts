@@ -21,6 +21,8 @@ import { AuthService } from "../auth/auth.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { SessionSummaryPayload } from "./conversation-summary.types";
 import { GenerateConversationReportDto } from "./dto/generate-conversation-report.dto";
+import { GenerateScenarioHintDto } from "./dto/generate-scenario-hint.dto";
+import { GenerateScenarioFeedbackDto } from "./dto/generate-scenario-feedback.dto";
 import { ConversationReportService } from "./conversation-report.service";
 
 @Controller("conversation")
@@ -87,6 +89,21 @@ export class ConversationController {
       conversationId,
       dto,
       undefined,
+      profile?.id,
+      resolveConversationKey(req),
+    );
+  }
+
+  @Post(":conversationId/hint")
+  async generateScenarioHint(
+    @Param("conversationId") conversationId: string,
+    @Body() dto: GenerateScenarioHintDto,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.generateScenarioHint(
+      conversationId,
+      dto.kind ?? "hint",
       profile?.id,
       resolveConversationKey(req),
     );
@@ -172,6 +189,21 @@ export class ConversationController {
   ) {
     const profile = await this.authService.resolveUserFromRequest(req);
     return this.conversationReportService.generateReport(
+      conversationId,
+      dto,
+      profile?.id,
+      resolveConversationKey(req),
+    );
+  }
+
+  @Post(":conversationId/scenario-feedback")
+  async generateScenarioFeedback(
+    @Param("conversationId") conversationId: string,
+    @Body() dto: GenerateScenarioFeedbackDto,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationReportService.generateScenarioFeedback(
       conversationId,
       dto,
       profile?.id,

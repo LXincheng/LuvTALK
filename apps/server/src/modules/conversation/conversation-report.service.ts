@@ -19,10 +19,12 @@ import {
   ConversationReportSourceMode,
 } from "./conversation-report.types";
 import { GenerateConversationReportDto } from "./dto/generate-conversation-report.dto";
+import { GenerateScenarioFeedbackDto } from "./dto/generate-scenario-feedback.dto";
 import {
   buildSessionSummary,
   SessionSummaryPayload,
 } from "./conversation-summary.types";
+import { ScenarioFeedbackPayload } from "./conversation-scenario-feedback.types";
 
 type ReportRecord = {
   id: string;
@@ -39,9 +41,27 @@ type ReportRecord = {
   updatedAt: Date;
 };
 
+type ScenarioFeedbackPromptInput = {
+  conversationId: string;
+  targetLanguage: LanguageCode;
+  nativeLanguage: LanguageCode;
+  reportLanguage: "zh" | "en";
+  userTurns: number;
+  aiTurns: number;
+  averageScore: number | null;
+  latestScore: number | null;
+  pronunciationMentions: number;
+  grammarMentions: number;
+  rhythmMentions: number;
+  strengths: string[];
+  improvements: string[];
+  transcriptLines: string[];
+};
+
 @Injectable()
 export class ConversationReportService {
   private readonly logger = new Logger(ConversationReportService.name);
+  private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
   private readonly openAiEndpoint = this.resolveOpenAiEndpoint();
 
   constructor(
@@ -175,6 +195,7 @@ export class ConversationReportService {
     });
 
     const generatedReport =
+      (await this.requestDeepSeekReport(promptInput)) ??
       (await this.requestOpenAiReport(promptInput)) ??
       this.buildFallbackReport(promptInput);
 
@@ -263,6 +284,58 @@ export class ConversationReportService {
       }
       throw error;
     }
+  }
+
+  async generateScenarioFeedback(
+    conversationId: string,
+    dto: GenerateScenarioFeedbackDto,
+    userId?: string,
+    conversationKey?: string,
+  ): Promise<ScenarioFeedbackPayload> {
+    const session = await this.conversationService.getAccessibleSession(
+      conversationId,
+      {
+        userId,
+        conversationKey,
+        allowBootstrapMissingAccessKey: true,
+        bindUserIfAuthenticated: true,
+      },
+    );
+
+    const existing = await this.findReportByConversationId(conversationId);
+    if (
+      existing &&
+      !dto.force &&
+      existing.updatedAt.getTime() >= new Date(session.updatedAt).getTime()
+    ) {
+      return this.toScenarioFeedback(this.mapReportRecord(existing));
+    }
+
+    const summary = buildSessionSummary({
+      conversationId: session.id,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: session.messages,
+    });
+    const metrics = this.buildReportMetrics(session.messages, summary);
+    const reportLanguage = this.resolveReportLanguage(
+      session.nativeLanguage ?? LanguageCode.Mandarin,
+    );
+    const fastInput = this.buildScenarioFeedbackPromptInput({
+      session,
+      summary,
+      metrics,
+      reportLanguage,
+    });
+
+    if (fastInput.userTurns <= 0) {
+      return this.buildMinimalScenarioFeedback(fastInput);
+    }
+
+    return (
+      (await this.requestDeepSeekScenarioFeedback(fastInput)) ??
+      this.buildFallbackScenarioFeedback(fastInput)
+    );
   }
 
   private async findReportByConversationId(
@@ -384,6 +457,36 @@ export class ConversationReportService {
     });
   }
 
+  private buildScenarioFeedbackPromptInput(params: {
+    session: ConversationSession;
+    summary: SessionSummaryPayload;
+    metrics: ConversationReportMetrics;
+    reportLanguage: "zh" | "en";
+  }): ScenarioFeedbackPromptInput {
+    const { session, summary, metrics, reportLanguage } = params;
+    return {
+      conversationId: session.id,
+      targetLanguage: session.targetLanguage,
+      nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+      reportLanguage,
+      userTurns: metrics.userTurns,
+      aiTurns: metrics.aiTurns,
+      averageScore: metrics.averageScore,
+      latestScore: metrics.latestScore,
+      pronunciationMentions: metrics.pronunciationMentions,
+      grammarMentions: metrics.grammarMentions,
+      rhythmMentions: metrics.rhythmMentions,
+      strengths: summary.strengths.slice(0, 3),
+      improvements: summary.improvements.slice(0, 3),
+      transcriptLines: session.messages
+        .slice(-10)
+        .map((message) => {
+          const speaker = message.sender === "user" ? "Learner" : "Tutor";
+          return `[${speaker}] ${message.text}`;
+        }),
+    };
+  }
+
   private resolveSourceMode(
     session: ConversationSession,
   ): ConversationReportSourceMode {
@@ -431,14 +534,18 @@ export class ConversationReportService {
     };
 
     try {
-      const response = await fetch(this.openAiEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+      const response = await this.fetchWithTimeout(
+        this.openAiEndpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+        envConfig.modelTimeoutMs.primary,
+      );
 
       if (!response.ok) {
         const detail = await response.text();
@@ -461,6 +568,108 @@ export class ConversationReportService {
     } catch (error) {
       this.logger.warn(
         `Conversation report request aborted: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private async requestDeepSeekReport(
+    input: ConversationReportPromptInput,
+  ): Promise<ConversationReportBody | null> {
+    const apiKey = envConfig.deepseek.apiKey;
+    const model = this.resolveFastDeepSeekModel();
+    const endpoint = this.deepSeekEndpoint;
+    if (!apiKey || !model || !endpoint) {
+      return null;
+    }
+
+    const payload = {
+      model,
+      temperature: 0.25,
+      messages: [
+        {
+          role: "system",
+          content: this.buildReportSystemPrompt(input.reportLanguage),
+        },
+        {
+          role: "user",
+          content: this.buildReportUserPrompt(input),
+        },
+      ],
+    };
+
+    try {
+      const content = await this.fetchChatCompletionContentWithTimeout(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        },
+        envConfig.modelTimeoutMs.secondary,
+      );
+
+      if (!content) {
+        return null;
+      }
+      return this.parseReportContent(content);
+    } catch (error) {
+      this.logger.warn(
+        `Scenario report DS request aborted: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private async requestDeepSeekScenarioFeedback(
+    input: ScenarioFeedbackPromptInput,
+  ): Promise<ScenarioFeedbackPayload | null> {
+    const apiKey = envConfig.deepseek.apiKey;
+    const model = this.resolveFastDeepSeekModel();
+    const endpoint = this.deepSeekEndpoint;
+    if (!apiKey || !model || !endpoint) {
+      return null;
+    }
+
+    const payload = {
+      model,
+      temperature: 0.15,
+      messages: [
+        {
+          role: "system",
+          content: this.buildScenarioFeedbackSystemPrompt(input.reportLanguage),
+        },
+        {
+          role: "user",
+          content: this.buildScenarioFeedbackUserPrompt(input),
+        },
+      ],
+    };
+
+    try {
+      const content = await this.fetchChatCompletionContentWithTimeout(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        },
+        Math.min(envConfig.modelTimeoutMs.secondary, 7000),
+      );
+
+      if (!content) {
+        return null;
+      }
+      return this.parseScenarioFeedbackContent(content, input);
+    } catch (error) {
+      this.logger.warn(
+        `Scenario feedback DS request aborted: ${(error as Error).message}`,
       );
       return null;
     }
@@ -497,6 +706,36 @@ export class ConversationReportService {
     ].join("\n");
   }
 
+  private buildScenarioFeedbackSystemPrompt(
+    reportLanguage: "zh" | "en",
+  ): string {
+    const outputLanguage =
+      reportLanguage === "zh" ? "Simplified Chinese" : "English";
+    return [
+      "You are a fast premium language-practice evaluator for scenario dialogue.",
+      `Write the result in ${outputLanguage}.`,
+      "Use only the session metrics and transcript provided.",
+      "Score conservatively. If the learner barely practiced, keep the score clearly low.",
+      "Do not reward empty or one-turn sessions with inflated scores.",
+      "Return ONLY one valid JSON object.",
+      "JSON shape:",
+      "{",
+      '  "headline": "string",',
+      '  "summary": "string",',
+      '  "overallScore": 0,',
+      '  "dimensions": {',
+      '    "taskCompletion": 0,',
+      '    "naturalness": 0,',
+      '    "pronunciation": 0,',
+      '    "resilience": 0',
+      "  },",
+      '  "suggestions": ["string", "string", "string"]',
+      "}",
+      "Each suggestion must be concrete and short.",
+      "Do not use markdown.",
+    ].join("\n");
+  }
+
   private buildReportUserPrompt(input: ConversationReportPromptInput): string {
     const sourceModeLabel =
       input.sourceMode === "immersive"
@@ -527,6 +766,27 @@ export class ConversationReportService {
     ].join("\n\n");
   }
 
+  private buildScenarioFeedbackUserPrompt(
+    input: ScenarioFeedbackPromptInput,
+  ): string {
+    return [
+      `Target language: ${input.targetLanguage}`,
+      `Learner native language: ${input.nativeLanguage}`,
+      `Output language: ${input.reportLanguage}`,
+      `Learner turns: ${input.userTurns}`,
+      `Tutor turns: ${input.aiTurns}`,
+      `Average score: ${input.averageScore ?? "null"}`,
+      `Latest score: ${input.latestScore ?? "null"}`,
+      `Pronunciation mentions: ${input.pronunciationMentions}`,
+      `Grammar mentions: ${input.grammarMentions}`,
+      `Rhythm mentions: ${input.rhythmMentions}`,
+      `Strength hints: ${JSON.stringify(input.strengths)}`,
+      `Improvement hints: ${JSON.stringify(input.improvements)}`,
+      "Recent transcript:",
+      input.transcriptLines.join("\n"),
+    ].join("\n\n");
+  }
+
   private parseReportContent(content: string): ConversationReportBody | null {
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
@@ -545,6 +805,30 @@ export class ConversationReportService {
     } catch (error) {
       this.logger.warn(
         `Failed to parse conversation report JSON: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private parseScenarioFeedbackContent(
+    content: string,
+    input: ScenarioFeedbackPromptInput,
+  ): ScenarioFeedbackPayload | null {
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(content.slice(start, end + 1)) as Record<
+        string,
+        unknown
+      >;
+      return this.normalizeScenarioFeedbackPayload(parsed, input);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to parse scenario feedback JSON: ${(error as Error).message}`,
       );
       return null;
     }
@@ -672,6 +956,124 @@ export class ConversationReportService {
     });
   }
 
+  private buildMinimalScenarioFeedback(
+    input: ScenarioFeedbackPromptInput,
+  ): ScenarioFeedbackPayload {
+    const isZh = input.reportLanguage === "zh";
+    return {
+      conversationId: input.conversationId,
+      overallScore: 52,
+      headline: isZh ? "这一轮还没真正展开" : "This round barely started",
+      summary: isZh
+        ? "你还没有完成有效练习。下一轮先完成 2 到 3 轮真实对话，再来看评分会更准确。"
+        : "You have not completed enough real practice yet. Try finishing 2 or 3 real turns next time for a more accurate score.",
+      dimensions: [
+        { key: "taskCompletion", score: 48 },
+        { key: "naturalness", score: 56 },
+        { key: "pronunciation", score: 54 },
+        { key: "resilience", score: 50 },
+      ],
+      suggestions: isZh
+        ? [
+            "先把场景里的第一句完整说出来。",
+            "至少完成一轮问答，再继续追问一次。",
+            "结束前再做一次确认或收尾。",
+          ]
+        : [
+            "Start with one complete first line in the scenario.",
+            "Finish at least one full question-and-answer exchange.",
+            "Add one confirmation or closing line before ending.",
+          ],
+    };
+  }
+
+  private buildFallbackScenarioFeedback(
+    input: ScenarioFeedbackPromptInput,
+  ): ScenarioFeedbackPayload {
+    if (input.userTurns <= 0) {
+      return this.buildMinimalScenarioFeedback(input);
+    }
+
+    const baseScore =
+      input.userTurns === 1
+        ? input.latestScore ?? 61
+        : input.averageScore ?? input.latestScore ?? 68;
+    const clamp = (value: number, min = 45, max = 96) =>
+      Math.max(min, Math.min(max, Math.round(value)));
+    const taskCompletion = clamp(
+      baseScore * 0.72 + Math.min(22, input.userTurns * 5) - Math.max(0, 12 - input.aiTurns * 2),
+      input.userTurns <= 1 ? 45 : 58,
+    );
+    const naturalness = clamp(
+      baseScore + 5 - Math.min(18, input.grammarMentions * 3) - Math.min(10, input.rhythmMentions * 2),
+    );
+    const pronunciation = clamp(
+      (input.latestScore ?? baseScore) * 0.8 + 10 - Math.min(18, input.pronunciationMentions * 4),
+    );
+    const resilience = clamp(
+      baseScore * 0.68 + 8 + Math.min(16, Math.max(0, input.userTurns - 2) * 3),
+    );
+    const overallScore =
+      input.userTurns === 1
+        ? clamp(baseScore, 58, 72)
+        : clamp(
+            taskCompletion * 0.34 +
+              naturalness * 0.22 +
+              pronunciation * 0.24 +
+              resilience * 0.2,
+            60,
+            96,
+          );
+    const isZh = input.reportLanguage === "zh";
+
+    return {
+      conversationId: input.conversationId,
+      overallScore,
+      headline:
+        overallScore >= 88
+          ? isZh
+            ? "这轮完成得很稳"
+            : "A strong, steady round"
+          : overallScore >= 72
+            ? isZh
+              ? "这轮已经有真实练习感"
+              : "This already feels like real practice"
+            : isZh
+              ? "场景感已经有了，还需要再收紧"
+              : "The scenario is there, but it still needs tightening",
+      summary:
+        input.userTurns === 1
+          ? isZh
+            ? "你已经开始进入场景了，但对话轮次还太少，暂时只能给出保守评分。"
+            : "You entered the scenario, but the round was still too short, so the score stays conservative."
+          : isZh
+            ? "这份评分基于本轮真实对话轮次、系统打分和纠错线索生成，重点看你是否把场景推进下去了。"
+            : "This score is based on real turns, system scoring, and coaching signals from this round, with emphasis on whether you kept the scenario moving.",
+      dimensions: [
+        { key: "taskCompletion", score: taskCompletion },
+        { key: "naturalness", score: naturalness },
+        { key: "pronunciation", score: pronunciation },
+        { key: "resilience", score: resilience },
+      ],
+      suggestions: this.dedupeStrings(
+        [
+          ...input.improvements,
+          ...(isZh
+            ? [
+                "下一轮先回答，再补一个具体细节。",
+                "把句子缩短一点，会更自然。",
+                "结束前补一次确认或收尾。",
+              ]
+            : [
+                "Answer first, then add one concrete detail.",
+                "Shorter sentences will sound more natural.",
+                "Add one confirmation or closing line before ending.",
+              ]),
+        ],
+      ).slice(0, 3),
+    };
+  }
+
   private mapReportRecord(record: ReportRecord): ConversationReportPayload {
     const report = ConversationReportBodySchema.parse(
       this.normalizeReportPayload(record.report as Record<string, unknown>),
@@ -693,6 +1095,169 @@ export class ConversationReportService {
       metrics,
       report,
     };
+  }
+
+  private toScenarioFeedback(
+    report: ConversationReportPayload,
+  ): ScenarioFeedbackPayload {
+    const userTurns = report.metrics.userTurns;
+    const aiTurns = report.metrics.aiTurns;
+    const baseScore = (() => {
+      if (userTurns <= 0) {
+        return 52;
+      }
+      if (userTurns === 1) {
+        return report.metrics.latestScore ?? 61;
+      }
+      return (
+        report.metrics.averageScore ??
+        report.metrics.latestScore ??
+        68
+      );
+    })();
+    const clamp = (value: number) => Math.max(60, Math.min(99, Math.round(value)));
+    const clampLoose = (value: number) => Math.max(45, Math.min(99, Math.round(value)));
+    const taskCompletion = (userTurns <= 1 ? clampLoose : clamp)(
+      baseScore * 0.7 +
+        Math.min(22, userTurns * 5) -
+        Math.max(0, 12 - aiTurns * 2),
+    );
+    const naturalness = clampLoose(
+      baseScore +
+        6 -
+        Math.min(18, report.metrics.grammarMentions * 3) -
+        Math.min(10, report.metrics.rhythmMentions * 2),
+    );
+    const pronunciation = clampLoose(
+      (report.metrics.latestScore ?? baseScore) * 0.78 +
+        12 -
+        Math.min(20, report.metrics.pronunciationMentions * 4),
+    );
+    const resilience = clampLoose(
+      baseScore * 0.68 +
+        8 +
+        Math.min(16, Math.max(0, userTurns - 2) * 3) -
+        Math.min(8, Math.max(0, report.report.opportunities.length - 1) * 2),
+    );
+
+    const overallScore = (() => {
+      if (userTurns <= 0) {
+        return 52;
+      }
+      if (userTurns === 1) {
+        return Math.max(58, Math.min(72, Math.round(baseScore)));
+      }
+      return Math.max(
+        60,
+        Math.min(
+          96,
+          Math.round(
+            taskCompletion * 0.34 +
+              naturalness * 0.22 +
+              pronunciation * 0.24 +
+              resilience * 0.2,
+          ),
+        ),
+      );
+    })();
+
+    const suggestions = this.dedupeStrings(
+      [
+        report.report.nextSessionPlan.focus,
+        ...report.report.nextSessionPlan.drills,
+        ...report.report.opportunities.slice(0, 2),
+      ].filter((item): item is string => Boolean(item?.trim())),
+    ).slice(0, 3);
+
+    return {
+      conversationId: report.conversationId,
+      overallScore,
+      summary:
+        userTurns <= 0
+          ? report.reportLanguage === "en"
+            ? "This round barely started. Begin with 2 or 3 turns next time so the feedback can reflect your real level."
+            : "这一轮几乎还没真正开始。下次至少完成 2 到 3 轮对话，反馈才会更接近你的真实水平。"
+          : report.report.overallSummary,
+      headline: report.report.headline,
+      dimensions: [
+        { key: "taskCompletion", score: taskCompletion },
+        { key: "naturalness", score: naturalness },
+        { key: "pronunciation", score: pronunciation },
+        { key: "resilience", score: resilience },
+      ],
+      suggestions,
+    };
+  }
+
+  private normalizeScenarioFeedbackPayload(
+    value: Record<string, unknown>,
+    input: ScenarioFeedbackPromptInput,
+  ): ScenarioFeedbackPayload {
+    const fallback = this.buildFallbackScenarioFeedback(input);
+    const dimensions =
+      value.dimensions && typeof value.dimensions === "object"
+        ? (value.dimensions as Record<string, unknown>)
+        : {};
+    const parseScore = (raw: unknown, fallbackValue: number) => {
+      const numeric =
+        typeof raw === "number"
+          ? raw
+          : typeof raw === "string"
+            ? Number(raw)
+            : Number.NaN;
+      if (!Number.isFinite(numeric)) {
+        return fallbackValue;
+      }
+      return Math.max(45, Math.min(99, Math.round(numeric)));
+    };
+    const suggestions = Array.isArray(value.suggestions)
+      ? value.suggestions
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter((item) => item.length > 0)
+          .slice(0, 3)
+      : fallback.suggestions;
+
+    const normalized: ScenarioFeedbackPayload = {
+      conversationId: input.conversationId,
+      overallScore: parseScore(value.overallScore, fallback.overallScore),
+      headline:
+        typeof value.headline === "string" && value.headline.trim()
+          ? value.headline.trim()
+          : fallback.headline,
+      summary:
+        typeof value.summary === "string" && value.summary.trim()
+          ? value.summary.trim()
+          : fallback.summary,
+      dimensions: [
+        {
+          key: "taskCompletion",
+          score: parseScore(dimensions.taskCompletion, fallback.dimensions[0].score),
+        },
+        {
+          key: "naturalness",
+          score: parseScore(dimensions.naturalness, fallback.dimensions[1].score),
+        },
+        {
+          key: "pronunciation",
+          score: parseScore(dimensions.pronunciation, fallback.dimensions[2].score),
+        },
+        {
+          key: "resilience",
+          score: parseScore(dimensions.resilience, fallback.dimensions[3].score),
+        },
+      ],
+      suggestions: suggestions.length ? suggestions : fallback.suggestions,
+    };
+
+    if (input.userTurns <= 1) {
+      normalized.overallScore = Math.min(normalized.overallScore, fallback.overallScore);
+      normalized.dimensions = normalized.dimensions.map((dimension, index) => ({
+        ...dimension,
+        score: Math.min(dimension.score, fallback.dimensions[index]?.score ?? dimension.score),
+      }));
+    }
+
+    return normalized;
   }
 
   private mapReportHistoryItem(record: ReportRecord): ConversationReportHistoryItem {
@@ -859,6 +1424,90 @@ export class ConversationReportService {
       return `${raw}/chat/completions`;
     }
     return `${raw}/v1/chat/completions`;
+  }
+
+  private resolveDeepSeekEndpoint(): string | null {
+    const raw = envConfig.deepseek.apiUrl?.replace(/\/$/, "");
+    if (!raw) {
+      return null;
+    }
+    if (raw.endsWith("/chat/completions")) {
+      return raw;
+    }
+    if (raw.endsWith("/v1")) {
+      return `${raw}/chat/completions`;
+    }
+    return `${raw}/v1/chat/completions`;
+  }
+
+  private resolveFastDeepSeekModel(): string {
+    const models = [
+      envConfig.modelRouting.thirdModel,
+      envConfig.modelRouting.secondaryModel,
+    ]
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftIsReasoner = /reasoner/i.test(left);
+        const rightIsReasoner = /reasoner/i.test(right);
+        if (leftIsReasoner === rightIsReasoner) {
+          return 0;
+        }
+        return leftIsReasoner ? 1 : -1;
+      });
+    return models[0] ?? "";
+  }
+
+  private async fetchWithTimeout(
+    input: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async fetchChatCompletionContentWithTimeout(
+    input: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<string | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        this.logger.warn(
+          `Chat completion request failed (${response.status}): ${detail}`,
+        );
+        return null;
+      }
+
+      const raw = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const content = raw.choices?.[0]?.message?.content;
+      if (!content?.trim()) {
+        this.logger.warn("Chat completion request returned empty content.");
+        return null;
+      }
+      return content;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private isDatabaseConnectionError(error: unknown): boolean {

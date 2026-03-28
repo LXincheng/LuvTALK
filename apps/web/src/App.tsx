@@ -5,6 +5,9 @@ import MainLayout from './components/layout/MainLayout';
 import RouteLoadingFallback from './components/layout/RouteLoadingFallback';
 
 const loadConversationPage = () => import('./pages/ConversationPage');
+const loadScenarioHubPage = () => import('./features/scenario/pages/ScenarioHubPage');
+const loadScenarioDetailPage = () => import('./features/scenario/pages/ScenarioDetailPage');
+const loadScenarioSessionPage = () => import('./features/scenario/pages/ScenarioSessionPage');
 const loadDailyReviewPage = () => import('./pages/DailyReviewPage');
 const loadFavoritesPage = () => import('./pages/FavoritesPage');
 const loadProfilePage = () => import('./pages/ProfilePage');
@@ -12,6 +15,9 @@ const loadLoginPage = () => import('./pages/LoginPage');
 const loadAchievementHallPage = () => import('./pages/AchievementHallPage');
 
 const ConversationPage = lazy(loadConversationPage);
+const ScenarioHubPage = lazy(loadScenarioHubPage);
+const ScenarioDetailPage = lazy(loadScenarioDetailPage);
+const ScenarioSessionPage = lazy(loadScenarioSessionPage);
 const DailyReviewPage = lazy(loadDailyReviewPage);
 const FavoritesPage = lazy(loadFavoritesPage);
 const ProfilePage = lazy(loadProfilePage);
@@ -46,8 +52,13 @@ export default function App() {
       loadFavoritesPage();
       loadDailyReviewPage();
       loadProfilePage();
+      loadScenarioHubPage();
       if (location.pathname !== '/chat') {
         loadConversationPage();
+      }
+      if (!location.pathname.startsWith('/scenarios/')) {
+        loadScenarioDetailPage();
+        loadScenarioSessionPage();
       }
       if (location.pathname !== '/achievements') {
         loadAchievementHallPage();
@@ -67,6 +78,30 @@ export default function App() {
           element={(
             <LazyPage>
               <ConversationPage />
+            </LazyPage>
+          )}
+        />
+        <Route
+          path="scenarios"
+          element={(
+            <LazyPage>
+              <ScenarioHubPage />
+            </LazyPage>
+          )}
+        />
+        <Route
+          path="scenarios/:scenarioKey"
+          element={(
+            <LazyPage>
+              <ScenarioDetailPage />
+            </LazyPage>
+          )}
+        />
+        <Route
+          path="scenarios/:scenarioKey/session/:sessionId"
+          element={(
+            <LazyPage>
+              <ScenarioSessionPage />
             </LazyPage>
           )}
         />

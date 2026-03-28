@@ -415,8 +415,7 @@ export class ConversationService {
       options?.userMessageMeta,
     );
     const rawAiPayload =
-      (await this.requestOpenAi(session, trimmed, interactionMode)) ??
-      (await this.requestDsAi(session, trimmed, interactionMode)) ??
+      (await this.requestFastestTutorReply(session, trimmed, interactionMode)) ??
       this.composeAiResponse(
         trimmed,
         session.targetLanguage,
@@ -482,6 +481,69 @@ export class ConversationService {
 
     this.achievementService.queueUserProgressSync(userId);
     return session;
+  }
+
+  async generateScenarioHint(
+    conversationId: string,
+    kind: "hint" | "nudge",
+    userId?: string,
+    conversationKey?: string,
+  ): Promise<{ kind: "hint" | "nudge"; message: string; translation?: string }> {
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
+    const nativeLanguage = session.nativeLanguage ?? LanguageCode.Mandarin;
+    const targetLanguage = session.targetLanguage;
+    const scenarioLabel = this.describeScenario(session.scenarioId, nativeLanguage);
+    const userTurns = session.messages.filter(
+      (message) => message.sender === "user",
+    ).length;
+    const lastAiMessage = [...session.messages]
+      .reverse()
+      .find((message) => message.sender === "ai");
+    const lastUserMessage = [...session.messages]
+      .reverse()
+      .find((message) => message.sender === "user");
+
+    if (kind === "nudge") {
+      const candidates = this.buildDynamicScenarioGuidance(
+        session,
+        targetLanguage,
+        nativeLanguage,
+      );
+      const candidate =
+        candidates[userTurns % candidates.length] ??
+        this.buildScenarioAssociativePhrases(targetLanguage, session.scenarioId)[0];
+      const translation =
+        targetLanguage === nativeLanguage
+          ? undefined
+          : await this.translateForNativeLanguage(
+              candidate,
+              targetLanguage,
+              nativeLanguage,
+            );
+      return {
+        kind,
+        message: candidate,
+        translation,
+      };
+    }
+
+    const hintMessage = this.buildScenarioHintMessage({
+      scenarioLabel,
+      targetLanguage,
+      nativeLanguage,
+      userTurns,
+      lastAiText: lastAiMessage?.text,
+      lastUserText: lastUserMessage?.text,
+    });
+
+    return {
+      kind,
+      message: hintMessage,
+    };
   }
 
   async getSession(conversationId: string): Promise<ConversationSession> {
@@ -822,6 +884,44 @@ export class ConversationService {
     }
   }
 
+  private async requestFastestTutorReply(
+    session: ConversationSession,
+    latestMessage: string,
+    interactionMode: TutorInteractionMode,
+  ): Promise<AiResponse | null> {
+    const wrapCandidate = (
+      task: Promise<AiResponse | null>,
+      label: string,
+    ): Promise<AiResponse> =>
+      task.then((payload) => {
+        if (!payload) {
+          throw new Error(`${label}_empty`);
+        }
+        return payload;
+      });
+
+    const dsTask = wrapCandidate(
+      this.requestDsAi(session, latestMessage, interactionMode),
+      "ds",
+    );
+    const openAiTask = new Promise<AiResponse>((resolve, reject) => {
+      windowLikeSetTimeout(() => {
+        wrapCandidate(
+          this.requestOpenAi(session, latestMessage, interactionMode),
+          "openai",
+        )
+          .then(resolve)
+          .catch(reject);
+      }, 260);
+    });
+
+    try {
+      return await Promise.any([dsTask, openAiTask]);
+    } catch {
+      return null;
+    }
+  }
+
   private parseAiResponseContent(
     content: string,
     fallbackReason: string,
@@ -893,9 +993,10 @@ export class ConversationService {
     const configuredSecondary = envConfig.modelRouting.secondaryModel.trim();
     const configuredThird = envConfig.modelRouting.thirdModel.trim();
 
-    const orderedModels = [configuredSecondary, configuredThird].filter(
-      (model, index, list) => model && list.indexOf(model) === index,
-    );
+    const orderedModels = this.resolveRealtimeDeepSeekModels([
+      configuredThird,
+      configuredSecondary,
+    ]);
     if (!orderedModels.length) {
       this.logger.warn(CONVERSATION_LOG_COPY.missingSecondaryConfig);
       return null;
@@ -932,7 +1033,7 @@ export class ConversationService {
       );
 
       try {
-        const response = await this.fetchWithTimeout(
+        const content = await this.fetchChatCompletionContentWithTimeout(
           endpoint,
           {
             method: "POST",
@@ -945,23 +1046,7 @@ export class ConversationService {
           candidate.timeoutMs,
         );
 
-        if (!response.ok) {
-          const detail = await response.text();
-          this.logger.warn(
-            `Fallback ${candidate.label} model responded with ${response.status}: ${detail}`,
-          );
-          continue;
-        }
-
-        const raw: unknown = await response.json();
-        const content = (
-          raw as { choices?: Array<{ message?: { content?: string } }> }
-        )?.choices?.[0]?.message?.content;
-
         if (!content) {
-          this.logger.warn(
-            `Fallback ${candidate.label} model returned empty content.`,
-          );
           continue;
         }
 
@@ -1364,9 +1449,13 @@ export class ConversationService {
     scenarioId: string,
   ): AiResponse {
     const polite = message || "（等待输入）";
+    const normalizedLength = polite.replace(/\s+/g, "").length;
+    const hasQuestion = /[?？]/.test(polite);
+    const detailBonus = normalizedLength >= 18 ? 8 : normalizedLength >= 10 ? 4 : 0;
+    const questionBonus = hasQuestion ? 4 : 0;
     const score = Math.max(
-      60,
-      Math.min(98, 92 - Math.round(Math.min(polite.length, 120) / 6)),
+      48,
+      Math.min(82, 50 + detailBonus + questionBonus + Math.round(normalizedLength / 12)),
     );
 
     const tips = this.buildDefaultTeachingTips(
@@ -1396,6 +1485,108 @@ export class ConversationService {
       grammarTip: tips.grammarTip,
       keyTerms: [],
     });
+  }
+
+  private buildDynamicScenarioGuidance(
+    session: ConversationSession,
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+  ): string[] {
+    const [primaryPhrase, secondaryPhrase] = this.buildScenarioAssociativePhrases(
+      targetLanguage,
+      session.scenarioId,
+    );
+    const lastAiText = [...session.messages]
+      .reverse()
+      .find((message) => message.sender === "ai")
+      ?.text;
+    const lastUserText = [...session.messages]
+      .reverse()
+      .find((message) => message.sender === "user")
+      ?.text;
+    const compactTopic = (lastUserText ?? lastAiText ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 28);
+
+    if (nativeLanguage === LanguageCode.English) {
+      return [
+        primaryPhrase,
+        secondaryPhrase,
+        compactTopic
+          ? `About ${compactTopic}, I want to confirm one more detail.`
+          : "I want to confirm one more detail before we finish.",
+      ];
+    }
+
+    if (nativeLanguage === LanguageCode.Cantonese) {
+      return [
+        primaryPhrase,
+        secondaryPhrase,
+        compactTopic
+          ? `关于${compactTopic}，我想再确认一个细节。`
+          : "我想再确认一个细节。",
+      ];
+    }
+
+    return [
+      primaryPhrase,
+      secondaryPhrase,
+      compactTopic
+        ? `关于${compactTopic}，我想再确认一个细节。`
+        : "我想再确认一个细节。",
+    ];
+  }
+
+  private buildScenarioHintMessage(params: {
+    scenarioLabel: string;
+    targetLanguage: LanguageCode;
+    nativeLanguage: LanguageCode;
+    userTurns: number;
+    lastAiText?: string;
+    lastUserText?: string;
+  }): string {
+    const {
+      scenarioLabel,
+      targetLanguage,
+      nativeLanguage,
+      userTurns,
+      lastAiText,
+      lastUserText,
+    } = params;
+    const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
+    const aiAskedQuestion = Boolean(
+      lastAiText &&
+        (/[?？]$/.test(lastAiText.trim()) ||
+          /^(what|when|where|which|how|can|could|would|do|did|are|is)\b/i.test(
+            lastAiText.trim(),
+          )),
+    );
+    const alreadyGaveDetail = Boolean(lastUserText && lastUserText.trim().length >= 18);
+
+    if (nativeLanguage === LanguageCode.English) {
+      if (userTurns === 0) {
+        return `Stay inside the ${scenarioLabel} scene. Start with one short ${targetLabel} sentence, then add one concrete detail.`;
+      }
+      if (aiAskedQuestion) {
+        return `Keep the ${scenarioLabel} flow. Answer the question first, then add one useful detail instead of opening a new topic.`;
+      }
+      if (alreadyGaveDetail) {
+        return `Your next line can be shorter. Confirm the key point, then close with a small request or follow-up.`;
+      }
+      return `Stay in the ${scenarioLabel} context. Say the key information first, then add one small detail that moves the task forward.`;
+    }
+
+    if (userTurns === 0) {
+      return `先留在${scenarioLabel}这个场景里。先用一句简短的${targetLabel}说清核心信息，再补一个具体细节。`;
+    }
+    if (aiAskedQuestion) {
+      return `继续留在${scenarioLabel}场景里。先直接回应对方的问题，再补一个有用信息，不要突然换话题。`;
+    }
+    if (alreadyGaveDetail) {
+      return "你下一句可以更短一些。先确认重点，再顺势补一个小请求或追问。";
+    }
+    return `继续留在${scenarioLabel}这个任务里。先说重点，再补一个能推动场景往下走的小细节。`;
   }
 
   private buildReply(
@@ -1916,6 +2107,71 @@ export class ConversationService {
     }
   }
 
+  private async fetchChatCompletionContentWithTimeout(
+    input: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<string | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        this.logger.warn(
+          `Chat completion responded with ${response.status}: ${detail}`,
+        );
+        return null;
+      }
+
+      const raw = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const content = raw.choices?.[0]?.message?.content;
+      if (!content?.trim()) {
+        this.logger.warn("Chat completion returned empty content.");
+        return null;
+      }
+      return content;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private orderDeepSeekModelsByLatency(models: string[]): string[] {
+    const seen = new Set<string>();
+    return models
+      .map((model) => model.trim())
+      .filter((model) => {
+        if (!model || seen.has(model)) {
+          return false;
+        }
+        seen.add(model);
+        return true;
+      })
+      .sort((left, right) => {
+        const leftIsReasoner = /reasoner/i.test(left);
+        const rightIsReasoner = /reasoner/i.test(right);
+        if (leftIsReasoner === rightIsReasoner) {
+          return 0;
+        }
+        return leftIsReasoner ? 1 : -1;
+      });
+  }
+
+  private resolveRealtimeDeepSeekModels(models: string[]): string[] {
+    const ranked = this.orderDeepSeekModelsByLatency(models);
+    const nonReasoning = ranked.filter((model) => !/reasoner/i.test(model));
+    return nonReasoning.length ? nonReasoning : ranked;
+  }
+
   private isAbortError(error: unknown): boolean {
     return (
       error instanceof Error &&
@@ -1935,4 +2191,8 @@ const resolveTimestamp = (timestamp?: string): string | undefined => {
     return undefined;
   }
   return date.toISOString();
+};
+
+const windowLikeSetTimeout = (callback: () => void, delayMs: number) => {
+  setTimeout(callback, delayMs);
 };

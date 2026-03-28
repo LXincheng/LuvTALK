@@ -104,6 +104,30 @@ export interface VoiceOperationSnapshot {
   updatedAt: string;
 }
 
+export interface ScenarioHintPayload {
+  kind: 'hint' | 'nudge';
+  message: string;
+  translation?: string;
+}
+
+export type ScenarioFeedbackDimensionKey =
+  | 'taskCompletion'
+  | 'naturalness'
+  | 'pronunciation'
+  | 'resilience';
+
+export interface ScenarioFeedbackPayload {
+  conversationId: string;
+  overallScore: number;
+  summary: string;
+  headline: string;
+  dimensions: Array<{
+    key: ScenarioFeedbackDimensionKey;
+    score: number;
+  }>;
+  suggestions: string[];
+}
+
 export type ReviewSourceType = 'favorite' | 'low_score';
 
 export interface ReviewCard {

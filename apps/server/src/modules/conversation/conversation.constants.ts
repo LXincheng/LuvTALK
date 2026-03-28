@@ -3,7 +3,7 @@ export const CONVERSATION_DEFAULTS = {
   historyWindow: 6,
   openAiTemperature: 0.65,
   fallbackTemperature: 0.6,
-  fallbackScore: 72,
+  fallbackScore: 62,
 } as const;
 
 export const CONVERSATION_ENDPOINTS = {

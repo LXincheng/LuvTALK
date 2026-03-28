@@ -10,7 +10,9 @@ export default function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const { t } = useLocale();
-  const isChatRoute = location.pathname.startsWith('/chat');
+  const isChatRoute =
+    location.pathname.startsWith('/chat') ||
+    /^\/scenarios\/[^/]+\/session\/[^/]+/.test(location.pathname);
   const currentItem = useMemo(() => {
     return (
       navItems.find((item) => location.pathname.startsWith(item.path)) ??

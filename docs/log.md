@@ -530,3 +530,98 @@
 | 问题点   | 沉浸式报告预览 toast 仍沿用通用横向布局，视觉重心偏左，文案和按钮也偏长。                                 |
 | 修复点   | 新增 `app-toast--report-preview` 专用样式，仅用于 immersive report 预览提示，并将提示与按钮文案压缩。    |
 | 效果     | 退出沉浸模式后的“生成复盘？”提示会以更居中的确认条呈现，信息更简洁，操作更直接。                         |
+
+### 2026-03-28（场景对话功能设计定稿）
+
+| 维度 | 记录 |
+| --- | --- |
+| 业务判断 | 当前自由 Chat 已具备可用性，但用户仍缺少“针对某个真实任务集中练习”的入口，场景化练习是最值得补强的新主链路。 |
+| 核心决策 | 将“场景对话”定义为独立训练链路，而不是 Chat 页内的一个模式开关；主导航新增 `场景` 一级入口。 |
+| 体验目标 | 围绕“选场景 -> 开始前角色准备 -> 场景练习 -> 卡壳提示 -> 结束评分 modal”构建完整闭环。 |
+| UI 方向 | 整体采用苹果风格的克制高级感，减少解释性小字，强调白天 / 黑夜模式一致性、玻璃质感层级和高质量动效。 |
+| AI 目标 | Prompt 新增 `scenario layer`，要求 tutor 保持角色感、推动任务完成、支持轻提示与引导，并在结束后输出结构化反馈。 |
+| 语音要求 | 场景模式下 tutor 语音优先追求自然、短句、像真人对话，避免长段播报和机械读稿感。 |
+| 工程约束 | 场景定义、文案、Prompt、组件分层解耦；首版复用现有 conversation 基础设施，但新增独立 `scenario feature` 页面与类型体系。 |
+| 文档输出 | 新增 `docs/scenario-dialogue-design.md`，并将 `docs/plan.md` 重构为围绕场景对话推进的执行版计划。 |
+
+### 2026-03-28（场景对话前端骨架落地）
+
+| 维度 | 记录 |
+| --- | --- |
+| 页面落地 | 已新增独立 `scenario feature`，包含场景首页、场景开始前准备页、场景练习页和 `ScenarioScoreModal`。 |
+| 导航接入 | 主导航与移动端底栏已新增 `场景` 入口，路由接入 `/scenarios`、`/scenarios/:scenarioKey`、`/scenarios/:scenarioKey/session/:sessionId`。 |
+| 视觉方向 | 首版 UI 按“苹果风格、紧凑高级、减少无效留白”的方向实现，优先保证首屏可操作、信息密度更高、动线更清晰。 |
+| 文案策略 | 场景标题、摘要、角色、目标、评分反馈建议全部进入 locale 与配置层，避免在 React 组件内硬编码大段场景文案。 |
+| 当前范围 | 本次先完成前端体验骨架与 mock 数据演示；真实场景 session、hint 接口、评分生成和 Prompt 场景层仍待后端接入。 |
+| 验证结果 | `pnpm --filter web typecheck`、`pnpm --filter web build` 通过。 |
+
+### 2026-03-28（场景会话真实接口接入与 Chat 同构收口）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 场景练习页此前仍以 mock 回复演示为主，头部和底部结构也和主聊天页有明显割裂，真实可用性不够。 |
+| 接入点 | 前端场景会话页改为直接复用现有 `conversation` 基础设施，接入真实 `startSession / sendMessage / uploadVoice / voice-status / hint` 链路。 |
+| 后端补充 | `ConversationController` 新增 `POST /conversation/:conversationId/hint`，`ConversationService` 新增轻量 `generateScenarioHint()`，按 `hint / nudge` 返回引导内容。 |
+| 体验收口 | `ScenarioSessionPage` 的顶部和底部进一步向 `ConversationPage` 对齐，继续复用 `MessageBubble`、`VoiceInput`、`ChatQuickReplies`，只保留场景特有的返回、提示和结束操作。 |
+| 当前取舍 | 评分 modal 仍使用前端结构化预览数据，先保证“可练、可发、可听、可提示”，后续再把练后评分完全切到真实 AI 反馈。 |
+| 验证结果 | `pnpm --filter web typecheck`、`pnpm --filter web build`、`pnpm --filter server build` 通过。 |
+
+### 2026-03-28（场景结束评分切到真实反馈接口）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 场景练习结束后的评分 modal 仍依赖前端预览数据，无法反映本轮真实对话质量。 |
+| 接口设计 | 新增 `POST /conversation/:conversationId/scenario-feedback`，由后端复用已有 `conversation report` 生成链路，再压成适合 modal 的紧凑结构：`overallScore / summary / dimensions / suggestions`。 |
+| 前端改造 | `ScenarioSessionPage` 的“结束练习”按钮现在会真实请求场景反馈；modal 支持 `loading / error / success` 三态。 |
+| 兼容策略 | 场景详情页仍保留预览反馈能力，但统一先映射到同一套 `ScenarioFeedback` UI 数据结构，避免展示层分叉。 |
+| 当前结果 | 练习结束后会展示基于本轮会话内容生成的真实结构化反馈，不再是静态 mock 分数。 |
+| 验证结果 | `pnpm --filter web typecheck`、`pnpm --filter web build`、`pnpm --filter server build` 通过。 |
+
+### 2026-03-28（场景页收口：移除 mock、目录归位、DS 优先）
+
+| 维度 | 记录 |
+| --- | --- |
+| UI 收口 | 修正场景详情页、练习页顶部操作区的按钮尺寸和对齐，统一主要操作按钮高度为同一组规格，减少“看起来没对齐”的零散感。 |
+| 组件归位 | 将 `ScenarioScoreModal` 从 `features/scenario/components` 移到 `apps/web/src/components/report`，与现有报告/反馈组件保持同一分层，页面只负责装配。 |
+| mock 清理 | 删除场景详情页的静态评分预览入口与 `scenarioFeedbackPreviewMap`，避免再把假数据混入真实产品链路。 |
+| 引导优化 | 场景页快捷引导不再只在开场给固定文案，而是基于当前会话轮次、最近一条导师消息和最近一条用户消息动态给出下一句建议。 |
+| 模型路由 | 会话主回复与场景评分报告都改为 `DeepSeek -> OpenAI -> 本地兜底` 顺序，并收紧默认超时，优先追求更快首响。 |
+| 评分修正 | 场景反馈对 `userTurns` 更敏感；未开始或只说一轮时会显著降分，不再出现“几乎没练也有 78 分”的误导性结果。 |
+| 数据库影响 | 本轮未新增 Prisma schema / migration，也未改动 Supabase 数据结构，因此无需做本地与远端数据库同步操作。 |
+| 验证结果 | `pnpm --filter web typecheck`、`pnpm --filter web build`、`pnpm --filter server build` 通过。 |
+
+### 2026-03-29（场景引导去写死 + DS 快反馈 + 浅色阴影收口）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 场景会话页的快捷消息还残留固定话术，出现“医院场景却提示酒店入住”的串场；评分等待页过于扁平；浅色模式多处 `glass-button / glass-card` 阴影偏脏。 |
+| 场景引导修复 | 为每个预设场景补充独立 `quickReplyKeys`，首轮快捷消息改为场景配置驱动；进入多轮对话后优先使用真实 `session.coach.associativePhrases`，仅在缺失时才用当前语境兜底，不再复用错误的固定 starter。 |
+| 反馈性能修复 | `ConversationReportService.generateScenarioFeedback()` 改为先走轻量 DeepSeek 场景反馈 Prompt，直接返回 `ScenarioFeedbackPayload`；若 DS 失败则立即回退本地启发式评分，不再强依赖完整重报告链路。 |
+| 等待页重做 | `ScenarioScoreModal` 的 loading 态改为单独的“生成中”布局，强化信息层级、旋转状态环和骨架指标区；底部两个按钮统一为同排双列布局，移动端不再上下堆叠。 |
+| 视觉收口 | 全局收紧浅色模式 `glass` 阴影；快捷胶囊、收藏筛选、成就页分段控制改为更干净的分段按钮与更轻的悬浮层，减少白天模式“灰脏”和厚重阴影。 |
+| mock 清理 | 本轮未引入新的 mock 数据；场景快捷消息与反馈都改为真实配置或真实会话数据驱动。 |
+| 验证结果 | `pnpm --filter web typecheck`、`pnpm --filter web build`、`pnpm --filter server build` 通过。 |
+
+### 2026-03-29（AI 链路测速与首轮降时：Chat / Scenario）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 用户反馈“场景报告生成依然很慢”；进一步实测发现不仅 `scenario-feedback` 慢，普通 `chat/scenario` 文本消息也存在 20~30 秒级等待。 |
+| 实测方式 | 对本地真实接口分段计时：`start-session -> message -> scenario-feedback`，同时单独探测上游模型首响；并对比旧服务进程与基于当前代码的新服务实例。 |
+| 关键发现 1 | `deepseek-reasoner` 的真实首响显著慢于 `deepseek-chat` 与主模型；极小请求探测中，`reasoner` 约 13 秒，而 `deepseek-chat` 约 1.6 秒，主模型约 3 秒。 |
+| 关键发现 2 | 原 `fetchWithTimeout()` 只约束到 `fetch()` 返回响应头，不覆盖 `response.json()` 读取完整 body，因此一旦上游慢速输出正文，接口仍会被拖到 20~40 秒。 |
+| 修复点 | `ConversationService` 与 `ConversationReportService` 新增“完整响应体读取超时”封装；场景反馈快路径与对话 fallback 路由优先改为低时延模型，避免 `reasoner` 持续阻塞首响。 |
+| 实测结果 | 新服务实例复测后：`scenario-feedback` 从约 43 秒下降到约 5.8 秒；首条场景文本消息从约 24 秒下降到约 5.7 秒；第二条文本消息从约 27 秒下降到约 10.8 秒。 |
+| 剩余瓶颈 | 当前第二条及后续消息仍可能被主模型 `gpt-5.1` 的 4.8 秒等待窗口拖慢，且 `deepseek-chat` 在长 prompt 下偶发超时，说明系统还需要更细的模型分层和首响/补全解耦。 |
+| 结论 | “先快回、再补强”应成为所有 AI 模块的统一策略；高推理模型不适合作为实时聊天与场景训练的首响路径。 |
+
+### 2026-03-29（场景评分弹窗重排 + 冗余场景常量清理）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 场景评分弹窗在移动端出现大分数字号、状态胶囊、背景字母和正文抢空间，形成文字堆叠和遮挡；同时本轮代码中仍残留多批已不再参与逻辑的场景提示常量。 |
+| UI 修复 | `ScenarioScoreModal` 改为更克制的单列层级：收紧分数字体、移除大水印字母与额外状态胶囊、减少边框块感；维度区改为简洁列表，建议区保持统一字级和留白；loading 动效改为更轻的环形微动效。 |
+| 移动端收口 | 保证弹窗在窄屏上不再出现分数、标题、摘要互相覆盖；按钮保持稳定同排，正文和建议区按照自然阅读顺序向下排布。 |
+| 冗余清理 | 删除这两轮里不再被页面或逻辑使用的 `scenarioSessionHint/Nudge`、旧的 `scenarioFeedback...Tip`、`starterKey`、固定 `quickReplyKeys` 等场景文案与类型字段，避免“看起来还在用，实际上已失效”的维护噪音。 |
+| 引导策略调整 | 场景会话首轮快捷消息由“locale 固定文案”改成基于当前场景目标动态生成；后续仍优先依赖真实 `session.coach.associativePhrases`。 |
+| 验证结果 | 使用 `rg` 检查后已无相关冗余 key 残留引用；`pnpm --filter web typecheck`、`pnpm --filter web build` 通过。 |

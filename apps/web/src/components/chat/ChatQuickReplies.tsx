@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { MessageCircleMore, X } from 'lucide-react';
+import { X } from 'lucide-react';
 
 export interface QuickReplyOption {
   id: string;
@@ -42,16 +42,15 @@ export default function ChatQuickReplies({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.18, delay: index * 0.03 }}
-                className="press-scale inline-flex max-w-[78vw] shrink-0 items-center gap-1.5 rounded-[16px] border border-[rgba(124,151,192,0.18)] bg-[rgba(255,255,255,0.9)] px-3 py-2 text-left text-[12px] font-medium leading-5 text-label-secondary shadow-[0_10px_24px_rgba(61,88,135,0.12)] backdrop-blur-xl transition hover:border-primary/20 hover:bg-[rgba(255,255,255,0.98)] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-[rgba(28,28,30,0.84)] dark:shadow-[0_12px_28px_rgba(0,0,0,0.28)] sm:max-w-[320px]"
+                className="press-scale inline-flex max-w-[78vw] shrink-0 items-center rounded-[16px] border border-separator bg-[rgba(255,255,255,0.88)] px-3.5 py-2.5 text-left text-[12.5px] font-medium leading-5 text-label-secondary backdrop-blur-xl transition hover:bg-[rgba(255,255,255,0.96)] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[rgba(28,28,30,0.8)] dark:hover:bg-[rgba(32,32,36,0.92)] sm:max-w-[320px]"
               >
-                <MessageCircleMore className="h-3.5 w-3.5 shrink-0 text-primary/85" />
                 <span className="line-clamp-2">{option.text}</span>
               </motion.button>
             ))}
             <button
               type="button"
               onClick={onClose}
-              className="press-scale inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[15px] border border-[rgba(124,151,192,0.18)] bg-[rgba(255,255,255,0.9)] text-label-tertiary shadow-[0_10px_24px_rgba(61,88,135,0.12)] backdrop-blur-xl transition hover:bg-[rgba(255,255,255,0.98)] dark:border-white/10 dark:bg-[rgba(28,28,30,0.84)] dark:shadow-[0_12px_28px_rgba(0,0,0,0.28)]"
+              className="press-scale inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[15px] border border-separator bg-[rgba(255,255,255,0.88)] text-label-tertiary backdrop-blur-xl transition hover:bg-[rgba(255,255,255,0.96)] dark:bg-[rgba(28,28,30,0.8)] dark:hover:bg-[rgba(32,32,36,0.92)]"
               aria-label="close quick replies"
             >
               <X className="h-3.5 w-3.5" />

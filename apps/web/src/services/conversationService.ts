@@ -5,6 +5,8 @@ import type {
   ConversationReportPayload,
   ConversationSession,
   LanguageCode,
+  ScenarioFeedbackPayload,
+  ScenarioHintPayload,
   SessionSummaryPayload,
   VoiceOperationSnapshot,
   VoiceUploadResponse,
@@ -369,4 +371,32 @@ export function synthesizeConversationSpeech(
     ...payload,
     audioUrl: withConversationAccessQuery(payload.audioUrl, conversationId),
   }));
+}
+
+export function generateScenarioHint(
+  conversationId: string,
+  kind: 'hint' | 'nudge',
+) {
+  return apiClient.postWithOptions<
+    ScenarioHintPayload,
+    { kind: 'hint' | 'nudge' }
+  >(
+    `/conversation/${conversationId}/hint`,
+    { kind },
+    { headers: buildConversationAccessHeaders(conversationId) },
+  );
+}
+
+export function generateScenarioFeedback(
+  conversationId: string,
+  payload: { force?: boolean } = {},
+) {
+  return apiClient.postWithOptions<
+    ScenarioFeedbackPayload,
+    { force?: boolean }
+  >(
+    `/conversation/${conversationId}/scenario-feedback`,
+    payload,
+    { headers: buildConversationAccessHeaders(conversationId) },
+  );
 }

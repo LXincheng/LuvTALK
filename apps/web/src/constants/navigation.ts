@@ -1,8 +1,8 @@
-import { MessageCircle, Star, BookOpen, User } from 'lucide-react';
+import { Compass, MessageCircle, Star, BookOpen, User } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { LocaleKey } from '../providers/LocaleContext';
 
-export type NavItemId = 'chat' | 'favorites' | 'review' | 'profile';
+export type NavItemId = 'chat' | 'scenarios' | 'favorites' | 'review' | 'profile';
 
 export interface NavItem {
   id: NavItemId;
@@ -13,6 +13,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { id: 'chat', labelKey: 'navChat', path: '/chat', icon: MessageCircle },
+  { id: 'scenarios', labelKey: 'navScenarios', path: '/scenarios', icon: Compass },
   {
     id: 'favorites',
     labelKey: 'navFavorites',

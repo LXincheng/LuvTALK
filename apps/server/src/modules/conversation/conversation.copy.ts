@@ -35,6 +35,11 @@ const SCENARIO_LABELS_ZH: Record<string, string> = {
   directions: "问路指引",
   business: "商务寒暄",
   daily: "日常聊天",
+  hotel_checkin: "酒店入住",
+  doctor_visit_fever: "感冒看病",
+  restaurant_ordering: "餐厅点单",
+  shopping_in_store: "商店购物",
+  asking_directions: "问路与打车",
 };
 
 const SCENARIO_LABELS_EN: Record<string, string> = {
@@ -43,6 +48,11 @@ const SCENARIO_LABELS_EN: Record<string, string> = {
   directions: "Asking for directions",
   business: "Business meetup",
   daily: "Daily small talk",
+  hotel_checkin: "Hotel check-in",
+  doctor_visit_fever: "Doctor visit",
+  restaurant_ordering: "Restaurant ordering",
+  shopping_in_store: "In-store shopping",
+  asking_directions: "Directions and taxi",
 };
 
 const LANGUAGE_LABELS = {
@@ -83,6 +93,31 @@ export const resolveFallbackAssociativePhrases = (
 ): [string, string] => {
   if (targetLanguage === LanguageCode.English) {
     switch (scenarioId) {
+      case "hotel_checkin":
+        return [
+          "I have a reservation under Chan.",
+          "If possible, I would like a quieter room.",
+        ];
+      case "doctor_visit_fever":
+        return [
+          "I have had a fever since yesterday evening.",
+          "I also took some medicine this morning.",
+        ];
+      case "restaurant_ordering":
+        return [
+          "I'd like this dish, but not too spicy.",
+          "Could I also get that to go?",
+        ];
+      case "shopping_in_store":
+        return [
+          "Do you have this in a larger size?",
+          "Can I try this on first?",
+        ];
+      case "asking_directions":
+        return [
+          "How long does it take to get there from here?",
+          "Would you recommend walking or taking a taxi?",
+        ];
       case "restaurant":
         return [
           "Could you recommend your signature dish?",
@@ -116,8 +151,9 @@ export const buildFallbackReplyCopy = (
   language: LanguageCode,
   scenarioId: string,
 ): string => {
+  const scenarioLabel = resolveScenarioTitle(scenarioId, language);
   if (language === LanguageCode.English) {
-    return `I heard "${message}". Here is a natural ${scenarioId} response to keep things flowing.`;
+    return `I heard "${message}". Here is a natural ${scenarioLabel} response to keep things flowing.`;
   }
   if (language === LanguageCode.Cantonese) {
     return `我聽到你講：「${message}」。等我用地道講法繼續对话。`;

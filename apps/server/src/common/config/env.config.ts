@@ -38,9 +38,9 @@ export const envConfig = {
     translationModel: readTrimmed(process.env.TRANSLATION_MODEL),
   },
   modelTimeoutMs: {
-    primary: readNumber(process.env.PRIMARY_MODEL_TIMEOUT_MS, 7000),
-    secondary: readNumber(process.env.SECONDARY_MODEL_TIMEOUT_MS, 3200),
-    third: readNumber(process.env.THIRD_MODEL_TIMEOUT_MS, 1800),
+    primary: readNumber(process.env.PRIMARY_MODEL_TIMEOUT_MS, 4500),
+    secondary: readNumber(process.env.SECONDARY_MODEL_TIMEOUT_MS, 2200),
+    third: readNumber(process.env.THIRD_MODEL_TIMEOUT_MS, 1500),
   },
   deepseek: {
     apiKey: readTrimmed(process.env.SECONDARY_API_KEY),

@@ -181,11 +181,11 @@ export default function AchievementHallPage() {
               </div>
             </div>
 
-            <div className="flex gap-2 mb-6 glass-card rounded-xl p-1">
-              <button onClick={() => setActiveTab('achievements')} className={`flex-1 px-4 md:px-6 py-2.5 md:py-3 rounded-lg font-medium transition-all text-sm md:text-base ${activeTab === 'achievements' ? 'bg-primary text-white shadow-lg' : 'text-label-secondary hover:bg-fill'}`}>
+            <div className="mb-6 inline-flex w-full gap-1 rounded-xl border border-separator bg-fill-secondary p-1">
+              <button onClick={() => setActiveTab('achievements')} className={`flex-1 rounded-[10px] px-4 md:px-6 py-2.5 md:py-3 font-medium transition-colors text-sm md:text-base ${activeTab === 'achievements' ? 'bg-primary text-white' : 'text-label-secondary hover:bg-white/70 dark:hover:bg-white/5'}`}>
                 {t('achievementTabAchievements')}
               </button>
-              <button onClick={() => setActiveTab('levels')} className={`flex-1 px-4 md:px-6 py-2.5 md:py-3 rounded-lg font-medium transition-all text-sm md:text-base ${activeTab === 'levels' ? 'bg-primary text-white shadow-lg' : 'text-label-secondary hover:bg-fill'}`}>
+              <button onClick={() => setActiveTab('levels')} className={`flex-1 rounded-[10px] px-4 md:px-6 py-2.5 md:py-3 font-medium transition-colors text-sm md:text-base ${activeTab === 'levels' ? 'bg-primary text-white' : 'text-label-secondary hover:bg-white/70 dark:hover:bg-white/5'}`}>
                 {t('achievementTabLevels')}
               </button>
             </div>
