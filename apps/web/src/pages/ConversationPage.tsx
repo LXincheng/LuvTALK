@@ -7,6 +7,7 @@ import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
 import VoiceStyleSelector from '../components/chat/VoiceStyleSelector';
+import VoiceSpeedSelector from '../components/chat/VoiceSpeedSelector';
 import ConversationRecoveryBanner from '../components/chat/ConversationRecoveryBanner';
 import SessionSummaryCard from '../components/chat/SessionSummaryCard';
 import type { ConversationRecoveryState } from '../components/chat/ConversationRecoveryBanner';
@@ -31,7 +32,12 @@ import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
-import { PREFERRED_RECORDING_MIMES, DEFAULT_TTS_VOICE } from '../constants/ui';
+import {
+  DEFAULT_TTS_SPEED,
+  DEFAULT_TTS_VOICE,
+  PREFERRED_RECORDING_MIMES,
+  REALTIME_VOICE_OPTIONS,
+} from '../constants/ui';
 import { CONVERSATION_REPORT_TOAST_ID } from '../constants/report';
 import type { Annotation, ChatMode, Message, MessageStatusTone } from '../types/chat';
 import type {
@@ -90,11 +96,11 @@ const getStoredConversationIds = (): string[] => {
 };
 
 const GUEST_MAX_HISTORY = 5;
-const MEMORY_PREFERENCE_PREFIX = 'conversationMemoryEnabled:';
 const ACTIVE_CONVERSATION_BY_LANGUAGE_KEY = 'activeConversationIdByLanguage';
 const MEANINGFUL_HISTORY_MIN_MESSAGES = 2;
 const NEW_CHAT_QUICK_REPLY_DELAY_MS = 1400;
 const EXISTING_CHAT_QUICK_REPLY_DELAY_MS = 5000;
+const TTS_SPEED_STORAGE_KEY = 'ttsSpeed';
 
 let startupSessionPromise: Promise<ConversationSession> | null = null;
 
@@ -151,32 +157,6 @@ const trackConversationId = (id: string) => {
     'conversationIds',
     JSON.stringify(ids.slice(0, GUEST_MAX_HISTORY)),
   );
-};
-
-const getMemoryPreferenceKey = (conversationId: string) =>
-  `${MEMORY_PREFERENCE_PREFIX}${conversationId}`;
-
-const readStoredMemoryPreference = (
-  conversationId: string,
-): boolean | undefined => {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-  const raw = window.localStorage.getItem(getMemoryPreferenceKey(conversationId));
-  if (raw === 'true') {
-    return true;
-  }
-  if (raw === 'false') {
-    return false;
-  }
-  return undefined;
-};
-
-const storeMemoryPreference = (conversationId: string, value: boolean) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.localStorage.setItem(getMemoryPreferenceKey(conversationId), String(value));
 };
 
 const mapAnnotationTypeToFavoriteType = (
@@ -501,6 +481,15 @@ export default function ConversationPage() {
     if (typeof window === 'undefined') return DEFAULT_TTS_VOICE;
     return localStorage.getItem('ttsVoice') || DEFAULT_TTS_VOICE;
   });
+  const [realtimeVoice, setRealtimeVoice] = useState<string>(() => {
+    if (typeof window === 'undefined') return REALTIME_VOICE_OPTIONS[0].id;
+    return localStorage.getItem('realtimeVoice') || REALTIME_VOICE_OPTIONS[0].id;
+  });
+  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(() => {
+    if (typeof window === 'undefined') return DEFAULT_TTS_SPEED;
+    const stored = window.localStorage.getItem(TTS_SPEED_STORAGE_KEY);
+    return stored === 'slow' || stored === 'fast' ? stored : DEFAULT_TTS_SPEED;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -511,6 +500,7 @@ export default function ConversationPage() {
   const voiceDraftUrlRef = useRef<string | null>(null);
   const ttsAudioMapRef = useRef<Record<string, string>>({});
   const ttsVoiceRef = useRef(ttsVoice);
+  const ttsSpeedRef = useRef(ttsSpeed);
   const ttsBaselineRef = useRef(0);
   const prevChatModeRef = useRef<ChatMode>(chatMode);
   const prevAutoTtsModeRef = useRef<ChatMode>(chatMode);
@@ -527,7 +517,7 @@ export default function ConversationPage() {
   const lastSummaryAiCountRef = useRef(0);
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
-  const [isMemorySaving, setIsMemorySaving] = useState(false);
+  const [isPreferenceSaving, setIsPreferenceSaving] = useState(false);
   const [quickReplyOptions, setQuickReplyOptions] = useState<QuickReplyOption[]>([]);
   const [quickRepliesVisible, setQuickRepliesVisible] = useState(false);
   const [dismissedQuickReplyKey, setDismissedQuickReplyKey] = useState<string | null>(null);
@@ -921,12 +911,28 @@ export default function ConversationPage() {
   }, [ttsVoice]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('realtimeVoice', realtimeVoice);
+    }
+  }, [realtimeVoice]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(TTS_SPEED_STORAGE_KEY, ttsSpeed);
+    }
+  }, [ttsSpeed]);
+
+  useEffect(() => {
     ttsAudioMapRef.current = ttsAudioMap;
   }, [ttsAudioMap]);
 
   useEffect(() => {
     ttsVoiceRef.current = ttsVoice;
   }, [ttsVoice]);
+
+  useEffect(() => {
+    ttsSpeedRef.current = ttsSpeed;
+  }, [ttsSpeed]);
 
   useEffect(() => {
     currentSessionIdRef.current = session?.id ?? null;
@@ -1431,33 +1437,6 @@ export default function ConversationPage() {
   }, [chatMode, session?.id, session?.messages.length]);
 
   useEffect(() => {
-    if (!session?.id) {
-      return;
-    }
-    const conversationId = session.id;
-    const serverValue = session.memoryEnabled !== false;
-    const localValue = readStoredMemoryPreference(conversationId);
-    if (localValue === undefined) {
-      storeMemoryPreference(conversationId, serverValue);
-      return;
-    }
-    if (localValue === serverValue) {
-      return;
-    }
-    void updateConversationPreferences(conversationId, {
-      memoryEnabled: localValue,
-    })
-      .then((updatedSession) => {
-        if (updatedSession.id === currentSessionIdRef.current) {
-          setSession(updatedSession);
-        }
-      })
-      .catch(() => {
-        storeMemoryPreference(conversationId, serverValue);
-      });
-  }, [session?.id, session?.memoryEnabled]);
-
-  useEffect(() => {
     if (!session?.id || chatMode === 'immersive') {
       return;
     }
@@ -1491,7 +1470,12 @@ export default function ConversationPage() {
       return;
     }
     ttsRequestsRef.current.add(message.id);
-    synthesizeConversationSpeech(session.id, message.text, ttsVoiceRef.current)
+    synthesizeConversationSpeech(
+      session.id,
+      message.text,
+      ttsVoiceRef.current,
+      ttsSpeedRef.current,
+    )
       .then((payload) => {
         setTtsAudioMap((prev) => ({
           ...prev,
@@ -1643,23 +1627,22 @@ export default function ConversationPage() {
     setChatMode(nextMode);
   };
 
-  const handleToggleMemory = useCallback(async () => {
-    if (!session || isMemorySaving) {
+  const handleToggleDeepThinking = useCallback(async () => {
+    if (!session || isPreferenceSaving) {
       return;
     }
     const conversationId = session.id;
-    const previousValue = session.memoryEnabled !== false;
+    const previousValue = session.deepThinkingEnabled === true;
     const nextValue = !previousValue;
-    setIsMemorySaving(true);
+    setIsPreferenceSaving(true);
     setSession((prev) =>
       prev && prev.id === conversationId
-        ? { ...prev, memoryEnabled: nextValue }
+        ? { ...prev, deepThinkingEnabled: nextValue }
         : prev,
     );
-    storeMemoryPreference(conversationId, nextValue);
     try {
       const updatedSession = await updateConversationPreferences(conversationId, {
-        memoryEnabled: nextValue,
+        deepThinkingEnabled: nextValue,
       });
       setSession((prev) =>
         prev && prev.id === updatedSession.id ? updatedSession : prev,
@@ -1667,15 +1650,14 @@ export default function ConversationPage() {
     } catch {
       setSession((prev) =>
         prev && prev.id === conversationId
-          ? { ...prev, memoryEnabled: previousValue }
+          ? { ...prev, deepThinkingEnabled: previousValue }
           : prev,
       );
-      storeMemoryPreference(conversationId, previousValue);
-      toast.error(t('memorySaveError'), { id: 'memory-preferences' });
+      toast.error(t('deepThinkingSaveError'), { id: 'session-preferences' });
     } finally {
-      setIsMemorySaving(false);
+      setIsPreferenceSaving(false);
     }
-  }, [isMemorySaving, session, t]);
+  }, [isPreferenceSaving, session, t]);
 
   const handleSend = useCallback(async (overrideText?: string) => {
     const messageText = (overrideText ?? inputValue).trim();
@@ -1907,36 +1889,36 @@ export default function ConversationPage() {
     />
   );
 
-  const memoryEnabled = session?.memoryEnabled !== false;
-  const memoryStatusText = memoryEnabled ? t('memoryOn') : t('memoryOff');
-  const memoryToggleControl = (
+  const deepThinkingEnabled = session?.deepThinkingEnabled === true;
+  const deepThinkingStatusText = deepThinkingEnabled ? t('deepThinkingOn') : t('deepThinkingOff');
+  const deepThinkingToggleControl = (
     <button
       type="button"
       onClick={() => {
-        void handleToggleMemory();
+        void handleToggleDeepThinking();
       }}
-      disabled={!session || isInitializing || isMemorySaving}
+      disabled={!session || isInitializing || isPreferenceSaving}
       className="press-scale inline-flex items-center gap-2 rounded-lg border border-separator glass-card px-2.5 py-1.5 text-xs text-label-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      title={t('memoryToggle')}
-      aria-label={`${t('memoryToggle')} ${memoryStatusText}`}
-      aria-pressed={memoryEnabled}
+      title={t('deepThinkingToggle')}
+      aria-label={`${t('deepThinkingToggle')} ${deepThinkingStatusText}`}
+      aria-pressed={deepThinkingEnabled}
     >
       <span
         className={`relative h-5 w-9 rounded-full transition-colors ${
-          memoryEnabled
+          deepThinkingEnabled
             ? 'bg-success'
             : 'bg-fill'
         }`}
       >
         <span
           className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-            memoryEnabled ? 'translate-x-4' : ''
+            deepThinkingEnabled ? 'translate-x-4' : ''
           }`}
         />
       </span>
-      <span className="font-medium">{t('memoryToggle')}</span>
+      <span className="font-medium">{t('deepThinkingToggle')}</span>
       <span className="text-[11px] text-label-tertiary">
-        {memoryStatusText}
+        {deepThinkingStatusText}
       </span>
     </button>
   );
@@ -1963,11 +1945,11 @@ export default function ConversationPage() {
       >
         <LazyImmersiveMode
           conversationId={session.id}
-          voice={ttsVoice}
-          onVoiceChange={setTtsVoice}
+          voice={realtimeVoice}
+          onVoiceChange={setRealtimeVoice}
           onExit={() => {
             const nextConversationId = session.id;
-            const nextVoiceStyle = ttsVoice;
+            const nextVoiceStyle = realtimeVoice;
             // Skip existing messages but allow new incoming AI messages after exit.
             ttsBaselineRef.current = session.messages.length;
             setChatMode('voice');
@@ -2069,10 +2051,13 @@ export default function ConversationPage() {
                 <div className="shrink-0">
                   <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
                 </div>
+                <div className="shrink-0">
+                  <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
+                </div>
               </>
             )}
             <div className="w-px h-5 bg-separator shrink-0" />
-            <div className="shrink-0">{memoryToggleControl}</div>
+            <div className="shrink-0">{deepThinkingToggleControl}</div>
           </div>
         </div>
 
@@ -2122,9 +2107,12 @@ export default function ConversationPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 lg:gap-3 shrink-0 min-w-0">
-            {memoryToggleControl}
+            {deepThinkingToggleControl}
             {chatMode !== 'text' && (
-              <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
+              <>
+                <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
+                <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
+              </>
             )}
             <ChatModeSwitcher mode={chatMode} onChange={handleModeChange} compact />
           </div>

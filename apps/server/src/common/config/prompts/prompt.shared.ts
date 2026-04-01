@@ -3,6 +3,7 @@ import {
   ConversationPromptContext,
   ConversationPromptInput,
 } from "./prompt.types";
+import { resolveScenarioPromptDefinition } from "./scenario.config";
 
 export const describeLanguage = (language: LanguageCode): string => {
   switch (language) {
@@ -22,12 +23,19 @@ export const buildPromptContext = (
 ): ConversationPromptContext => {
   const interactionMode = input.interactionMode ?? "text";
   const learnerLevel = input.learnerLevel ?? "intermediate";
+  const scenarioDefinition = resolveScenarioPromptDefinition(input.scenarioId);
   return {
+    scenarioId: scenarioDefinition.key,
     targetLanguage: input.targetLanguage,
     nativeLanguage: input.nativeLanguage,
     targetLabel: describeLanguage(input.targetLanguage),
     nativeLabel: describeLanguage(input.nativeLanguage),
     scenarioLabel: input.scenarioLabel,
+    learnerRole: scenarioDefinition.learnerRole,
+    tutorRole: scenarioDefinition.tutorRole,
+    scenarioGoals: scenarioDefinition.taskGoals,
+    scenarioFocus: scenarioDefinition.followUpFocus,
+    coachingFocus: scenarioDefinition.coachingFocus,
     interactionMode,
     learnerLevel,
   };

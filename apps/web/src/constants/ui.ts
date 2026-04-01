@@ -70,11 +70,26 @@ export const PROFILE_DEFAULT_PROGRESS = [
   { labelKey: 'profilePronunciation', progressKey: 'profilePronunciationProgress', width: '0%', color: PROGRESS_COLORS.purple },
 ] as const;
 
-// Available TTS voice options for AI speech (curated for natural sound)
+// Available TTS voice options for Bailian/Qwen speech.
 export const TTS_VOICE_OPTIONS = [
+  { id: 'Kiki', labelKey: 'voiceKiki' },
+  { id: 'Serena', labelKey: 'voiceSerena' },
+  { id: 'Cherry', labelKey: 'voiceCherry' },
+] as const;
+
+export const DEFAULT_TTS_VOICE = 'Kiki';
+
+export const TTS_SPEED_OPTIONS = [
+  { id: 'slow', labelKey: 'voiceSpeedSlow' },
+  { id: 'normal', labelKey: 'voiceSpeedNormal' },
+  { id: 'fast', labelKey: 'voiceSpeedFast' },
+] as const;
+
+export const DEFAULT_TTS_SPEED = 'normal';
+
+// Keep realtime untouched for now.
+export const REALTIME_VOICE_OPTIONS = [
   { id: 'shimmer', labelKey: 'voiceShimmer' },
   { id: 'alloy', labelKey: 'voiceAlloy' },
   { id: 'nova', labelKey: 'voiceNova' },
 ] as const;
-
-export const DEFAULT_TTS_VOICE = 'shimmer';

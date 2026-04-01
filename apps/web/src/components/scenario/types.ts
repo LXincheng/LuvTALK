@@ -4,8 +4,6 @@ import type {
 } from '../../types/api';
 import type { LocaleKey } from '../../providers/LocaleContext';
 
-export type ScenarioCategory = 'travel' | 'health' | 'daily' | 'work';
-
 export type ScenarioDifficulty = 'basic' | 'natural' | 'challenge';
 
 export type ScenarioKey =
@@ -17,8 +15,8 @@ export type ScenarioKey =
 
 export interface ScenarioDefinition {
   key: ScenarioKey;
-  category: ScenarioCategory;
   icon: 'hotel' | 'stethoscope' | 'utensils' | 'bag' | 'map';
+  emoji: string;
   estimatedMinutes: number;
   difficulty: ScenarioDifficulty;
   supportedLanguages: LanguageCode[];
@@ -28,8 +26,6 @@ export interface ScenarioDefinition {
   roleUserKey: LocaleKey;
   roleTutorKey: LocaleKey;
   goals: readonly LocaleKey[];
-  accentFrom: string;
-  accentTo: string;
 }
 
 export interface ScenarioFeedback {

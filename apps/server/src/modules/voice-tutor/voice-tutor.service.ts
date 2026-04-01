@@ -8,6 +8,10 @@ import { basename, extname, join } from "path";
 import { Readable } from "stream";
 import { envConfig } from "../../common/config/env.config";
 import {
+  resolveChatModelRoute,
+  resolveDashscopeGenerationEndpoint,
+} from "../../common/config/model-provider.config";
+import {
   VoiceOperationCacheService,
   VoiceOperationSnapshot,
 } from "../../common/cache/voice-operation-cache.service";
@@ -28,8 +32,13 @@ const CONVERTIBLE_AUDIO_EXTENSIONS = new Set([
 interface LanguageHint {
   languageCode: string;
   transcriptionPrompt: string;
+  ttsLanguageType: string;
   ttsVoice: string;
 }
+
+type TtsSpeed = "slow" | "normal" | "fast";
+
+const FLASH_ONLY_TTS_VOICES = new Set(["Kiki", "Rocky"]);
 
 export interface VoiceUploadFile {
   buffer: Buffer;
@@ -54,11 +63,11 @@ export class VoiceTutorService {
     private readonly conversationService: ConversationService,
     private readonly voiceOperationCache: VoiceOperationCacheService,
   ) {
-    this.validateOpenAiSetup();
+    this.validateVoiceSetup();
   }
 
-  private validateOpenAiSetup(): void {
-    const { apiKey, apiUrl, audioApiUrl } = envConfig.openai;
+  private validateVoiceSetup(): void {
+    const { apiKey, apiUrl } = envConfig.openai;
     const transcribeModel = envConfig.modelRouting.sttModel;
     const ttsModel = envConfig.modelRouting.ttsModel;
     if (!apiKey) {
@@ -66,7 +75,7 @@ export class VoiceTutorService {
       return;
     }
     this.logger.log(
-      `Primary provider ready | base=${apiUrl || "unset"} | audio=${audioApiUrl || "unset"} | stt=${transcribeModel || "unset"} | tts=${ttsModel || "unset"}`,
+      `Voice provider ready | base=${apiUrl || "unset"} | stt=${transcribeModel || "unset"} | tts=${ttsModel || "unset"}`,
     );
   }
 
@@ -167,7 +176,7 @@ export class VoiceTutorService {
       status: "transcribing",
     });
     try {
-      let transcript = await this.transcribeWithOpenAi(
+      let transcript = await this.transcribeWithQwenAsr(
         activeUpload,
         languageHint,
       );
@@ -182,7 +191,7 @@ export class VoiceTutorService {
           await this.updateOperationStatus(conversationId, activeUpload, {
             status: "transcribing",
           });
-          transcript = await this.transcribeWithOpenAi(
+          transcript = await this.transcribeWithQwenAsr(
             activeUpload,
             languageHint,
           );
@@ -331,6 +340,7 @@ export class VoiceTutorService {
         conversationId,
         latestAiMessage.text,
         languageHint.ttsVoice,
+        "normal",
         undefined,
         conversationKey,
       );
@@ -407,37 +417,46 @@ export class VoiceTutorService {
     );
   }
 
-  private async transcribeWithOpenAi(
+  private async transcribeWithQwenAsr(
     upload: VoiceUploadResult,
     languageHint: LanguageHint,
   ): Promise<string | undefined> {
-    const { apiKey, audioApiUrl } = envConfig.openai;
-    const transcribeModel = envConfig.modelRouting.sttModel;
-    if (!apiKey || !transcribeModel || !audioApiUrl) {
+    const route = resolveChatModelRoute(envConfig.modelRouting.sttModel);
+    if (!route) {
       this.logger.warn("Primary provider STT 配置缺失，无法执行语音识别");
       return undefined;
     }
     try {
       const buffer = await readFile(upload.filePath);
-      const fileBlob = new Blob([buffer], {
-        type: upload.mimeType || "application/octet-stream",
-      });
-      const formData = new FormData();
-      formData.append("file", fileBlob, upload.fileName);
-      formData.append("model", transcribeModel);
-      formData.append("language", languageHint.languageCode);
-      formData.append("prompt", languageHint.transcriptionPrompt);
-      formData.append("response_format", "json");
-      const response = await fetch(
-        `${audioApiUrl.replace(/\/$/, "")}/transcriptions`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: formData,
+      const base64 = buffer.toString("base64");
+      const response = await fetch(route.endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${route.apiKey}`,
         },
-      );
+        body: JSON.stringify({
+          model: route.model,
+          stream: false,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "input_audio",
+                  input_audio: {
+                    data: `data:${upload.mimeType || "audio/mpeg"};base64,${base64}`,
+                  },
+                },
+              ],
+            },
+          ],
+          asr_options: {
+            language: languageHint.languageCode,
+            enable_itn: true,
+          },
+        }),
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -447,17 +466,19 @@ export class VoiceTutorService {
         return undefined;
       }
 
-      const raw = await response.text();
-      try {
-        const payload = JSON.parse(raw) as { text?: string };
-        return payload.text?.trim();
-      } catch (error) {
-        this.logger.error(
-          `Failed to parse transcription response for ${upload.operationId}: ${raw}`,
-          error instanceof Error ? error.stack : String(error),
-        );
-        return undefined;
-      }
+      const payload = (await response.json()) as {
+        choices?: Array<{
+          message?: {
+            content?:
+              | string
+              | Array<
+                  | { type?: string; text?: string }
+                  | { type?: string; input_text?: string }
+                >;
+          };
+        }>;
+      };
+      return this.extractMessageText(payload.choices?.[0]?.message?.content);
     } catch (error) {
       this.logger.error(
         `Primary provider transcription exception for ${upload.operationId}`,
@@ -476,12 +497,13 @@ export class VoiceTutorService {
     conversationId: string,
     text: string,
     voice?: string,
+    speed: TtsSpeed = "normal",
     userId?: string,
     conversationKey?: string,
   ): Promise<{ audioUrl: string; fileName: string } | undefined> {
-    const { apiKey, audioApiUrl } = envConfig.openai;
-    const ttsModel = envConfig.modelRouting.ttsModel;
-    if (!apiKey || !ttsModel || !audioApiUrl) {
+    const { apiKey, apiUrl } = envConfig.openai;
+    const configuredTtsModel = envConfig.modelRouting.ttsModel;
+    if (!apiKey || !configuredTtsModel || !apiUrl) {
       this.logger.warn("Primary provider TTS 配置缺失，无法执行语音合成");
       return undefined;
     }
@@ -495,6 +517,7 @@ export class VoiceTutorService {
     );
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
     const resolvedVoice = voice ?? languageHint.ttsVoice;
+    const resolvedTtsModel = this.resolveTtsModel(configuredTtsModel, resolvedVoice);
     const directory = join(this.storageRoot, conversationId);
     const speechInput = buildProsodyReadyTtsInput(
       text,
@@ -508,6 +531,7 @@ export class VoiceTutorService {
       conversationId,
       text,
       resolvedVoice,
+      speed,
     );
     if (reusable) {
       this.logger.debug(
@@ -516,16 +540,25 @@ export class VoiceTutorService {
       return reusable;
     }
     try {
-      const response = await fetch(`${audioApiUrl.replace(/\/$/, "")}/speech`, {
+      const response = await fetch(resolveDashscopeGenerationEndpoint(apiUrl), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: ttsModel,
-          input: speechInput,
-          voice: resolvedVoice,
+          model: resolvedTtsModel,
+          input: {
+            text: speechInput,
+            voice: resolvedVoice,
+            language_type: languageHint.ttsLanguageType,
+          },
+          parameters: this.buildTtsParameters(
+            resolvedTtsModel,
+            resolvedVoice,
+            speed,
+            session.targetLanguage,
+          ),
         }),
       });
       if (!response.ok) {
@@ -535,9 +568,25 @@ export class VoiceTutorService {
         );
         return undefined;
       }
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const payload = (await response.json()) as {
+        output?: { audio?: { url?: string } };
+      };
+      const remoteAudioUrl = payload.output?.audio?.url?.trim();
+      if (!remoteAudioUrl) {
+        this.logger.error("Primary provider speech synthesis returned empty audio url");
+        return undefined;
+      }
+      const audioResponse = await fetch(remoteAudioUrl);
+      if (!audioResponse.ok) {
+        const errorText = await audioResponse.text();
+        this.logger.error(
+          `Primary provider speech audio download failed (${audioResponse.status}): ${errorText}`,
+        );
+        return undefined;
+      }
+      const buffer = Buffer.from(await audioResponse.arrayBuffer());
       await mkdir(directory, { recursive: true });
-      const fileName = `tts-${Date.now()}-${randomUUID()}.mp3`;
+      const fileName = `tts-${Date.now()}-${randomUUID()}.wav`;
       await writeFile(join(directory, fileName), buffer);
       this.logger.debug(
         `Stored synthesized speech for ${conversationId} -> ${fileName}`,
@@ -556,6 +605,7 @@ export class VoiceTutorService {
             ...targetMessage.meta,
             audioUrl,
             ttsVoice: resolvedVoice,
+            ttsSpeed: speed,
           };
           await this.conversationService.persistSessionPublic(currentSession);
         }
@@ -584,6 +634,7 @@ export class VoiceTutorService {
     conversationId: string,
     text: string,
     voice: string,
+    speed: TtsSpeed,
   ): Promise<{ audioUrl: string; fileName: string } | undefined> {
     const target = text.trim();
     if (!target) {
@@ -601,9 +652,15 @@ export class VoiceTutorService {
       }
       // Backward compatible: old records may not have ttsVoice.
       if (!message.meta.ttsVoice) {
-        return true;
+        return speed === "normal";
       }
-      return message.meta.ttsVoice === voice;
+      if (message.meta.ttsVoice !== voice) {
+        return false;
+      }
+      if (!message.meta.ttsSpeed) {
+        return speed === "normal";
+      }
+      return message.meta.ttsSpeed === speed;
     });
     if (!candidate?.meta?.audioUrl) {
       return undefined;
@@ -660,29 +717,129 @@ export class VoiceTutorService {
     return "application/octet-stream";
   }
 
+  private resolveAudioFormat(fileName: string, mimeType?: string): string {
+    const ext = extname(fileName).replace(/^\./, "").toLowerCase();
+    if (ext) {
+      return ext === "mpeg" ? "mp3" : ext;
+    }
+    if (!mimeType) {
+      return "mp3";
+    }
+    if (mimeType.includes("webm")) {
+      return "webm";
+    }
+    if (mimeType.includes("wav")) {
+      return "wav";
+    }
+    if (mimeType.includes("mp4") || mimeType.includes("m4a")) {
+      return "m4a";
+    }
+    return "mp3";
+  }
+
   private resolveLanguageHint(language?: LanguageCode | string): LanguageHint {
     switch (language) {
       case LanguageCode.Mandarin:
         return {
           languageCode: "zh",
-          transcriptionPrompt: "说话人使用普通话（Mandarin Chinese）。",
-          ttsVoice: "shimmer",
+          transcriptionPrompt:
+            "Please transcribe this Mandarin Chinese speech accurately and return only the transcript.",
+          ttsLanguageType: "Chinese",
+          ttsVoice: "Serena",
         };
       case LanguageCode.Cantonese:
         return {
-          languageCode: "zh",
+          languageCode: "yue",
           transcriptionPrompt:
-            "说话人使用粤语（Cantonese Chinese），请按粤语发音转写。",
-          ttsVoice: "shimmer",
+            "Please transcribe this Cantonese speech accurately and return only the transcript in written Chinese that matches the spoken Cantonese content.",
+          ttsLanguageType: "Chinese",
+          ttsVoice: "Kiki",
         };
       case LanguageCode.English:
       default:
         return {
           languageCode: "en",
-          transcriptionPrompt: "Speaker is using English.",
-          ttsVoice: "shimmer",
+          transcriptionPrompt:
+            "Please transcribe this English speech accurately and return only the transcript.",
+          ttsLanguageType: "English",
+          ttsVoice: "Cherry",
         };
     }
+  }
+
+  private resolveTtsModel(configuredModel: string, voice: string): string {
+    if (FLASH_ONLY_TTS_VOICES.has(voice) && /instruct/i.test(configuredModel)) {
+      return "qwen3-tts-flash";
+    }
+    return configuredModel;
+  }
+
+  private buildTtsParameters(
+    model: string,
+    voice: string,
+    speed: TtsSpeed,
+    targetLanguage: LanguageCode,
+  ): Record<string, unknown> {
+    const parameters: Record<string, unknown> = {
+      format: "wav",
+    };
+    if (!/instruct/i.test(model)) {
+      return parameters;
+    }
+    const speedInstruction =
+      speed === "slow"
+        ? "Speak a bit slower with clear pauses between clauses."
+        : speed === "fast"
+          ? "Speak slightly faster while staying natural and clear."
+          : "Keep a natural conversational pace.";
+    const languageInstruction =
+      targetLanguage === LanguageCode.Cantonese
+        ? "Use a natural Cantonese speaking style with smooth everyday rhythm."
+        : targetLanguage === LanguageCode.Mandarin
+          ? "Use natural Mandarin with a warm tutor tone."
+          : "Use natural English with a friendly tutor tone.";
+    parameters.instructions = `${languageInstruction} ${speedInstruction}`;
+    parameters.output_audio = {
+      speech_rate: speed === "slow" ? 0.9 : speed === "fast" ? 1.08 : 1,
+    };
+    if (voice) {
+      parameters.voice = voice;
+    }
+    return parameters;
+  }
+
+  private extractMessageText(
+    content:
+      | string
+      | Array<
+          | { type?: string; text?: string }
+          | { type?: string; input_text?: string }
+        >
+      | undefined,
+  ): string | undefined {
+    if (typeof content === "string") {
+      const normalized = content.trim();
+      return normalized || undefined;
+    }
+    if (!Array.isArray(content)) {
+      return undefined;
+    }
+    const normalized = content
+      .map((item) => {
+        if (typeof item !== "object" || item === null) {
+          return "";
+        }
+        if ("text" in item && typeof item.text === "string") {
+          return item.text;
+        }
+        if ("input_text" in item && typeof item.input_text === "string") {
+          return item.input_text;
+        }
+        return "";
+      })
+      .join("\n")
+      .trim();
+    return normalized || undefined;
   }
 
   private buildFallbackUserText(languageHint: LanguageHint): string {

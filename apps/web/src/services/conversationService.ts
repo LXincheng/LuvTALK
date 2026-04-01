@@ -310,9 +310,9 @@ export function sendConversationMessage(
 
 export function updateConversationPreferences(
   conversationId: string,
-  payload: { memoryEnabled?: boolean },
+  payload: { deepThinkingEnabled?: boolean },
 ) {
-  return apiClient.postWithOptions<ConversationSession, { memoryEnabled?: boolean }>(
+  return apiClient.postWithOptions<ConversationSession, { deepThinkingEnabled?: boolean }>(
     `/conversation/${conversationId}/preferences`,
     payload,
     { headers: buildConversationAccessHeaders(conversationId) },
@@ -362,10 +362,14 @@ export function synthesizeConversationSpeech(
   conversationId: string,
   text: string,
   voice?: string,
+  speed?: 'slow' | 'normal' | 'fast',
 ) {
-  return apiClient.postWithOptions<{ audioUrl: string; fileName: string }, { text: string; voice?: string }>(
+  return apiClient.postWithOptions<
+    { audioUrl: string; fileName: string },
+    { text: string; voice?: string; speed?: 'slow' | 'normal' | 'fast' }
+  >(
     `/conversation/${conversationId}/tts`,
-    { text, voice },
+    { text, voice, speed },
     { headers: buildConversationAccessHeaders(conversationId) },
   ).then((payload) => ({
     ...payload,

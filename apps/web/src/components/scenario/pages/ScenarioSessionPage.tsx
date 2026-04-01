@@ -1,10 +1,12 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import MessageBubble from '../../../components/chat/MessageBubble';
-import VoiceInput from '../../../components/chat/VoiceInput';
-import ChatQuickReplies, { type QuickReplyOption } from '../../../components/chat/ChatQuickReplies';
-import ScenarioScoreModal from '../../../components/report/ScenarioScoreModal';
+import MessageBubble from '../../chat/MessageBubble';
+import VoiceStyleSelector from '../../chat/VoiceStyleSelector';
+import VoiceSpeedSelector from '../../chat/VoiceSpeedSelector';
+import VoiceInput from '../../chat/VoiceInput';
+import ChatQuickReplies, { type QuickReplyOption } from '../../chat/ChatQuickReplies';
+import ScenarioScoreModal from '../../report/ScenarioScoreModal';
 import { useLocale } from '../../../providers/LocaleContext';
 import { API_BASE_URL } from '../../../services/apiClient';
 import {
@@ -18,18 +20,25 @@ import {
   uploadConversationVoice,
   withConversationAccessQuery,
 } from '../../../services/conversationService';
-import { DEFAULT_TTS_VOICE, PREFERRED_RECORDING_MIMES } from '../../../constants/ui';
+import {
+  DEFAULT_TTS_SPEED,
+  DEFAULT_TTS_VOICE,
+  PREFERRED_RECORDING_MIMES,
+} from '../../../constants/ui';
 import { toast } from '../../../utils/toast';
 import ScenarioSessionHeader from '../components/ScenarioSessionHeader';
 import { getScenarioDefinition } from '../data/scenarioDefinitions';
+import {
+  buildScenarioQuickReplyOptions,
+  buildScenarioStageLabel,
+} from '../data/scenarioDialogueGuidance';
 import type {
   ConversationSession,
   LanguageCode,
   ScenarioFeedbackPayload,
 } from '../../../types/api';
-import type { LocaleKey } from '../../../providers/LocaleContext';
 import type { Message, MessageStatusTone } from '../../../types/chat';
-import type { ScenarioDefinition, ScenarioFeedback } from '../types';
+import type { ScenarioFeedback } from '../types';
 
 const buildTempId = () => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -129,166 +138,6 @@ const mapSessionToMessages = (
   return mapped;
 };
 
-const scenarioEmojiMap = {
-  hotel: '🏨',
-  stethoscope: '🩺',
-  utensils: '🍽️',
-  bag: '🛍️',
-  map: '🗺️',
-} as const;
-
-const cleanSnippet = (value?: string): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  const compact = value.replace(/\s+/g, ' ').trim();
-  if (!compact) {
-    return undefined;
-  }
-  return compact.length > 24 ? `${compact.slice(0, 24).trim()}...` : compact;
-};
-
-const buildScenarioOpeningReplies = (
-  scenario: ScenarioDefinition,
-  language: LanguageCode,
-  t: (key: LocaleKey) => string,
-): string[] => {
-  const goal = cleanSnippet(t(scenario.goals[0])) ?? cleanSnippet(t(scenario.titleKey));
-  if (language === 'english') {
-    return [
-      goal ? `I want to start with ${goal.toLowerCase()}.` : 'I want to start with the key information.',
-      'Let me say the main point first.',
-      'I can answer step by step.',
-    ];
-  }
-  if (language === 'cantonese') {
-    return [
-      goal ? `我想先講${goal}。` : '我想先講最重要嗰部分。',
-      '我先講重點。',
-      '我可以逐步答。',
-    ];
-  }
-  return [
-    goal ? `我想先说${goal}。` : '我想先说最重要的信息。',
-    '我先把重点说明白。',
-    '我可以一步一步回答。',
-  ];
-};
-
-const buildScenarioQuickReplies = (
-  scenario: ScenarioDefinition,
-  session: ConversationSession,
-  t: (key: LocaleKey) => string,
-): QuickReplyOption[] => {
-  const { messages } = session;
-  const userTurns = messages.filter((message) => message.sender === 'user').length;
-  if (userTurns === 0) {
-    return buildScenarioOpeningReplies(scenario, session.targetLanguage, t).map((text, index) => ({
-      id: `starter-${scenario.key}-${index}`,
-      text,
-    }));
-  }
-
-  const associativePhrases = session.coach?.associativePhrases
-    ?.map((text) => text.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-  if (associativePhrases?.length) {
-    return associativePhrases.map((text, index) => ({
-      id: `scenario-coach-${session.id}-${index}`,
-      text,
-    }));
-  }
-
-  const lastAiMessage = [...messages].reverse().find((message) => message.sender === 'ai');
-  const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
-  const aiText = lastAiMessage?.text?.trim() ?? '';
-  const topic = cleanSnippet(lastUserMessage?.text ?? aiText);
-  const isClosingTurn = /thank|thanks|完成|好了|冇問題|结账|that's all|all set/i.test(aiText);
-  const asksQuestion = /[?？]$/.test(aiText) || /^(what|when|where|which|how|can|could|would|do|did|are|is)\b/i.test(aiText);
-
-  const language = session.targetLanguage;
-  const replySet = isClosingTurn
-    ? language === 'english'
-      ? [
-          'Great, that works for me. Thank you.',
-          'Perfect, that is all I needed.',
-          'Got it. I do not have any other questions.',
-        ]
-      : language === 'cantonese'
-        ? [
-            '好呀，噉就得，唔該晒。',
-            '明白，我冇其他問題喇。',
-            '好，噉樣安排就可以。',
-          ]
-        : [
-            '好的，那就这样安排，谢谢你。',
-            '明白了，我没有其他问题了。',
-            '好，这样就可以了。',
-          ]
-    : asksQuestion
-      ? language === 'english'
-        ? [
-            topic ? `About ${topic.toLowerCase()}, I want to confirm one more thing.` : 'I want to confirm one more thing.',
-            'Let me give you the key information first.',
-            'If possible, I also have one small request.',
-          ]
-        : language === 'cantonese'
-          ? [
-              topic ? `關於${topic}，我想再確認一件事。` : '我想再確認一件事。',
-              '我可以先講最重要嗰部分。',
-              '如果可以，我仲有一個小要求。',
-            ]
-          : [
-              topic ? `关于${topic}，我想再确认一件事。` : '我想再确认一件事。',
-              '我先说最重要的信息。',
-              '如果可以的话，我还有一个小需求。',
-            ]
-      : language === 'english'
-        ? [
-            'Can you give me one more example?',
-            'How would a native speaker say that more naturally?',
-            'Can we do one more turn in this situation?',
-          ]
-        : language === 'cantonese'
-          ? [
-              '你可唔可以再俾我一個例句？',
-              '如果用母語者口吻，通常會點講？',
-              '我想就呢個情境再練多一輪。',
-            ]
-          : [
-              '你可以再给我一个例句吗？',
-              '如果用母语者口吻，通常会怎么说？',
-              '我想围绕这个情境再练一轮。',
-            ];
-
-  return replySet.map((text, index) => ({
-    id: `scenario-${scenario.key}-${userTurns}-${index}`,
-    text,
-  }));
-};
-
-const buildStageLabel = (
-  t: (key: LocaleKey) => string,
-  userTurns: number,
-  lastAiText?: string,
-): string => {
-  if (userTurns === 0) {
-    return t('scenarioHeaderStageStart');
-  }
-  if (
-    lastAiText &&
-    (/[?？]$/.test(lastAiText.trim()) ||
-      /^(what|when|where|which|how|can|could|would|do|did|are|is)\b/i.test(lastAiText.trim()))
-  ) {
-    return t('scenarioHeaderStageRespond');
-  }
-  if (userTurns >= 4) {
-    return t('scenarioHeaderStageWrap');
-  }
-  return t('scenarioHeaderStageAdvance');
-};
-
 export default function ScenarioSessionPage() {
   const { scenarioKey, sessionId } = useParams();
   const navigate = useNavigate();
@@ -307,6 +156,15 @@ export default function ScenarioSessionPage() {
   const [quickRepliesVisible, setQuickRepliesVisible] = useState(true);
   const [quickReplyOptions, setQuickReplyOptions] = useState<QuickReplyOption[]>([]);
   const [ttsAudioMap, setTtsAudioMap] = useState<Record<string, string>>({});
+  const [ttsVoice, setTtsVoice] = useState<string>(() => {
+    if (typeof window === 'undefined') return DEFAULT_TTS_VOICE;
+    return window.localStorage.getItem('ttsVoice') || DEFAULT_TTS_VOICE;
+  });
+  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(() => {
+    if (typeof window === 'undefined') return DEFAULT_TTS_SPEED;
+    const stored = window.localStorage.getItem('ttsSpeed');
+    return stored === 'slow' || stored === 'fast' ? stored : DEFAULT_TTS_SPEED;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -334,7 +192,7 @@ export default function ScenarioSessionPage() {
     .reverse()
     .find((message) => message.sender === 'ai')
     ?.text;
-  const stageLabel = buildStageLabel(t, userTurnCount, lastAiText);
+  const stageLabel = buildScenarioStageLabel(t, userTurnCount, lastAiText);
   const turnLabel = t('scenarioHeaderTurnsValue').replace('{value}', String(userTurnCount));
 
   const syncSession = useCallback((nextSession: ConversationSession) => {
@@ -371,6 +229,13 @@ export default function ScenarioSessionPage() {
   useEffect(() => {
     ttsAudioMapRef.current = ttsAudioMap;
   }, [ttsAudioMap]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('ttsVoice', ttsVoice);
+      window.localStorage.setItem('ttsSpeed', ttsSpeed);
+    }
+  }, [ttsSpeed, ttsVoice]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -438,7 +303,12 @@ export default function ScenarioSessionPage() {
       return;
     }
     ttsRequestsRef.current.add(latestAiMessage.id);
-    synthesizeConversationSpeech(activeSession.id, latestAiMessage.text, DEFAULT_TTS_VOICE)
+    synthesizeConversationSpeech(
+      activeSession.id,
+      latestAiMessage.text,
+      ttsVoice,
+      ttsSpeed,
+    )
       .then((payload) => {
         setTtsAudioMap((prev) => ({
           ...prev,
@@ -451,7 +321,7 @@ export default function ScenarioSessionPage() {
       .finally(() => {
         ttsRequestsRef.current.delete(latestAiMessage.id);
       });
-  }, [t]);
+  }, [t, ttsSpeed, ttsVoice]);
 
   const syncTranslationIfNeeded = useCallback((conversationId: string, attempt = 0) => {
     if (translationSyncTimerRef.current) {
@@ -485,7 +355,7 @@ export default function ScenarioSessionPage() {
     if (!session || !scenario) {
       return;
     }
-    const nextOptions = buildScenarioQuickReplies(scenario, session, t);
+    const nextOptions = buildScenarioQuickReplyOptions(scenario, session, t);
     startTransition(() => {
       setQuickReplyOptions(nextOptions);
       setQuickRepliesVisible(nextOptions.length > 0);
@@ -666,7 +536,7 @@ export default function ScenarioSessionPage() {
       <ScenarioSessionHeader
         backTo={`/scenarios/${scenario.key}`}
         title={session?.title || t(scenario.titleKey)}
-        emoji={scenarioEmojiMap[scenario.icon]}
+        emoji={scenario.emoji}
         languageLabel={languageLabel}
         turnLabel={turnLabel}
         stageLabel={stageLabel}
@@ -674,6 +544,12 @@ export default function ScenarioSessionPage() {
           void handleOpenScore();
         }}
         endLabel={t('scenarioSessionEnd')}
+        settingsContent={(
+          <>
+            <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
+            <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
+          </>
+        )}
       />
 
       <div className="flex-1 overflow-y-auto px-4 pt-6 pb-28 space-y-4 md:pb-10">

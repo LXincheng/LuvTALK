@@ -1,32 +1,27 @@
-import { Volume2 } from 'lucide-react';
-import { TTS_VOICE_OPTIONS } from '../../constants/ui';
+import { Gauge } from 'lucide-react';
+import { TTS_SPEED_OPTIONS } from '../../constants/ui';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
 
-type VoiceOption = {
-  id: string;
-  labelKey: string;
-};
+type VoiceSpeed = (typeof TTS_SPEED_OPTIONS)[number]['id'];
 
-interface VoiceStyleSelectorProps {
-  value: string;
-  onChange: (voice: string) => void;
+interface VoiceSpeedSelectorProps {
+  value: VoiceSpeed;
+  onChange: (speed: VoiceSpeed) => void;
   compact?: boolean;
-  options?: readonly VoiceOption[];
 }
 
-export default function VoiceStyleSelector({
+export default function VoiceSpeedSelector({
   value,
   onChange,
   compact = false,
-  options = TTS_VOICE_OPTIONS,
-}: VoiceStyleSelectorProps) {
+}: VoiceSpeedSelectorProps) {
   const { t } = useLocale();
 
   return (
     <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none border border-separator rounded-lg p-0.5 glass-card">
-      <Volume2 className="w-3.5 h-3.5 text-label-tertiary ml-1.5 shrink-0" />
-      {options.map((opt) => {
+      <Gauge className="ml-1.5 h-3.5 w-3.5 shrink-0 text-label-tertiary" />
+      {TTS_SPEED_OPTIONS.map((opt) => {
         const isActive = value === opt.id;
         return (
           <button

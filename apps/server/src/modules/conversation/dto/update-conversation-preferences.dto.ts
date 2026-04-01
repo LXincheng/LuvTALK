@@ -4,4 +4,8 @@ export class UpdateConversationPreferencesDto {
   @IsOptional()
   @IsBoolean()
   memoryEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  deepThinkingEnabled?: boolean;
 }

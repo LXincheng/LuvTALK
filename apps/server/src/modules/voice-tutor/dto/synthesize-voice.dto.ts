@@ -12,4 +12,9 @@ export class SynthesizeVoiceDto {
   @IsString()
   @MaxLength(128)
   voice?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(16)
+  speed?: "slow" | "normal" | "fast";
 }

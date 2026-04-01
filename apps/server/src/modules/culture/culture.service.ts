@@ -1,10 +1,15 @@
-﻿import {
+import {
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { envConfig } from "../../common/config/env.config";
+import {
+  applyThinkingToggle,
+  resolveChatModelRoute,
+  supportsJsonObjectResponse,
+} from "../../common/config/model-provider.config";
 import { buildCulturePrompt } from "../../common/config/prompt.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { CulturePopup } from "../../common/types/culture.types";
@@ -24,7 +29,7 @@ export class CultureService {
       );
     } catch (error) {
       this.logger.warn(
-        `Secondary provider cultural cards fallback: ${(error as Error).message}`,
+        `Culture cards fallback: ${(error as Error).message}`,
       );
       return this.buildFallback(params.targetLanguage);
     }
@@ -34,58 +39,91 @@ export class CultureService {
     targetLanguage: LanguageCode,
     nativeLanguage: LanguageCode,
   ): Promise<CulturePopup[]> {
-    const { apiKey, apiUrl } = envConfig.deepseek;
-    const model = envConfig.modelRouting.secondaryModel;
-    if (!apiKey || !apiUrl || !model) {
-      throw new ServiceUnavailableException(
-        "Secondary provider config missing for cultural cards",
-      );
-    }
-
     const prompt = buildCulturePrompt({
       targetLanguage,
       nativeLanguage,
     });
+    const modelCandidates = [
+      envConfig.modelRouting.secondaryModel,
+      envConfig.modelRouting.thirdModel,
+    ]
+      .map((item) => item.trim())
+      .filter(Boolean);
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.5,
+    for (const model of modelCandidates) {
+      const route = resolveChatModelRoute(model);
+      if (!route) {
+        continue;
+      }
+
+      const body: Record<string, unknown> = {
+        model: route.model,
+        temperature: 0.4,
+        stream: false,
         messages: [
           { role: "system", content: prompt },
           { role: "user", content: "Provide the cards now." },
         ],
-      }),
-    });
+      };
+      applyThinkingToggle(body, route.model, false);
+      if (supportsJsonObjectResponse(route.model)) {
+        body.response_format = { type: "json_object" };
+      }
 
-    if (!response.ok) {
-      throw new ServiceUnavailableException(
-        `Secondary provider cultural cards failed (${response.status})`,
+      const controller = new AbortController();
+      const timer = setTimeout(
+        () => controller.abort(),
+        this.resolveModelTimeout(route.model),
       );
+      const response = await fetch(route.endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${route.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timer));
+
+      if (!response.ok) {
+        this.logger.warn(
+          `Culture cards request failed (${response.status}) for model ${route.model}`,
+        );
+        continue;
+      }
+
+      const payload = (await response.json()) as {
+        cards?: Array<Record<string, string>>;
+        choices?: Array<{
+          message?: {
+            content?:
+              | string
+              | Array<
+                  | { type?: string; text?: string }
+                  | { type?: string; input_text?: string }
+                >;
+          };
+        }>;
+      };
+      const rawCards =
+        payload.cards ??
+        this.extractCardsFromContent(payload.choices?.[0]?.message?.content);
+      if (!rawCards?.length) {
+        continue;
+      }
+
+      return rawCards.slice(0, 4).map((card) => ({
+        id: randomUUID(),
+        title: card.title?.trim() ?? "Culture insight",
+        scenario: card.scenario?.trim() ?? "daily",
+        expression: card.expression?.trim() ?? "",
+        explanation: card.explanation?.trim() ?? "",
+        tip: card.tip?.trim() ?? "",
+        language: targetLanguage,
+      }));
     }
 
-    const payload = (await response.json()) as {
-      cards?: Array<Record<string, string>>;
-    };
-    const rawCards = payload.cards;
-    if (!rawCards?.length) {
-      throw new ServiceUnavailableException("Secondary provider cards empty");
-    }
-
-    return rawCards.slice(0, 4).map((card) => ({
-      id: randomUUID(),
-      title: card.title?.trim() ?? "Culture insight",
-      scenario: card.scenario?.trim() ?? "daily",
-      expression: card.expression?.trim() ?? "",
-      explanation: card.explanation?.trim() ?? "",
-      tip: card.tip?.trim() ?? "",
-      language: targetLanguage,
-    }));
+    throw new ServiceUnavailableException("All cultural card providers failed");
   }
 
   private buildFallback(language: LanguageCode): CulturePopup[] {
@@ -121,16 +159,54 @@ export class CultureService {
     ];
   }
 
-  private describeLanguage(language: LanguageCode): string {
-    switch (language) {
-      case LanguageCode.Cantonese:
-        return "Cantonese";
-      case LanguageCode.Mandarin:
-        return "Mandarin Chinese";
-      case LanguageCode.English:
-        return "English";
-      default:
-        return language;
+  private extractCardsFromContent(
+    content:
+      | string
+      | Array<
+          | { type?: string; text?: string }
+          | { type?: string; input_text?: string }
+        >
+      | undefined,
+  ): Array<Record<string, string>> {
+    const normalized =
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content
+              .map((item) => {
+                if (typeof item !== "object" || item === null) {
+                  return "";
+                }
+                if ("text" in item && typeof item.text === "string") {
+                  return item.text;
+                }
+                if ("input_text" in item && typeof item.input_text === "string") {
+                  return item.input_text;
+                }
+                return "";
+              })
+              .join("\n")
+          : "";
+    if (!normalized.trim()) {
+      return [];
     }
+    try {
+      const parsed = JSON.parse(normalized) as {
+        cards?: Array<Record<string, string>>;
+      };
+      return parsed.cards ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  private resolveModelTimeout(model: string): number {
+    if (model === envConfig.modelRouting.thirdModel) {
+      return envConfig.modelTimeoutMs.third;
+    }
+    if (model === envConfig.modelRouting.secondaryModel) {
+      return envConfig.modelTimeoutMs.secondary;
+    }
+    return envConfig.modelTimeoutMs.primary;
   }
 }

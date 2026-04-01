@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -10,6 +11,7 @@ interface ScenarioSessionHeaderProps {
   stageLabel: string;
   onEnd: () => void;
   endLabel: string;
+  settingsContent?: ReactNode;
 }
 
 export default function ScenarioSessionHeader({
@@ -21,6 +23,7 @@ export default function ScenarioSessionHeader({
   stageLabel,
   onEnd,
   endLabel,
+  settingsContent,
 }: ScenarioSessionHeaderProps) {
   return (
     <div className="border-b border-separator glass-card">
@@ -57,6 +60,11 @@ export default function ScenarioSessionHeader({
             {endLabel}
           </button>
         </div>
+        {settingsContent ? (
+          <div className="flex flex-wrap items-center gap-2 pl-12 sm:pl-[3.2rem]">
+            {settingsContent}
+          </div>
+        ) : null}
       </div>
     </div>
   );

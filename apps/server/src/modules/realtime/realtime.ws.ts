@@ -132,10 +132,10 @@ export class RealtimeWsProxy {
       }
       this.cooldown.set(cooldownKey, now);
 
-      const { apiKey, realtimeApiUrl } = envConfig.openai;
+      const { realtimeApiKey, realtimeApiUrl } = envConfig.openai;
       const realtimeModel = envConfig.modelRouting.realtimeModel;
-      const transcribeModel = envConfig.modelRouting.sttModel;
-      if (!apiKey || !realtimeApiUrl || !realtimeModel) {
+      const transcribeModel = envConfig.modelRouting.realtimeTranscribeModel;
+      if (!realtimeApiKey || !realtimeApiUrl || !realtimeModel) {
         this.closeWithMetric({
           client,
           wsCode: 1011,
@@ -157,7 +157,7 @@ export class RealtimeWsProxy {
       this.logger.log(`Realtime upstream connecting -> ${upstreamUrl}`);
       const upstream = new WebSocket(upstreamUrl, {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${realtimeApiKey}`,
           "OpenAI-Beta": "realtime=v1",
         },
       });

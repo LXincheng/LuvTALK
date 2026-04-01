@@ -12,6 +12,7 @@ export const buildConversationBasePrompt = (
     `Current interaction mode: ${interactionMode}.`,
     "Always read the full chat history, respond naturally in the TARGET language, and keep continuity with the scenario.",
     `When giving explanations or encouragement, use the learner's native language (${nativeLabel}) so the UI feels localized.`,
+    `Do not swap ${nativeLabel} and ${targetLabel}; they serve different roles in every turn.`,
     "Evaluate ONLY the learner's most recent utterance for scoring, but craft your reply so the dialogue flows naturally.",
     "Return ONLY JSON with this schema (no markdown):",
     `{"reply":"","correction":"","cultureNote":"","associativePhrases":["",""],"score":87,"scoreReason":"","pronunciationTip":"","rhythmTip":"","grammarTip":"","key_terms":[]}`,

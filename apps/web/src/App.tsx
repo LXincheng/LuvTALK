@@ -5,9 +5,9 @@ import MainLayout from './components/layout/MainLayout';
 import RouteLoadingFallback from './components/layout/RouteLoadingFallback';
 
 const loadConversationPage = () => import('./pages/ConversationPage');
-const loadScenarioHubPage = () => import('./features/scenario/pages/ScenarioHubPage');
-const loadScenarioDetailPage = () => import('./features/scenario/pages/ScenarioDetailPage');
-const loadScenarioSessionPage = () => import('./features/scenario/pages/ScenarioSessionPage');
+const loadScenarioHubPage = () => import('./components/scenario/pages/ScenarioHubPage');
+const loadScenarioDetailPage = () => import('./components/scenario/pages/ScenarioDetailPage');
+const loadScenarioSessionPage = () => import('./components/scenario/pages/ScenarioSessionPage');
 const loadDailyReviewPage = () => import('./pages/DailyReviewPage');
 const loadFavoritesPage = () => import('./pages/FavoritesPage');
 const loadProfilePage = () => import('./pages/ProfilePage');

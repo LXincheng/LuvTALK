@@ -1,37 +1,15 @@
 import { useMemo, useState } from 'react';
-import {
-  ArrowLeft,
-  BriefcaseMedical,
-  Building2,
-  MapPinned,
-  Play,
-  ShoppingBag,
-  UtensilsCrossed,
-} from 'lucide-react';
+import { ArrowLeft, Play } from 'lucide-react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useLocale } from '../../../providers/LocaleContext';
 import { getScenarioDefinition } from '../data/scenarioDefinitions';
 import type { LanguageCode } from '../../../types/api';
-import type { LocaleKey } from '../../../providers/LocaleContext';
-import type { ScenarioDifficulty } from '../types';
-
-const scenarioIconMap = {
-  hotel: Building2,
-  stethoscope: BriefcaseMedical,
-  utensils: UtensilsCrossed,
-  bag: ShoppingBag,
-  map: MapPinned,
-} as const;
-
-const scenarioEmojiMap = {
-  hotel: '🏨',
-  stethoscope: '🩺',
-  utensils: '🍽️',
-  bag: '🛍️',
-  map: '🗺️',
-} as const;
-
-const languageOrder: LanguageCode[] = ['mandarin', 'cantonese', 'english'];
+import {
+  resolveLanguageLabelKey,
+  resolveScenarioIcon,
+  scenarioDifficultyLabelKeyMap,
+  scenarioLanguageOrder,
+} from '../data/scenarioUi';
 
 export default function ScenarioDetailPage() {
   const { scenarioKey } = useParams();
@@ -39,14 +17,9 @@ export default function ScenarioDetailPage() {
   const { t } = useLocale();
   const scenario = getScenarioDefinition(scenarioKey);
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>('mandarin');
-  const difficultyLabelMap: Record<ScenarioDifficulty, LocaleKey> = {
-    basic: 'scenarioDifficultyBasic',
-    natural: 'scenarioDifficultyNatural',
-    challenge: 'scenarioDifficultyChallenge',
-  };
 
   const supportedLanguages = useMemo(
-    () => languageOrder.filter((language) => scenario?.supportedLanguages.includes(language)),
+    () => scenarioLanguageOrder.filter((language) => scenario?.supportedLanguages.includes(language)),
     [scenario],
   );
 
@@ -54,7 +27,7 @@ export default function ScenarioDetailPage() {
     return <Navigate to="/scenarios" replace />;
   }
 
-  const Icon = scenarioIconMap[scenario.icon];
+  const Icon = resolveScenarioIcon(scenario.icon);
 
   return (
     <div className="h-full overflow-y-auto bg-surface">
@@ -74,7 +47,7 @@ export default function ScenarioDetailPage() {
         <section className="glass-card rounded-[24px] p-4 md:p-5">
           <div className="relative overflow-hidden rounded-[20px] bg-fill-secondary px-4 py-4">
             <div className="pointer-events-none absolute right-4 top-2 text-[62px] opacity-[0.16]">
-              {scenarioEmojiMap[scenario.icon]}
+              {scenario.emoji}
             </div>
             <div className="relative flex items-start gap-3">
               <div className="inline-flex h-10 w-10 items-center justify-center rounded-[14px] bg-surface text-label">
@@ -85,7 +58,7 @@ export default function ScenarioDetailPage() {
                 <div className="mt-2 flex flex-wrap gap-2 text-sm text-label-secondary">
                   <span>{t(scenario.metaKey)}</span>
                   <span className="text-label-tertiary">·</span>
-                  <span>{t(difficultyLabelMap[scenario.difficulty])}</span>
+                  <span>{t(scenarioDifficultyLabelKeyMap[scenario.difficulty])}</span>
                   <span className="text-label-tertiary">·</span>
                   <span>{t('scenarioMinutesValue').replace('{value}', String(scenario.estimatedMinutes))}</span>
                 </div>
@@ -107,13 +80,7 @@ export default function ScenarioDetailPage() {
                       : 'bg-fill-secondary text-label-secondary'
                   }`}
                 >
-                  {t(
-                    language === 'mandarin'
-                      ? 'languageMandarin'
-                      : language === 'cantonese'
-                        ? 'languageCantonese'
-                        : 'languageEnglish',
-                  )}
+                  {t(resolveLanguageLabelKey(language))}
                 </button>
               );
             })}

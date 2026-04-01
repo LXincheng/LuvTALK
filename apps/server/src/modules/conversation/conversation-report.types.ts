@@ -90,6 +90,8 @@ export interface ConversationReportPromptInput {
   sourceMode: ConversationReportSourceMode;
   voiceStyle?: string;
   summary: SessionSummaryPayload;
+  scenarioId: string;
+  scenarioLabel: string;
   targetLanguage: LanguageCode;
   nativeLanguage: LanguageCode;
   reportLanguage: "zh" | "en";

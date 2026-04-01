@@ -109,6 +109,7 @@ export class VoiceTutorController {
       conversationId,
       normalized,
       dto.voice?.trim() || undefined,
+      dto.speed === "slow" || dto.speed === "fast" ? dto.speed : "normal",
       profile?.id,
       resolveConversationKey(req),
     );

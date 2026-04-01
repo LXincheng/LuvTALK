@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { RotateCcw, X } from 'lucide-react';
 import { useLocale } from '../../providers/LocaleContext';
-import type { ScenarioFeedback } from '../../features/scenario/types';
+import type { ScenarioFeedback } from '../scenario/types';
 import type { LocaleKey } from '../../providers/LocaleContext';
 
 interface ScenarioScoreModalProps {

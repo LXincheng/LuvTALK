@@ -1,6 +1,6 @@
 import { ChevronRight, Download, Sparkles, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useLocale } from '../../providers/LocaleContext';
 import type {
   ConversationReportHistoryItem,
@@ -11,7 +11,6 @@ import {
   formatMinutesValue,
   formatScoreValue,
 } from '../../utils/report-format';
-import { createSampleConversationReport, toSampleHistoryItem } from '../../utils/report-sample';
 import { downloadConversationReportPdf } from '../../utils/report-pdf';
 import ConversationReportPanel from './ConversationReportPanel';
 
@@ -38,15 +37,12 @@ export default function ProfileReportHistory({
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
-  const sampleReport = useMemo(() => createSampleConversationReport(t), [t]);
-  const listItems = isGuest ? [toSampleHistoryItem(sampleReport)] : history;
+  const listItems = isGuest ? [] : history;
 
   const activeReport =
-    isGuest
-      ? sampleReport
-      : selectedReport && selectedReport.id === selectedReportId
-        ? selectedReport
-        : null;
+    selectedReport && selectedReport.id === selectedReportId
+      ? selectedReport
+      : null;
 
   const openViewer = (id: string) => {
     onSelectReport(id);

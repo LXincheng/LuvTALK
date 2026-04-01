@@ -21,6 +21,7 @@ export interface ConversationMessage {
     translation?: string;
     audioUrl?: string;
     ttsVoice?: string;
+    ttsSpeed?: "slow" | "normal" | "fast";
     source?: "default" | "realtime";
     keyTerms?: KeyTerm[];
   };
@@ -40,6 +41,7 @@ export interface ConversationSession {
   nativeLanguage?: LanguageCode;
   accessKey?: string;
   memoryEnabled?: boolean;
+  deepThinkingEnabled?: boolean;
   userId?: string;
   title?: string;
   status?: string;

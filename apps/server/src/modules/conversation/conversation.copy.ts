@@ -1,16 +1,22 @@
 import { LanguageCode } from "../../common/enums/language-code.enum";
+import {
+  resolveScenarioLabel,
+  resolveScenarioOpeningCue,
+} from "../../common/config/prompts/scenario.config";
 
 export const buildWelcomeCopy = (params: {
+  scenarioId: string;
   title: string;
   targetLabel: string;
   nativeLabel: string;
   nativeLanguage: LanguageCode;
 }): string => {
-  const { title, targetLabel, nativeLabel, nativeLanguage } = params;
+  const { scenarioId, title, targetLabel, nativeLabel, nativeLanguage } = params;
+  const openingCue = resolveScenarioOpeningCue(scenarioId, nativeLanguage);
   if (nativeLanguage === LanguageCode.English) {
-    return `👋 Welcome to the ${title} scenario.\nI'll coach you in ${targetLabel} and share tips in ${nativeLabel}. Let's warm up with a friendly greeting.`;
+    return `👋 Welcome to the ${title} scenario.\nYou are practicing ${targetLabel}, and support notes will appear in ${nativeLabel}.\nStart with this move: ${openingCue}`;
   }
-  return `👋 欢迎来到${title}练习场景。\n我会用${targetLabel}陪你练习，并用${nativeLabel}提供提示。先来一句轻松的寒暄吧。`;
+  return `👋 欢迎来到${title}练习场景。\n你当前练习语言是${targetLabel}，提示说明会使用${nativeLabel}。\n建议先这样开口：${openingCue}`;
 };
 
 export const resolveSpeakerName = (
@@ -29,32 +35,6 @@ export const FALLBACK_SCORE_REASON = {
   zh: "返回纯文本，已启用教学兜底评分。",
 } as const;
 
-const SCENARIO_LABELS_ZH: Record<string, string> = {
-  restaurant: "餐厅点单",
-  shopping: "商店交流",
-  directions: "问路指引",
-  business: "商务寒暄",
-  daily: "日常聊天",
-  hotel_checkin: "酒店入住",
-  doctor_visit_fever: "感冒看病",
-  restaurant_ordering: "餐厅点单",
-  shopping_in_store: "商店购物",
-  asking_directions: "问路与打车",
-};
-
-const SCENARIO_LABELS_EN: Record<string, string> = {
-  restaurant: "Dining etiquette",
-  shopping: "Shopping chat",
-  directions: "Asking for directions",
-  business: "Business meetup",
-  daily: "Daily small talk",
-  hotel_checkin: "Hotel check-in",
-  doctor_visit_fever: "Doctor visit",
-  restaurant_ordering: "Restaurant ordering",
-  shopping_in_store: "In-store shopping",
-  asking_directions: "Directions and taxi",
-};
-
 const LANGUAGE_LABELS = {
   zh: {
     cantonese: "粤语",
@@ -72,11 +52,7 @@ export const resolveScenarioTitle = (
   scenarioId: string,
   nativeLanguage?: LanguageCode,
 ): string => {
-  const prefersEnglish = nativeLanguage === LanguageCode.English;
-  const map = prefersEnglish ? SCENARIO_LABELS_EN : SCENARIO_LABELS_ZH;
-  return (
-    map[scenarioId] ?? (prefersEnglish ? "Conversation practice" : "沉浸对话")
-  );
+  return resolveScenarioLabel(scenarioId, nativeLanguage);
 };
 
 export const resolveLanguageLabel = (

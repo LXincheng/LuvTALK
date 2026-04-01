@@ -1,6 +1,13 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { envConfig } from "../../common/config/env.config";
+import {
+  applyThinkingToggle,
+  resolveChatModelRoute,
+  supportsJsonObjectResponse,
+  supportsThinkingToggle,
+} from "../../common/config/model-provider.config";
+import { resolveScenarioLabel } from "../../common/config/prompts/scenario.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import {
   ConversationMessage,
@@ -25,6 +32,12 @@ import {
   SessionSummaryPayload,
 } from "./conversation-summary.types";
 import { ScenarioFeedbackPayload } from "./conversation-scenario-feedback.types";
+import {
+  buildConversationReportSystemPrompt,
+  buildConversationReportUserPrompt,
+  buildScenarioFeedbackSystemPrompt,
+  buildScenarioFeedbackUserPrompt,
+} from "./conversation-report.prompts";
 
 type ReportRecord = {
   id: string;
@@ -43,6 +56,8 @@ type ReportRecord = {
 
 type ScenarioFeedbackPromptInput = {
   conversationId: string;
+  scenarioId: string;
+  scenarioLabel: string;
   targetLanguage: LanguageCode;
   nativeLanguage: LanguageCode;
   reportLanguage: "zh" | "en";
@@ -61,8 +76,6 @@ type ScenarioFeedbackPromptInput = {
 @Injectable()
 export class ConversationReportService {
   private readonly logger = new Logger(ConversationReportService.name);
-  private readonly deepSeekEndpoint = this.resolveDeepSeekEndpoint();
-  private readonly openAiEndpoint = this.resolveOpenAiEndpoint();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -195,8 +208,31 @@ export class ConversationReportService {
     });
 
     const generatedReport =
-      (await this.requestDeepSeekReport(promptInput)) ??
-      (await this.requestOpenAiReport(promptInput)) ??
+      (await this.requestReportWithModel(
+        promptInput,
+        envConfig.modelRouting.primaryModel,
+        envConfig.modelTimeoutMs.primary,
+        {
+          label: "report-primary",
+          enableThinking: session.deepThinkingEnabled === true,
+        },
+      )) ??
+      (await this.requestReportWithModel(
+        promptInput,
+        envConfig.modelRouting.secondaryModel,
+        envConfig.modelTimeoutMs.secondary,
+        {
+          label: "report-secondary",
+        },
+      )) ??
+      (await this.requestReportWithModel(
+        promptInput,
+        envConfig.modelRouting.thirdModel,
+        envConfig.modelTimeoutMs.third,
+        {
+          label: "report-third",
+        },
+      )) ??
       this.buildFallbackReport(promptInput);
 
     if (!this.prisma.canUseDatabase()) {
@@ -333,7 +369,24 @@ export class ConversationReportService {
     }
 
     return (
-      (await this.requestDeepSeekScenarioFeedback(fastInput)) ??
+      (await this.requestScenarioFeedbackWithModel(
+        fastInput,
+        envConfig.modelRouting.secondaryModel,
+        Math.min(envConfig.modelTimeoutMs.secondary, 7000),
+        { label: "scenario-secondary" },
+      )) ??
+      (await this.requestScenarioFeedbackWithModel(
+        fastInput,
+        envConfig.modelRouting.primaryModel,
+        Math.min(envConfig.modelTimeoutMs.primary, 9000),
+        { label: "scenario-primary" },
+      )) ??
+      (await this.requestScenarioFeedbackWithModel(
+        fastInput,
+        envConfig.modelRouting.thirdModel,
+        Math.min(envConfig.modelTimeoutMs.third, 5000),
+        { label: "scenario-third" },
+      )) ??
       this.buildFallbackScenarioFeedback(fastInput)
     );
   }
@@ -382,6 +435,11 @@ export class ConversationReportService {
       sourceMode,
       voiceStyle,
       summary,
+      scenarioId: session.scenarioId,
+      scenarioLabel: resolveScenarioLabel(
+        session.scenarioId,
+        session.nativeLanguage ?? LanguageCode.Mandarin,
+      ),
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
       reportLanguage,
@@ -466,6 +524,11 @@ export class ConversationReportService {
     const { session, summary, metrics, reportLanguage } = params;
     return {
       conversationId: session.id,
+      scenarioId: session.scenarioId,
+      scenarioLabel: resolveScenarioLabel(
+        session.scenarioId,
+        session.nativeLanguage ?? LanguageCode.Mandarin,
+      ),
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
       reportLanguage,
@@ -508,108 +571,53 @@ export class ConversationReportService {
     return nativeLanguage === LanguageCode.English ? "en" : "zh";
   }
 
-  private async requestOpenAiReport(
+  private async requestReportWithModel(
     input: ConversationReportPromptInput,
+    model: string,
+    timeoutMs: number,
+    options: { label: string; enableThinking?: boolean },
   ): Promise<ConversationReportBody | null> {
-    const { apiKey } = envConfig.openai;
-    const model = envConfig.modelRouting.primaryModel;
-    if (!apiKey || !model || !this.openAiEndpoint) {
-      this.logger.warn("Conversation report skipped: primary model config missing.");
+    const route = resolveChatModelRoute(model);
+    if (!route) {
       return null;
     }
+    const useThinking =
+      Boolean(options.enableThinking) && supportsThinkingToggle(route.model);
+    const useJsonMode =
+      !useThinking && supportsJsonObjectResponse(route.model);
 
-    const payload = {
-      model,
-      temperature: 0.35,
+    const payload: Record<string, unknown> = {
+      model: route.model,
+      temperature: useThinking ? 0.2 : 0.3,
+      stream: false,
       messages: [
         {
           role: "system",
-          content: this.buildReportSystemPrompt(input.reportLanguage),
+          content: buildConversationReportSystemPrompt(input.reportLanguage),
         },
         {
           role: "user",
-          content: this.buildReportUserPrompt(input),
+          content: buildConversationReportUserPrompt(input),
         },
       ],
     };
-
-    try {
-      const response = await this.fetchWithTimeout(
-        this.openAiEndpoint,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify(payload),
-        },
-        envConfig.modelTimeoutMs.primary,
-      );
-
-      if (!response.ok) {
-        const detail = await response.text();
-        this.logger.warn(
-          `Conversation report request failed (${response.status}): ${detail}`,
-        );
-        return null;
-      }
-
-      const raw = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const content = raw.choices?.[0]?.message?.content;
-      if (!content?.trim()) {
-        this.logger.warn("Conversation report request returned empty content.");
-        return null;
-      }
-
-      return this.parseReportContent(content);
-    } catch (error) {
-      this.logger.warn(
-        `Conversation report request aborted: ${(error as Error).message}`,
-      );
-      return null;
+    applyThinkingToggle(payload, route.model, useThinking);
+    if (useJsonMode) {
+      payload.response_format = { type: "json_object" };
     }
-  }
-
-  private async requestDeepSeekReport(
-    input: ConversationReportPromptInput,
-  ): Promise<ConversationReportBody | null> {
-    const apiKey = envConfig.deepseek.apiKey;
-    const model = this.resolveFastDeepSeekModel();
-    const endpoint = this.deepSeekEndpoint;
-    if (!apiKey || !model || !endpoint) {
-      return null;
-    }
-
-    const payload = {
-      model,
-      temperature: 0.25,
-      messages: [
-        {
-          role: "system",
-          content: this.buildReportSystemPrompt(input.reportLanguage),
-        },
-        {
-          role: "user",
-          content: this.buildReportUserPrompt(input),
-        },
-      ],
-    };
 
     try {
       const content = await this.fetchChatCompletionContentWithTimeout(
-        endpoint,
+        route.endpoint,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${route.apiKey}`,
           },
           body: JSON.stringify(payload),
         },
-        envConfig.modelTimeoutMs.secondary,
+        timeoutMs,
       );
 
       if (!content) {
@@ -618,49 +626,55 @@ export class ConversationReportService {
       return this.parseReportContent(content);
     } catch (error) {
       this.logger.warn(
-        `Scenario report DS request aborted: ${(error as Error).message}`,
+        `Conversation report request ${options.label} aborted: ${(error as Error).message}`,
       );
       return null;
     }
   }
 
-  private async requestDeepSeekScenarioFeedback(
+  private async requestScenarioFeedbackWithModel(
     input: ScenarioFeedbackPromptInput,
+    model: string,
+    timeoutMs: number,
+    options: { label: string },
   ): Promise<ScenarioFeedbackPayload | null> {
-    const apiKey = envConfig.deepseek.apiKey;
-    const model = this.resolveFastDeepSeekModel();
-    const endpoint = this.deepSeekEndpoint;
-    if (!apiKey || !model || !endpoint) {
+    const route = resolveChatModelRoute(model);
+    if (!route) {
       return null;
     }
 
-    const payload = {
-      model,
+    const payload: Record<string, unknown> = {
+      model: route.model,
       temperature: 0.15,
+      stream: false,
       messages: [
         {
           role: "system",
-          content: this.buildScenarioFeedbackSystemPrompt(input.reportLanguage),
+          content: buildScenarioFeedbackSystemPrompt(input.reportLanguage),
         },
         {
           role: "user",
-          content: this.buildScenarioFeedbackUserPrompt(input),
+          content: buildScenarioFeedbackUserPrompt(input),
         },
       ],
     };
+    applyThinkingToggle(payload, route.model, false);
+    if (supportsJsonObjectResponse(route.model)) {
+      payload.response_format = { type: "json_object" };
+    }
 
     try {
       const content = await this.fetchChatCompletionContentWithTimeout(
-        endpoint,
+        route.endpoint,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${route.apiKey}`,
           },
           body: JSON.stringify(payload),
         },
-        Math.min(envConfig.modelTimeoutMs.secondary, 7000),
+        timeoutMs,
       );
 
       if (!content) {
@@ -669,122 +683,10 @@ export class ConversationReportService {
       return this.parseScenarioFeedbackContent(content, input);
     } catch (error) {
       this.logger.warn(
-        `Scenario feedback DS request aborted: ${(error as Error).message}`,
+        `Scenario feedback request ${options.label} aborted: ${(error as Error).message}`,
       );
       return null;
     }
-  }
-
-  private buildReportSystemPrompt(reportLanguage: "zh" | "en"): string {
-    const outputLanguage =
-      reportLanguage === "zh" ? "Simplified Chinese" : "English";
-    return [
-      "You are a premium 1-on-1 language coaching analyst.",
-      `Write the report in ${outputLanguage}.`,
-      "Use only evidence that exists in the provided transcript, score trends, and coaching tips.",
-      "If direct acoustic evidence is limited, say the pronunciation or rhythm judgment is based on in-session system coaching tips.",
-      "Anchor pronunciation, rhythm, and pacing feedback to the tutor system voice when it is provided.",
-      "Be specific, practical, premium, and non-generic.",
-      "Prefer concise, high-signal language and clear action items over long explanations.",
-      "Return ONLY one valid JSON object.",
-      "JSON shape:",
-      "{",
-      '  "headline": "string",',
-      '  "overallSummary": "string",',
-      '  "learnerSnapshot": "string",',
-      '  "strengths": ["string"],',
-      '  "opportunities": ["string"],',
-      '  "pronunciation": { "summary": "string", "highlights": ["string"], "actionPlan": ["string"] },',
-      '  "vocabulary": { "summary": "string", "highlights": ["string"], "actionPlan": ["string"] },',
-      '  "grammar": { "summary": "string", "highlights": ["string"], "actionPlan": ["string"] },',
-      '  "rhythm": { "summary": "string", "highlights": ["string"], "actionPlan": ["string"] },',
-      '  "nextSessionPlan": { "focus": "string", "drills": ["string"], "checkpoint": "string" },',
-      '  "keyMoments": [{ "speaker": "user" | "ai", "quote": "string", "note": "string" }]',
-      "}",
-      "Keep arrays concise: strengths/opportunities/highlights/actionPlan/drills max 3 items; keyMoments max 3 items.",
-      "Do not use markdown.",
-    ].join("\n");
-  }
-
-  private buildScenarioFeedbackSystemPrompt(
-    reportLanguage: "zh" | "en",
-  ): string {
-    const outputLanguage =
-      reportLanguage === "zh" ? "Simplified Chinese" : "English";
-    return [
-      "You are a fast premium language-practice evaluator for scenario dialogue.",
-      `Write the result in ${outputLanguage}.`,
-      "Use only the session metrics and transcript provided.",
-      "Score conservatively. If the learner barely practiced, keep the score clearly low.",
-      "Do not reward empty or one-turn sessions with inflated scores.",
-      "Return ONLY one valid JSON object.",
-      "JSON shape:",
-      "{",
-      '  "headline": "string",',
-      '  "summary": "string",',
-      '  "overallScore": 0,',
-      '  "dimensions": {',
-      '    "taskCompletion": 0,',
-      '    "naturalness": 0,',
-      '    "pronunciation": 0,',
-      '    "resilience": 0',
-      "  },",
-      '  "suggestions": ["string", "string", "string"]',
-      "}",
-      "Each suggestion must be concrete and short.",
-      "Do not use markdown.",
-    ].join("\n");
-  }
-
-  private buildReportUserPrompt(input: ConversationReportPromptInput): string {
-    const sourceModeLabel =
-      input.sourceMode === "immersive"
-        ? "immersive realtime voice session"
-        : input.sourceMode === "voice"
-          ? "voice tutoring session"
-          : "text tutoring session";
-    return [
-      `Target language: ${input.targetLanguage}`,
-      `Learner native language: ${input.nativeLanguage}`,
-      `Output language: ${input.reportLanguage === "zh" ? "zh" : "en"}`,
-      `Session type: ${sourceModeLabel}`,
-      `Tutor system voice: ${input.voiceStyle ?? "not provided"}`,
-      "If a tutor system voice is provided, align pacing and delivery feedback to that voice style.",
-      "Session metrics:",
-      JSON.stringify(input.summary, null, 2),
-      "Pronunciation tips:",
-      JSON.stringify(input.pronunciationTips, null, 2),
-      "Grammar tips:",
-      JSON.stringify(input.grammarTips, null, 2),
-      "Rhythm tips:",
-      JSON.stringify(input.rhythmTips, null, 2),
-      "Score reasons:",
-      JSON.stringify(input.scoreReasons, null, 2),
-      "Transcript excerpts:",
-      input.transcriptLines.join("\n"),
-      "Write a polished premium review report with clear coaching suggestions.",
-    ].join("\n\n");
-  }
-
-  private buildScenarioFeedbackUserPrompt(
-    input: ScenarioFeedbackPromptInput,
-  ): string {
-    return [
-      `Target language: ${input.targetLanguage}`,
-      `Learner native language: ${input.nativeLanguage}`,
-      `Output language: ${input.reportLanguage}`,
-      `Learner turns: ${input.userTurns}`,
-      `Tutor turns: ${input.aiTurns}`,
-      `Average score: ${input.averageScore ?? "null"}`,
-      `Latest score: ${input.latestScore ?? "null"}`,
-      `Pronunciation mentions: ${input.pronunciationMentions}`,
-      `Grammar mentions: ${input.grammarMentions}`,
-      `Rhythm mentions: ${input.rhythmMentions}`,
-      `Strength hints: ${JSON.stringify(input.strengths)}`,
-      `Improvement hints: ${JSON.stringify(input.improvements)}`,
-      "Recent transcript:",
-      input.transcriptLines.join("\n"),
-    ].join("\n\n");
   }
 
   private parseReportContent(content: string): ConversationReportBody | null {
@@ -1412,69 +1314,6 @@ export class ConversationReportService {
     };
   }
 
-  private resolveOpenAiEndpoint(): string | null {
-    const raw = envConfig.openai.apiUrl?.replace(/\/$/, "");
-    if (!raw) {
-      return null;
-    }
-    if (raw.endsWith("/chat/completions")) {
-      return raw;
-    }
-    if (raw.endsWith("/v1")) {
-      return `${raw}/chat/completions`;
-    }
-    return `${raw}/v1/chat/completions`;
-  }
-
-  private resolveDeepSeekEndpoint(): string | null {
-    const raw = envConfig.deepseek.apiUrl?.replace(/\/$/, "");
-    if (!raw) {
-      return null;
-    }
-    if (raw.endsWith("/chat/completions")) {
-      return raw;
-    }
-    if (raw.endsWith("/v1")) {
-      return `${raw}/chat/completions`;
-    }
-    return `${raw}/v1/chat/completions`;
-  }
-
-  private resolveFastDeepSeekModel(): string {
-    const models = [
-      envConfig.modelRouting.thirdModel,
-      envConfig.modelRouting.secondaryModel,
-    ]
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .sort((left, right) => {
-        const leftIsReasoner = /reasoner/i.test(left);
-        const rightIsReasoner = /reasoner/i.test(right);
-        if (leftIsReasoner === rightIsReasoner) {
-          return 0;
-        }
-        return leftIsReasoner ? 1 : -1;
-      });
-    return models[0] ?? "";
-  }
-
-  private async fetchWithTimeout(
-    input: string,
-    init: RequestInit,
-    timeoutMs: number,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(input, {
-        ...init,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   private async fetchChatCompletionContentWithTimeout(
     input: string,
     init: RequestInit,
@@ -1497,9 +1336,18 @@ export class ConversationReportService {
       }
 
       const raw = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{
+          message?: {
+            content?:
+              | string
+              | Array<
+                  | { type?: string; text?: string }
+                  | { type?: string; input_text?: string }
+                >;
+          };
+        }>;
       };
-      const content = raw.choices?.[0]?.message?.content;
+      const content = this.extractMessageContent(raw.choices?.[0]?.message?.content);
       if (!content?.trim()) {
         this.logger.warn("Chat completion request returned empty content.");
         return null;
@@ -1508,6 +1356,38 @@ export class ConversationReportService {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private extractMessageContent(
+    content:
+      | string
+      | Array<
+          | { type?: string; text?: string }
+          | { type?: string; input_text?: string }
+        >
+      | undefined,
+  ): string {
+    if (typeof content === "string") {
+      return content;
+    }
+    if (!Array.isArray(content)) {
+      return "";
+    }
+    return content
+      .map((item) => {
+        if (typeof item !== "object" || item === null) {
+          return "";
+        }
+        if ("text" in item && typeof item.text === "string") {
+          return item.text;
+        }
+        if ("input_text" in item && typeof item.input_text === "string") {
+          return item.input_text;
+        }
+        return "";
+      })
+      .join("\n")
+      .trim();
   }
 
   private isDatabaseConnectionError(error: unknown): boolean {

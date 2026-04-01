@@ -33,6 +33,10 @@ export const envConfig = {
     secondaryModel: readTrimmed(process.env.SECONDARY_MODEL),
     thirdModel: readTrimmed(process.env.THIRD_MODEL),
     realtimeModel: readTrimmed(process.env.REALTIME_MODEL),
+    realtimeTranscribeModel: readTrimmed(
+      process.env.REALTIME_TRANSCRIBE_MODEL,
+      process.env.STT_MODEL,
+    ),
     sttModel: readTrimmed(process.env.STT_MODEL),
     ttsModel: readTrimmed(process.env.TTS_MODEL),
     translationModel: readTrimmed(process.env.TRANSLATION_MODEL),
@@ -49,6 +53,10 @@ export const envConfig = {
   openai: {
     apiKey: readTrimmed(process.env.PRIMARY_API_KEY),
     apiUrl: readTrimmed(process.env.PRIMARY_API_URL),
+    realtimeApiKey: readTrimmed(
+      process.env.PRIMARY_REALTIME_API_KEY,
+      process.env.PRIMARY_API_KEY,
+    ),
     realtimeApiUrl: readTrimmed(
       process.env.PRIMARY_REALTIME_API_URL,
       process.env.PRIMARY_API_URL

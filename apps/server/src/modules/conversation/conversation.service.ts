@@ -4,9 +4,23 @@ import { randomUUID } from "crypto";
 import { Observable, Subject } from "rxjs";
 import { envConfig } from "../../common/config/env.config";
 import {
+  applyThinkingToggle,
+  isDeepSeekModel,
+  isQwenModel,
+  resolveChatModelRoute,
+  supportsJsonObjectResponse,
+  supportsThinkingToggle,
+} from "../../common/config/model-provider.config";
+import {
   buildConversationSystemPrompt,
   TutorInteractionMode,
 } from "../../common/config/prompt.config";
+import {
+  buildDefaultTeachingTips,
+  buildDynamicScenarioGuidance,
+  buildScenarioHintMessage,
+  ensureScenarioTeachingReply,
+} from "../../common/config/prompts/conversation.guidance";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import {
   ConversationCoachNote,
@@ -42,7 +56,6 @@ import {
 } from "./conversation.copy";
 import {
   CONVERSATION_DEFAULTS,
-  CONVERSATION_ENDPOINTS,
   CONVERSATION_LOG_COPY,
 } from "./conversation.constants";
 import { ensureVoiceTipSet } from "./voice-tip-templater";
@@ -133,8 +146,6 @@ export class ConversationService {
     ai: TUTOR_AVATAR,
     user: LEARNER_AVATAR,
   };
-  private readonly fallbackEndpoint = this.resolveFallbackEndpoint();
-  private readonly openAiEndpoint = this.resolveOpenAiEndpoint();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -184,6 +195,7 @@ export class ConversationService {
       nativeLanguage,
       accessKey: this.createConversationAccessKey(),
       memoryEnabled: true,
+      deepThinkingEnabled: false,
       userId,
       title: this.buildConversationTitle(
         this.describeScenario(scenarioId, nativeLanguage),
@@ -351,8 +363,9 @@ export class ConversationService {
       conversationKey,
       bindUserIfAuthenticated: true,
     });
-    if (typeof dto.memoryEnabled === "boolean") {
-      session.memoryEnabled = dto.memoryEnabled;
+    session.memoryEnabled = true;
+    if (typeof dto.deepThinkingEnabled === "boolean") {
+      session.deepThinkingEnabled = dto.deepThinkingEnabled;
     }
     session.updatedAt = new Date().toISOString();
     await this.persistSession(session);
@@ -496,7 +509,6 @@ export class ConversationService {
     });
     const nativeLanguage = session.nativeLanguage ?? LanguageCode.Mandarin;
     const targetLanguage = session.targetLanguage;
-    const scenarioLabel = this.describeScenario(session.scenarioId, nativeLanguage);
     const userTurns = session.messages.filter(
       (message) => message.sender === "user",
     ).length;
@@ -508,11 +520,17 @@ export class ConversationService {
       .find((message) => message.sender === "user");
 
     if (kind === "nudge") {
-      const candidates = this.buildDynamicScenarioGuidance(
-        session,
+      const [primaryPhrase, secondaryPhrase] = this.buildScenarioAssociativePhrases(
         targetLanguage,
-        nativeLanguage,
+        session.scenarioId,
       );
+      const candidates = buildDynamicScenarioGuidance({
+        primaryPhrase,
+        secondaryPhrase,
+        nativeLanguage,
+        lastAiText: lastAiMessage?.text,
+        lastUserText: lastUserMessage?.text,
+      });
       const candidate =
         candidates[userTurns % candidates.length] ??
         this.buildScenarioAssociativePhrases(targetLanguage, session.scenarioId)[0];
@@ -531,8 +549,8 @@ export class ConversationService {
       };
     }
 
-    const hintMessage = this.buildScenarioHintMessage({
-      scenarioLabel,
+    const hintMessage = buildScenarioHintMessage({
+      scenarioId: session.scenarioId,
       targetLanguage,
       nativeLanguage,
       userTurns,
@@ -552,6 +570,9 @@ export class ConversationService {
       if (typeof cached.memoryEnabled !== "boolean") {
         cached.memoryEnabled = true;
       }
+      if (typeof cached.deepThinkingEnabled !== "boolean") {
+        cached.deepThinkingEnabled = false;
+      }
       return cached;
     }
 
@@ -559,6 +580,9 @@ export class ConversationService {
     if (cachedSnapshot) {
       if (typeof cachedSnapshot.memoryEnabled !== "boolean") {
         cachedSnapshot.memoryEnabled = true;
+      }
+      if (typeof cachedSnapshot.deepThinkingEnabled !== "boolean") {
+        cachedSnapshot.deepThinkingEnabled = false;
       }
       this.sessions.set(cachedSnapshot.id, cachedSnapshot);
       return cachedSnapshot;
@@ -608,6 +632,7 @@ export class ConversationService {
           createdAt: record.createdAt.toISOString(),
           updatedAt: record.updatedAt.toISOString(),
           memoryEnabled: true,
+          deepThinkingEnabled: false,
           messages: persistedMessages,
           coach: record.score
             ? {
@@ -653,6 +678,7 @@ export class ConversationService {
     const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
     const nativeLabel = this.describeLanguage(nativeLanguage, nativeLanguage);
     const welcomeText = buildWelcomeCopy({
+      scenarioId,
       title,
       targetLabel,
       nativeLabel,
@@ -783,16 +809,23 @@ export class ConversationService {
     return resolveLanguageLabel(language, nativeLanguage);
   }
 
-  private async requestOpenAi(
+  private async requestChatModelAi(
     session: ConversationSession,
     latestMessage: string,
     interactionMode: TutorInteractionMode,
+    options: {
+      model: string;
+      timeoutMs: number;
+      label: string;
+      enableThinking?: boolean;
+      preferJson?: boolean;
+    },
   ): Promise<AiResponse | null> {
-    const { apiKey } = envConfig.openai;
-    const tutorModel = envConfig.modelRouting.primaryModel;
-    const endpoint = this.openAiEndpoint;
-    if (!apiKey || !tutorModel || !endpoint) {
-      this.logger.warn(CONVERSATION_LOG_COPY.missingPrimaryConfig);
+    const route = resolveChatModelRoute(options.model);
+    if (!route) {
+      if (options.label === "primary") {
+        this.logger.warn(CONVERSATION_LOG_COPY.missingPrimaryConfig);
+      }
       return null;
     }
 
@@ -803,82 +836,125 @@ export class ConversationService {
         content: entry.text,
       }));
 
-    const prompt = buildConversationSystemPrompt({
-      targetLanguage: session.targetLanguage,
-      nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
-      scenarioLabel: this.describeScenario(
-        session.scenarioId,
-        session.nativeLanguage,
-      ),
-      interactionMode,
-    });
+    const prompt = isDeepSeekModel(route.model)
+      ? this.buildFallbackProviderPrompt({
+          scenarioId: session.scenarioId,
+          targetLanguage: session.targetLanguage,
+          nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+          scenarioLabel: this.describeScenario(
+            session.scenarioId,
+            session.nativeLanguage,
+          ),
+          interactionMode,
+        })
+      : buildConversationSystemPrompt({
+          scenarioId: session.scenarioId,
+          targetLanguage: session.targetLanguage,
+          nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+          scenarioLabel: this.describeScenario(
+            session.scenarioId,
+            session.nativeLanguage,
+          ),
+          interactionMode,
+        });
     const promptWithMemory = this.appendMemoryPackToPrompt(
       prompt,
       session,
       interactionMode,
     );
+    const useThinking =
+      Boolean(options.enableThinking) && supportsThinkingToggle(route.model);
+    const useJsonMode =
+      Boolean(options.preferJson) &&
+      !useThinking &&
+      supportsJsonObjectResponse(route.model);
 
-    const timeoutMs = envConfig.modelTimeoutMs.primary;
-    const payload = {
-      model: tutorModel,
-      temperature: CONVERSATION_DEFAULTS.openAiTemperature,
+    const payload: Record<string, unknown> = {
+      model: route.model,
+      temperature: isDeepSeekModel(route.model)
+        ? 0.55
+        : useThinking
+          ? 0.35
+          : CONVERSATION_DEFAULTS.openAiTemperature,
+      stream: false,
       messages: [
-        { role: "system", content: promptWithMemory },
+        {
+          role: "system",
+          content: this.appendModelOutputGuard(promptWithMemory, {
+            model: route.model,
+            useThinking,
+            useJsonMode,
+          }),
+        },
         ...history,
         { role: "user", content: latestMessage },
       ],
     };
+    applyThinkingToggle(payload, route.model, useThinking);
+    if (useJsonMode) {
+      payload.response_format = { type: "json_object" };
+    }
 
     this.logger.log(
-      `Primary tutor request -> ${endpoint} | model=${tutorModel} | messages=${payload.messages.length}`,
+      `Tutor request (${options.label}) -> ${route.endpoint} | provider=${route.provider} | model=${route.model} | thinking=${useThinking ? "on" : "off"} | json=${useJsonMode ? "on" : "off"} | timeout=${options.timeoutMs}ms`,
     );
 
     try {
-      const response = await this.fetchWithTimeout(
-        endpoint,
+      const content = await this.fetchChatCompletionContentWithTimeout(
+        route.endpoint,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${route.apiKey}`,
           },
           body: JSON.stringify(payload),
         },
-        timeoutMs,
+        options.timeoutMs,
       );
 
-      if (!response.ok) {
-        const detail = await response.text();
-        this.logger.warn(
-          `Primary tutor responded with ${response.status}: ${detail}`,
-        );
-        return null;
-      }
-
-      const raw: unknown = await response.json();
-      const content = (
-        raw as { choices?: Array<{ message?: { content?: string } }> }
-      )?.choices?.[0]?.message?.content;
-
       if (!content) {
-        this.logger.warn(CONVERSATION_LOG_COPY.primaryEmptyResponse);
         return null;
       }
 
-      return this.parseAiResponseContent(
+      const parsed = this.parseAiResponseContent(
         content,
-        CONVERSATION_LOG_COPY.primaryFallbackReason,
+        isDeepSeekModel(route.model)
+          ? CONVERSATION_LOG_COPY.fallbackReason
+          : CONVERSATION_LOG_COPY.primaryFallbackReason,
         session.targetLanguage,
+      );
+
+      if (parsed) {
+        return isDeepSeekModel(route.model)
+          ? this.enrichFallbackTeachingTips(
+              parsed,
+              session.targetLanguage,
+              session.nativeLanguage ?? LanguageCode.Mandarin,
+              interactionMode,
+              session.scenarioId,
+              latestMessage,
+            )
+          : parsed;
+      }
+
+      return this.buildAiResponseFromPlainText(
+        content,
+        session.targetLanguage,
+        session.nativeLanguage ?? LanguageCode.Mandarin,
+        interactionMode,
+        session.scenarioId,
+        latestMessage,
       );
     } catch (error) {
       if (this.isAbortError(error)) {
         this.logger.warn(
-          `Primary tutor timed out after ${timeoutMs}ms, switching to fallback source.`,
+          `Tutor request ${options.label} timed out after ${options.timeoutMs}ms.`,
         );
         return null;
       }
       this.logger.error(
-        `Primary tutor call failed: ${(error as Error).message}`,
+        `Tutor request ${options.label} failed: ${(error as Error).message}`,
       );
       return null;
     }
@@ -899,24 +975,71 @@ export class ConversationService {
         }
         return payload;
       });
+    const primaryModel = envConfig.modelRouting.primaryModel.trim();
+    const secondaryModel = envConfig.modelRouting.secondaryModel.trim();
+    const thirdModel = envConfig.modelRouting.thirdModel.trim();
+    const deepThinkingEnabled = session.deepThinkingEnabled === true;
+    const candidates: Array<Promise<AiResponse>> = [];
 
-    const dsTask = wrapCandidate(
-      this.requestDsAi(session, latestMessage, interactionMode),
-      "ds",
-    );
-    const openAiTask = new Promise<AiResponse>((resolve, reject) => {
-      windowLikeSetTimeout(() => {
+    const enqueueCandidate = (
+      label: string,
+      model: string,
+      timeoutMs: number,
+      delayMs: number,
+      options?: { enableThinking?: boolean; preferJson?: boolean },
+    ) => {
+      if (!model) {
+        return;
+      }
+      const run = () =>
         wrapCandidate(
-          this.requestOpenAi(session, latestMessage, interactionMode),
-          "openai",
-        )
-          .then(resolve)
-          .catch(reject);
-      }, 260);
+          this.requestChatModelAi(session, latestMessage, interactionMode, {
+            model,
+            timeoutMs,
+            label,
+            enableThinking: options?.enableThinking,
+            preferJson: options?.preferJson,
+          }),
+          label,
+        );
+      if (delayMs <= 0) {
+        candidates.push(run());
+        return;
+      }
+      candidates.push(
+        new Promise<AiResponse>((resolve, reject) => {
+          windowLikeSetTimeout(() => {
+            run().then(resolve).catch(reject);
+          }, delayMs);
+        }),
+      );
+    };
+
+    if (deepThinkingEnabled) {
+      enqueueCandidate("primary-thinking", primaryModel, envConfig.modelTimeoutMs.primary, 0, {
+        enableThinking: true,
+        preferJson: false,
+      });
+      enqueueCandidate("secondary-fast", secondaryModel, envConfig.modelTimeoutMs.secondary, 900, {
+        preferJson: true,
+      });
+    } else {
+      enqueueCandidate("secondary-fast", secondaryModel, envConfig.modelTimeoutMs.secondary, 0, {
+        preferJson: true,
+      });
+      enqueueCandidate("primary-quality", primaryModel, envConfig.modelTimeoutMs.primary, 220, {
+        preferJson: true,
+      });
+    }
+    enqueueCandidate("third-fallback", thirdModel, envConfig.modelTimeoutMs.third, 350, {
+      preferJson: true,
     });
 
+    if (!candidates.length) {
+      return null;
+    }
     try {
-      return await Promise.any([dsTask, openAiTask]);
+      return await Promise.any(candidates);
     } catch {
       return null;
     }
@@ -954,150 +1077,35 @@ export class ConversationService {
     }
   }
 
-  private async requestDsAi(
-    session: ConversationSession,
-    latestMessage: string,
-    interactionMode: TutorInteractionMode,
-  ): Promise<AiResponse | null> {
-    const apiKey = envConfig.deepseek.apiKey;
-    const endpoint = this.fallbackEndpoint;
-    if (!apiKey || !endpoint) {
-      this.logger.warn(
-        "Fallback provider config missing; using fallback payload.",
-      );
-      return null;
-    }
-
-    const history = session.messages
-      .slice(-CONVERSATION_DEFAULTS.historyWindow)
-      .map((entry) => ({
-        role: entry.sender === "ai" ? "assistant" : "user",
-        content: entry.text,
-      }));
-
-    const prompt = this.buildFallbackProviderPrompt({
-      targetLanguage: session.targetLanguage,
-      nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
-      scenarioLabel: this.describeScenario(
-        session.scenarioId,
-        session.nativeLanguage,
-      ),
-      interactionMode,
-    });
-    const promptWithMemory = this.appendMemoryPackToPrompt(
-      prompt,
-      session,
-      interactionMode,
-    );
-
-    const configuredSecondary = envConfig.modelRouting.secondaryModel.trim();
-    const configuredThird = envConfig.modelRouting.thirdModel.trim();
-
-    const orderedModels = this.resolveRealtimeDeepSeekModels([
-      configuredThird,
-      configuredSecondary,
-    ]);
-    if (!orderedModels.length) {
-      this.logger.warn(CONVERSATION_LOG_COPY.missingSecondaryConfig);
-      return null;
-    }
-
-    const candidates = orderedModels.map((model, index) => {
-      const isThird = model === configuredThird;
-      const baseTimeout = isThird
-        ? envConfig.modelTimeoutMs.third
-        : envConfig.modelTimeoutMs.secondary;
-      const timeoutMs = baseTimeout;
-      const label = isThird
-        ? "third"
-        : model === configuredSecondary
-          ? "secondary"
-          : `fallback-${index + 1}`;
-      return { model, timeoutMs, label };
-    });
-
-    for (const candidate of candidates) {
-      const payload = {
-        model: candidate.model,
-        temperature: 0.6,
-        stream: false,
-        messages: [
-          { role: "system", content: promptWithMemory },
-          ...history,
-          { role: "user", content: latestMessage },
-        ],
-      };
-
-      this.logger.log(
-        `Fallback request (${candidate.label}) -> ${endpoint} | model=${candidate.model} | timeout=${candidate.timeoutMs}ms | messages=${payload.messages.length}`,
-      );
-
-      try {
-        const content = await this.fetchChatCompletionContentWithTimeout(
-          endpoint,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify(payload),
-          },
-          candidate.timeoutMs,
-        );
-
-        if (!content) {
-          continue;
-        }
-
-        const parsed = this.parseAiResponseContent(
-          content,
-          CONVERSATION_LOG_COPY.fallbackReason,
-          session.targetLanguage,
-        );
-        if (parsed) {
-          return this.enrichFallbackTeachingTips(
-            parsed,
-            session.targetLanguage,
-            session.nativeLanguage ?? LanguageCode.Mandarin,
-            interactionMode,
-            session.scenarioId,
-            latestMessage,
-          );
-        }
-
-        const plainFallback = this.buildAiResponseFromPlainText(
-          content,
-          session.targetLanguage,
-          session.nativeLanguage ?? LanguageCode.Mandarin,
-          interactionMode,
-          session.scenarioId,
-          latestMessage,
-        );
-        if (plainFallback) {
-          return plainFallback;
-        }
-
-        this.logger.warn(
-          `Fallback ${candidate.label} model returned invalid JSON payload.`,
-        );
-      } catch (error) {
-        if (this.isAbortError(error)) {
-          this.logger.warn(
-            `Fallback ${candidate.label} model timed out after ${candidate.timeoutMs}ms.`,
-          );
-          continue;
-        }
-        this.logger.error(
-          `Fallback ${candidate.label} model failed: ${(error as Error).message}`,
-        );
+  private appendModelOutputGuard(
+    prompt: string,
+    options: { model: string; useThinking: boolean; useJsonMode: boolean },
+  ): string {
+    if (isQwenModel(options.model)) {
+      if (options.useThinking) {
+        return [
+          prompt,
+          "",
+          "QWEN OUTPUT RULES:",
+          "- You may use internal thinking, but the final visible answer must be exactly one valid JSON object.",
+          "- Do not output analysis, markdown, code fences, or any text outside the JSON object.",
+        ].join("\n");
+      }
+      if (options.useJsonMode) {
+        return [
+          prompt,
+          "",
+          "QWEN JSON OUTPUT RULES:",
+          "- Output exactly one valid JSON object that matches the schema above.",
+          '- The final answer must be pure JSON and must not contain markdown fences such as ```json.',
+        ].join("\n");
       }
     }
-
-    return null;
+    return prompt;
   }
 
   private buildFallbackProviderPrompt(input: {
+    scenarioId: string;
     targetLanguage: LanguageCode;
     nativeLanguage: LanguageCode;
     scenarioLabel: string;
@@ -1135,6 +1143,7 @@ export class ConversationService {
       "",
       "DEEPSEEK FALLBACK QUALITY GUARD:",
       `- Learner native language: ${nativeLabel}; target language: ${targetLabel}.`,
+      `- Scenario key: ${input.scenarioId}.`,
       `- Scenario focus: ${input.scenarioLabel}. Keep teaching tied to this scenario.`,
       "- Return ONLY one valid JSON object.",
       "- Keep reply practical and natural for this exact scenario, not generic.",
@@ -1156,21 +1165,20 @@ export class ConversationService {
     scenarioId: string,
     latestMessage: string,
   ): AiResponse {
-    const fallback = this.buildDefaultTeachingTips(
+    const fallback = buildDefaultTeachingTips({
       targetLanguage,
       nativeLanguage,
       interactionMode,
       scenarioId,
-    );
+    });
     return {
       ...payload,
-      reply: this.ensureScenarioTeachingReply(
-        payload.reply,
+      reply: ensureScenarioTeachingReply({
+        reply: payload.reply,
         targetLanguage,
         scenarioId,
-        interactionMode,
         latestMessage,
-      ),
+      }),
       correction: payload.correction?.trim() || fallback.correction,
       cultureNote: payload.cultureNote?.trim() || fallback.cultureNote,
       pronunciationTip:
@@ -1178,75 +1186,6 @@ export class ConversationService {
       rhythmTip: payload.rhythmTip?.trim() || fallback.rhythmTip,
       grammarTip: payload.grammarTip?.trim() || fallback.grammarTip,
     };
-  }
-
-  private buildDefaultTeachingTips(
-    targetLanguage: LanguageCode,
-    nativeLanguage: LanguageCode,
-    interactionMode: TutorInteractionMode,
-    scenarioId: string,
-  ): {
-    correction: string;
-    cultureNote: string;
-    pronunciationTip: string;
-    rhythmTip: string;
-    grammarTip: string;
-  } {
-    const prefersEnglish = nativeLanguage === LanguageCode.English;
-    const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
-    const scenarioLabel = this.describeScenario(scenarioId, nativeLanguage);
-    if (prefersEnglish) {
-      return {
-        correction:
-          interactionMode === "voice"
-            ? `In ${scenarioLabel}, use one shorter ${targetLabel} sentence first, then add details in the next turn.`
-            : `For ${scenarioLabel}, polish one sentence in ${targetLabel} first, and keep the next sentence concise.`,
-        cultureNote:
-          interactionMode === "voice"
-            ? `In ${scenarioLabel}, start with one positive phrase before asking a question to sound natural.`
-            : `In ${scenarioLabel}, add one friendly acknowledgement before your request.`,
-        pronunciationTip:
-          "Slow down the stressed syllables and keep ending consonants clear.",
-        rhythmTip:
-          "Pause briefly after each clause instead of speaking in one long breath.",
-        grammarTip:
-          "Prefer one tense in one sentence; avoid mixing structures in the same turn.",
-      };
-    }
-    return {
-      correction:
-        interactionMode === "voice"
-          ? `在${scenarioLabel}场景中，先用一句更短的${targetLabel}表达核心意思，再补充细节。`
-          : `在${scenarioLabel}场景中，先把一句${targetLabel}核心表达说完整，再用下一句补充信息。`,
-      cultureNote:
-        interactionMode === "voice"
-          ? `在${scenarioLabel}里先肯定对方再提出问题，会更像真实口语互动。`
-          : `在${scenarioLabel}里先做简短回应再表达需求，更符合母语者交流习惯。`,
-      pronunciationTip: "重读关键词，句尾辅音收清楚，语气会更自然。",
-      rhythmTip: "按意群做短停顿，不要一口气读完整句。",
-      grammarTip: "一句话只保留一个主结构，避免时态和句式混用。",
-    };
-  }
-
-  private ensureScenarioTeachingReply(
-    reply: string,
-    targetLanguage: LanguageCode,
-    scenarioId: string,
-    interactionMode: TutorInteractionMode,
-    latestMessage: string,
-  ): string {
-    const trimmed = reply.trim();
-    if (trimmed.length >= 28) {
-      return trimmed;
-    }
-    const scenario = this.describeScenario(scenarioId, targetLanguage);
-    if (targetLanguage === LanguageCode.English) {
-      return `${trimmed} In this ${scenario} context, try: "${latestMessage}" with one clearer key phrase and a follow-up question.`;
-    }
-    if (targetLanguage === LanguageCode.Cantonese) {
-      return `${trimmed} 喺${scenario}呢个场景，你可以先讲重点，再加一句追问令对话更自然。`;
-    }
-    return `${trimmed} 在${scenario}场景里，你可以先说重点，再补一句追问，让表达更像母语者。`;
   }
 
   private buildAiResponseFromPlainText(
@@ -1261,20 +1200,19 @@ export class ConversationService {
     if (!plain) {
       return null;
     }
-    const fallbackTips = this.buildDefaultTeachingTips(
+    const fallbackTips = buildDefaultTeachingTips({
       targetLanguage,
       nativeLanguage,
       interactionMode,
       scenarioId,
-    );
+    });
     return AiResponseSchema.parse({
-      reply: this.ensureScenarioTeachingReply(
-        plain,
+      reply: ensureScenarioTeachingReply({
+        reply: plain,
         targetLanguage,
         scenarioId,
-        interactionMode,
         latestMessage,
-      ),
+      }),
       correction: fallbackTips.correction,
       cultureNote: fallbackTips.cultureNote,
       associativePhrases: this.buildScenarioAssociativePhrases(
@@ -1308,12 +1246,12 @@ export class ConversationService {
     scenarioId: string,
   ): AiResponse {
     if (interactionMode === "voice") {
-      const fallbackTips = this.buildDefaultTeachingTips(
+      const fallbackTips = buildDefaultTeachingTips({
         targetLanguage,
         nativeLanguage,
-        "voice",
+        interactionMode: "voice",
         scenarioId,
-      );
+      });
       const voiceTips = ensureVoiceTipSet(
         {
           pronunciationTip: payload.pronunciationTip,
@@ -1387,12 +1325,12 @@ export class ConversationService {
       return rawReply;
     }
 
-    const fallbackTips = this.buildDefaultTeachingTips(
+    const fallbackTips = buildDefaultTeachingTips({
       targetLanguage,
       nativeLanguage,
-      "text",
+      interactionMode: "text",
       scenarioId,
-    );
+    });
     const stepCandidates = [
       payload.correction,
       payload.grammarTip,
@@ -1458,20 +1396,19 @@ export class ConversationService {
       Math.min(82, 50 + detailBonus + questionBonus + Math.round(normalizedLength / 12)),
     );
 
-    const tips = this.buildDefaultTeachingTips(
-      language,
-      LanguageCode.Mandarin,
-      "text",
+    const tips = buildDefaultTeachingTips({
+      targetLanguage: language,
+      nativeLanguage: LanguageCode.Mandarin,
+      interactionMode: "text",
       scenarioId,
-    );
+    });
     return AiResponseSchema.parse({
-      reply: this.ensureScenarioTeachingReply(
-        this.buildReply(polite, language, scenarioId),
-        language,
+      reply: ensureScenarioTeachingReply({
+        reply: this.buildReply(polite, language, scenarioId),
+        targetLanguage: language,
         scenarioId,
-        "text",
-        polite,
-      ),
+        latestMessage: polite,
+      }),
       correction: tips.correction,
       cultureNote: tips.cultureNote,
       associativePhrases: this.buildScenarioAssociativePhrases(
@@ -1485,108 +1422,6 @@ export class ConversationService {
       grammarTip: tips.grammarTip,
       keyTerms: [],
     });
-  }
-
-  private buildDynamicScenarioGuidance(
-    session: ConversationSession,
-    targetLanguage: LanguageCode,
-    nativeLanguage: LanguageCode,
-  ): string[] {
-    const [primaryPhrase, secondaryPhrase] = this.buildScenarioAssociativePhrases(
-      targetLanguage,
-      session.scenarioId,
-    );
-    const lastAiText = [...session.messages]
-      .reverse()
-      .find((message) => message.sender === "ai")
-      ?.text;
-    const lastUserText = [...session.messages]
-      .reverse()
-      .find((message) => message.sender === "user")
-      ?.text;
-    const compactTopic = (lastUserText ?? lastAiText ?? "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 28);
-
-    if (nativeLanguage === LanguageCode.English) {
-      return [
-        primaryPhrase,
-        secondaryPhrase,
-        compactTopic
-          ? `About ${compactTopic}, I want to confirm one more detail.`
-          : "I want to confirm one more detail before we finish.",
-      ];
-    }
-
-    if (nativeLanguage === LanguageCode.Cantonese) {
-      return [
-        primaryPhrase,
-        secondaryPhrase,
-        compactTopic
-          ? `关于${compactTopic}，我想再确认一个细节。`
-          : "我想再确认一个细节。",
-      ];
-    }
-
-    return [
-      primaryPhrase,
-      secondaryPhrase,
-      compactTopic
-        ? `关于${compactTopic}，我想再确认一个细节。`
-        : "我想再确认一个细节。",
-    ];
-  }
-
-  private buildScenarioHintMessage(params: {
-    scenarioLabel: string;
-    targetLanguage: LanguageCode;
-    nativeLanguage: LanguageCode;
-    userTurns: number;
-    lastAiText?: string;
-    lastUserText?: string;
-  }): string {
-    const {
-      scenarioLabel,
-      targetLanguage,
-      nativeLanguage,
-      userTurns,
-      lastAiText,
-      lastUserText,
-    } = params;
-    const targetLabel = this.describeLanguage(targetLanguage, nativeLanguage);
-    const aiAskedQuestion = Boolean(
-      lastAiText &&
-        (/[?？]$/.test(lastAiText.trim()) ||
-          /^(what|when|where|which|how|can|could|would|do|did|are|is)\b/i.test(
-            lastAiText.trim(),
-          )),
-    );
-    const alreadyGaveDetail = Boolean(lastUserText && lastUserText.trim().length >= 18);
-
-    if (nativeLanguage === LanguageCode.English) {
-      if (userTurns === 0) {
-        return `Stay inside the ${scenarioLabel} scene. Start with one short ${targetLabel} sentence, then add one concrete detail.`;
-      }
-      if (aiAskedQuestion) {
-        return `Keep the ${scenarioLabel} flow. Answer the question first, then add one useful detail instead of opening a new topic.`;
-      }
-      if (alreadyGaveDetail) {
-        return `Your next line can be shorter. Confirm the key point, then close with a small request or follow-up.`;
-      }
-      return `Stay in the ${scenarioLabel} context. Say the key information first, then add one small detail that moves the task forward.`;
-    }
-
-    if (userTurns === 0) {
-      return `先留在${scenarioLabel}这个场景里。先用一句简短的${targetLabel}说清核心信息，再补一个具体细节。`;
-    }
-    if (aiAskedQuestion) {
-      return `继续留在${scenarioLabel}场景里。先直接回应对方的问题，再补一个有用信息，不要突然换话题。`;
-    }
-    if (alreadyGaveDetail) {
-      return "你下一句可以更短一些。先确认重点，再顺势补一个小请求或追问。";
-    }
-    return `继续留在${scenarioLabel}这个任务里。先说重点，再补一个能推动场景往下走的小细节。`;
   }
 
   private buildReply(
@@ -2059,54 +1894,6 @@ export class ConversationService {
     );
   }
 
-  private resolveFallbackEndpoint(): string | null {
-    const raw = envConfig.deepseek.apiUrl;
-    if (!raw) {
-      return null;
-    }
-    const normalized = raw.replace(/\/$/, "");
-    if (normalized.endsWith(CONVERSATION_ENDPOINTS.chatCompletionsPath)) {
-      return normalized;
-    }
-    if (normalized.endsWith(CONVERSATION_ENDPOINTS.apiVersionPath)) {
-      return `${normalized}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
-    }
-    return `${normalized}${CONVERSATION_ENDPOINTS.apiVersionPath}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
-  }
-
-  private resolveOpenAiEndpoint(): string | null {
-    const raw = envConfig.openai.apiUrl?.replace(/\/$/, "");
-    if (!raw) {
-      return null;
-    }
-    if (raw.endsWith(CONVERSATION_ENDPOINTS.chatCompletionsPath)) {
-      return raw;
-    }
-    if (raw.endsWith(CONVERSATION_ENDPOINTS.apiVersionPath)) {
-      return `${raw}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
-    }
-    return `${raw}${CONVERSATION_ENDPOINTS.apiVersionPath}${CONVERSATION_ENDPOINTS.chatCompletionsPath}`;
-  }
-
-  private async fetchWithTimeout(
-    input: string,
-    init: RequestInit,
-    timeoutMs: number,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
-    try {
-      return await fetch(input, {
-        ...init,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   private async fetchChatCompletionContentWithTimeout(
     input: string,
     init: RequestInit,
@@ -2132,9 +1919,18 @@ export class ConversationService {
       }
 
       const raw = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+        choices?: Array<{
+          message?: {
+            content?:
+              | string
+              | Array<
+                  | { type?: string; text?: string }
+                  | { type?: string; input_text?: string }
+                >;
+          };
+        }>;
       };
-      const content = raw.choices?.[0]?.message?.content;
+      const content = this.extractMessageContent(raw.choices?.[0]?.message?.content);
       if (!content?.trim()) {
         this.logger.warn("Chat completion returned empty content.");
         return null;
@@ -2145,31 +1941,36 @@ export class ConversationService {
     }
   }
 
-  private orderDeepSeekModelsByLatency(models: string[]): string[] {
-    const seen = new Set<string>();
-    return models
-      .map((model) => model.trim())
-      .filter((model) => {
-        if (!model || seen.has(model)) {
-          return false;
+  private extractMessageContent(
+    content:
+      | string
+      | Array<
+          | { type?: string; text?: string }
+          | { type?: string; input_text?: string }
+        >
+      | undefined,
+  ): string {
+    if (typeof content === "string") {
+      return content;
+    }
+    if (!Array.isArray(content)) {
+      return "";
+    }
+    return content
+      .map((item) => {
+        if (typeof item !== "object" || item === null) {
+          return "";
         }
-        seen.add(model);
-        return true;
+        if ("text" in item && typeof item.text === "string") {
+          return item.text;
+        }
+        if ("input_text" in item && typeof item.input_text === "string") {
+          return item.input_text;
+        }
+        return "";
       })
-      .sort((left, right) => {
-        const leftIsReasoner = /reasoner/i.test(left);
-        const rightIsReasoner = /reasoner/i.test(right);
-        if (leftIsReasoner === rightIsReasoner) {
-          return 0;
-        }
-        return leftIsReasoner ? 1 : -1;
-      });
-  }
-
-  private resolveRealtimeDeepSeekModels(models: string[]): string[] {
-    const ranked = this.orderDeepSeekModelsByLatency(models);
-    const nonReasoning = ranked.filter((model) => !/reasoner/i.test(model));
-    return nonReasoning.length ? nonReasoning : ranked;
+      .join("\n")
+      .trim();
   }
 
   private isAbortError(error: unknown): boolean {

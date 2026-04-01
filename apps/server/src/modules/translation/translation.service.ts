@@ -1,6 +1,15 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { envConfig } from "../../common/config/env.config";
+import {
+  applyThinkingToggle,
+  isQwenModel,
+  resolveChatModelRoute,
+} from "../../common/config/model-provider.config";
+import {
+  buildTranslationSystemPrompt,
+  buildTranslationUserPrompt,
+} from "../../common/config/prompts/translation.prompts";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { TranslationRecord } from "../../common/types/conversation.types";
 import { PrismaService } from "../../core/prisma/prisma.service";
@@ -11,7 +20,6 @@ export class TranslationService {
   private readonly logger = new Logger(TranslationService.name);
   private readonly history: TranslationRecord[] = [];
   private readonly dictionary = this.buildDictionary();
-  private readonly fallbackEndpoint = this.resolveFallbackEndpoint();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -267,63 +275,121 @@ export class TranslationService {
     sourceLanguage: LanguageCode,
     targetLanguage: LanguageCode,
   ): Promise<string | undefined> {
-    const apiKey = envConfig.deepseek.apiKey;
-    const endpoint = this.fallbackEndpoint;
-    if (!apiKey || !endpoint) {
+    const preferredModel =
+      envConfig.modelRouting.translationModel ||
+      envConfig.modelRouting.secondaryModel ||
+      envConfig.modelRouting.primaryModel ||
+      envConfig.modelRouting.thirdModel;
+    const route = resolveChatModelRoute(preferredModel);
+    if (!route) {
       return undefined;
     }
 
-    const body = {
-      model:
-        envConfig.modelRouting.translationModel ||
-        envConfig.modelRouting.thirdModel ||
-        envConfig.modelRouting.secondaryModel,
+    const body: Record<string, unknown> = {
+      model: route.model,
+      temperature: 0.1,
+      stream: false,
       messages: [
         {
           role: "system",
-          content:
-            "You are a helpful translation assistant. Respond with only the translated sentence.",
+          content: buildTranslationSystemPrompt(),
         },
         {
           role: "user",
-          content: `Translate the following text from ${this.describeLanguage(sourceLanguage)} to ${this.describeLanguage(targetLanguage)}:\n"""${text}"""`,
+          content: buildTranslationUserPrompt({
+            text,
+            sourceLanguage,
+            targetLanguage,
+          }),
         },
       ],
-      temperature: 0.2,
-      stream: false,
     };
-    if (!body.model) {
-      return undefined;
+    applyThinkingToggle(body, route.model, false);
+
+    if (/^qwen-mt/i.test(route.model)) {
+      body.messages = [
+        {
+          role: "user",
+          content: text,
+        },
+      ];
+      body.translation_options = {
+        source_lang: this.toMtLanguage(sourceLanguage),
+        target_lang: this.toMtLanguage(targetLanguage),
+      };
+    } else if (isQwenModel(route.model)) {
+      body.response_format = { type: "json_object" };
+      body.messages = [
+        {
+          role: "system",
+          content: buildTranslationSystemPrompt({ jsonMode: true }),
+        },
+        {
+          role: "user",
+          content: buildTranslationUserPrompt({
+            text,
+            sourceLanguage,
+            targetLanguage,
+          }),
+        },
+      ];
     }
 
-    const response = await fetch(endpoint, {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.resolveModelTimeout(route.model),
+    );
+    const response = await fetch(route.endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${route.apiKey}`,
       },
       body: JSON.stringify(body),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
 
     if (!response.ok) {
       this.logger.warn(
-        `Secondary provider translation request failed (${response.status})`,
+        `Translation request failed (${response.status}) for model ${route.model}`,
       );
       return undefined;
     }
 
     const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{
+        message?: {
+          content?:
+            | string
+            | Array<
+                | { type?: string; text?: string }
+                | { type?: string; input_text?: string }
+              >;
+        };
+      }>;
     };
-    return data.choices?.[0]?.message?.content?.trim() || undefined;
+    const content = this.extractMessageContent(data.choices?.[0]?.message?.content);
+    if (!content) {
+      return undefined;
+    }
+    if (isQwenModel(route.model) && !/^qwen-mt/i.test(route.model)) {
+      try {
+        const parsed = JSON.parse(content) as { translation?: string };
+        return parsed.translation?.trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    return content.trim() || undefined;
   }
 
-  private describeLanguage(language: LanguageCode): string {
+  private toMtLanguage(language: LanguageCode): string {
     switch (language) {
       case LanguageCode.Cantonese:
-        return "Cantonese Chinese";
+        return "Cantonese";
       case LanguageCode.Mandarin:
-        return "Mandarin Chinese";
+        return "Chinese";
       case LanguageCode.English:
         return "English";
       default:
@@ -331,18 +397,45 @@ export class TranslationService {
     }
   }
 
-  private resolveFallbackEndpoint(): string | null {
-    const raw = envConfig.deepseek.apiUrl;
-    if (!raw) {
-      return null;
+  private extractMessageContent(
+    content:
+      | string
+      | Array<
+          | { type?: string; text?: string }
+          | { type?: string; input_text?: string }
+        >
+      | undefined,
+  ): string {
+    if (typeof content === "string") {
+      return content.trim();
     }
-    const normalized = raw.replace(/\/$/, "");
-    if (normalized.endsWith("/chat/completions")) {
-      return normalized;
+    if (!Array.isArray(content)) {
+      return "";
     }
-    if (normalized.endsWith("/v1")) {
-      return `${normalized}/chat/completions`;
+    return content
+      .map((item) => {
+        if (typeof item !== "object" || item === null) {
+          return "";
+        }
+        if ("text" in item && typeof item.text === "string") {
+          return item.text;
+        }
+        if ("input_text" in item && typeof item.input_text === "string") {
+          return item.input_text;
+        }
+        return "";
+      })
+      .join("\n")
+      .trim();
+  }
+
+  private resolveModelTimeout(model: string): number {
+    if (model === envConfig.modelRouting.thirdModel) {
+      return envConfig.modelTimeoutMs.third;
     }
-    return `${normalized}/v1/chat/completions`;
+    if (model === envConfig.modelRouting.secondaryModel) {
+      return envConfig.modelTimeoutMs.secondary;
+    }
+    return envConfig.modelTimeoutMs.primary;
   }
 }

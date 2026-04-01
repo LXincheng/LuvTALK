@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
 import { useRealtimeSession } from '../../hooks/useRealtimeSession';
+import { REALTIME_VOICE_OPTIONS } from '../../constants/ui';
 import { toast } from '../../utils/toast';
 import AudioOrb from './AudioOrb';
 import TranscriptSubtitles from './TranscriptSubtitles';
@@ -226,7 +227,11 @@ export default function ImmersiveMode({
               className="flex items-center justify-center overflow-hidden"
             >
               <div className="px-4 py-2 rounded-2xl bg-white/[0.08] border border-white/[0.16] backdrop-blur-2xl">
-                <VoiceStyleSelector value={voice} onChange={onVoiceChange} />
+                <VoiceStyleSelector
+                  value={voice}
+                  onChange={onVoiceChange}
+                  options={REALTIME_VOICE_OPTIONS}
+                />
               </div>
             </motion.div>
           )}

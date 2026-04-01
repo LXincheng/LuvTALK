@@ -61,9 +61,9 @@ export class RealtimeService {
     userId?: string,
     conversationKey?: string,
   ): Promise<RealtimeOfferResult> {
-    const { apiKey, realtimeApiUrl } = envConfig.openai;
+    const { realtimeApiKey, realtimeApiUrl } = envConfig.openai;
     const realtimeModel = envConfig.modelRouting.realtimeModel;
-    if (!apiKey || !realtimeApiUrl || !realtimeModel) {
+    if (!realtimeApiKey || !realtimeApiUrl || !realtimeModel) {
       throw new ServiceUnavailableException("Realtime service unavailable");
     }
     const session = await this.conversationService.getAccessibleSession(
@@ -109,7 +109,7 @@ export class RealtimeService {
         method: "POST",
         headers: {
           "Content-Type": "application/sdp",
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${realtimeApiKey}`,
           "OpenAI-Beta": "realtime=v1",
         },
         body: dto.offerSdp,
