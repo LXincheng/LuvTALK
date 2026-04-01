@@ -44,16 +44,24 @@
   --color-success: #34C759;
   --color-warning: #FF9500;
 
-  /* Glass morphism tokens */
-  --glass-bg: rgba(255, 255, 255, 0.84);
-  --glass-bg-heavy: rgba(255, 255, 255, 0.94);
-  --glass-bg-light: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(136, 168, 210, 0.2);
-  --glass-blur: 20px;
-  --glass-blur-heavy: 30px;
-  --glass-saturate: 180%;
-  --glass-shadow: 0 1px 2px rgba(78, 112, 168, 0.06);
-  --glass-shadow-lg: 0 12px 28px rgba(78, 112, 168, 0.1);
+  /* Unified surface system */
+  --glass-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 249, 255, 0.92));
+  --glass-bg-heavy: linear-gradient(180deg, rgba(255, 255, 255, 0.985), rgba(244, 248, 253, 0.95));
+  --glass-bg-light: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(112, 145, 192, 0.18);
+  --glass-blur: 0px;
+  --glass-blur-heavy: 0px;
+  --glass-saturate: 100%;
+  --glass-shadow: 0 4px 14px rgba(44, 72, 118, 0.04);
+  --glass-shadow-lg: 0 10px 26px rgba(44, 72, 118, 0.06);
+  --page-bg:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.92), transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, #f3f7fc 48%, #eef3f9 100%);
+  --page-accent: radial-gradient(circle at top right, rgba(22, 120, 255, 0.1), transparent 32%);
+  --surface-panel: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 252, 0.92));
+  --surface-panel-soft: rgba(255, 255, 255, 0.72);
+  --surface-shadow-soft: 0 4px 18px rgba(41, 64, 104, 0.04);
+  --surface-shadow-hover: 0 8px 20px rgba(41, 64, 104, 0.06);
 
   /* Border radius (Apple-style) */
   --radius: 0.75rem;
@@ -82,11 +90,11 @@
   /* Audio */
   --audio-player-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 247, 255, 0.92));
   --audio-player-border: rgba(116, 152, 204, 0.22);
-  --audio-player-shadow: 0 10px 26px rgba(72, 105, 158, 0.12);
+  --audio-player-shadow: 0 4px 16px rgba(72, 105, 158, 0.08);
   --audio-button-bg: linear-gradient(180deg, #ffffff 0%, #eef6ff 100%);
   --audio-button-border: rgba(22, 120, 255, 0.18);
   --audio-button-fg: #156FE8;
-  --audio-button-shadow: 0 8px 20px rgba(22, 120, 255, 0.18);
+  --audio-button-shadow: 0 2px 10px rgba(22, 120, 255, 0.1);
   --audio-track-bg: rgba(198, 218, 246, 0.92);
   --audio-time-bg: rgba(228, 239, 255, 0.92);
 
@@ -163,12 +171,20 @@
   --color-success: #30D158;
   --color-warning: #FF9F0A;
 
-  --glass-bg: rgba(28, 28, 30, 0.72);
-  --glass-bg-heavy: rgba(20, 20, 22, 0.85);
-  --glass-bg-light: rgba(44, 44, 46, 0.55);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-shadow: 0 2px 16px rgba(0, 0, 0, 0.2);
-  --glass-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --glass-bg: linear-gradient(180deg, rgba(24, 27, 34, 0.98), rgba(17, 20, 27, 0.96));
+  --glass-bg-heavy: linear-gradient(180deg, rgba(20, 23, 29, 0.99), rgba(13, 16, 22, 0.98));
+  --glass-bg-light: rgba(33, 37, 46, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  --glass-shadow-lg: 0 10px 26px rgba(0, 0, 0, 0.22);
+  --page-bg:
+    radial-gradient(circle at top, rgba(72, 116, 188, 0.12), transparent 26%),
+    linear-gradient(180deg, #0b0f15 0%, #0d1219 45%, #0a0e14 100%);
+  --page-accent: radial-gradient(circle at top right, rgba(72, 148, 255, 0.12), transparent 34%);
+  --surface-panel: linear-gradient(180deg, rgba(25, 29, 37, 0.98), rgba(17, 20, 27, 0.96));
+  --surface-panel-soft: rgba(255, 255, 255, 0.045);
+  --surface-shadow-soft: 0 4px 18px rgba(0, 0, 0, 0.18);
+  --surface-shadow-hover: 0 8px 22px rgba(0, 0, 0, 0.22);
 
   --sidebar: rgba(28, 28, 30, 0.85);
   --sidebar-foreground: #F5F5F7;
@@ -201,15 +217,15 @@
   --toast-dot-warning: #FFB340;
   --toast-dot-error: #FF6B61;
   --toast-dot-loading: #6DD6FF;
-  --audio-player-bg: linear-gradient(180deg, rgba(28, 28, 30, 0.88), rgba(20, 20, 22, 0.82));
-  --audio-player-border: rgba(255, 255, 255, 0.08);
-  --audio-player-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
-  --audio-button-bg: linear-gradient(180deg, rgba(10, 132, 255, 0.96) 0%, rgba(88, 86, 214, 0.9) 100%);
-  --audio-button-border: rgba(255, 255, 255, 0.08);
+  --audio-player-bg: linear-gradient(180deg, rgba(24, 27, 34, 0.98), rgba(18, 21, 28, 0.96));
+  --audio-player-border: rgba(255, 255, 255, 0.06);
+  --audio-player-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  --audio-button-bg: linear-gradient(180deg, rgba(36, 44, 58, 0.98) 0%, rgba(27, 33, 45, 0.96) 100%);
+  --audio-button-border: rgba(98, 136, 204, 0.22);
   --audio-button-fg: #FFFFFF;
-  --audio-button-shadow: 0 10px 24px rgba(10, 132, 255, 0.28);
-  --audio-track-bg: rgba(120, 120, 128, 0.28);
-  --audio-time-bg: rgba(120, 120, 128, 0.16);
+  --audio-button-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  --audio-track-bg: rgba(120, 120, 128, 0.2);
+  --audio-time-bg: rgba(255, 255, 255, 0.05);
 }
 
 /* ─── Base Layer ─── */
@@ -233,6 +249,8 @@ html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     letter-spacing: -0.01em;
+    background-image: var(--page-accent), var(--page-bg);
+    background-attachment: fixed;
   }
 }
 
@@ -259,22 +277,18 @@ html {
   .glass-card {
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
-    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
     box-shadow: var(--glass-shadow);
   }
 
   .glass-sidebar {
     background: var(--glass-bg-heavy);
     border-color: var(--color-separator);
-    backdrop-filter: blur(var(--glass-blur-heavy)) saturate(150%);
-    -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(150%);
+    box-shadow: var(--glass-shadow);
   }
 
   .glass-input {
-    background: var(--color-fill-secondary);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background: var(--surface-panel-soft);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
   }
 
   .glass-button {
@@ -291,9 +305,30 @@ html {
   .glass-status {
     background: var(--status-glass-bg);
     border: 1px solid var(--status-glass-border);
-    backdrop-filter: blur(var(--glass-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
     box-shadow: var(--glass-shadow);
+  }
+
+  .page-shell {
+    background-image: var(--page-accent), var(--page-bg);
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+
+  .page-panel {
+    background: var(--surface-panel);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--surface-shadow-soft);
+  }
+
+  .page-panel-soft {
+    background: var(--surface-panel-soft);
+    border: 1px solid rgba(255, 255, 255, 0.02);
+  }
+
+  .page-chip {
+    background: var(--surface-panel-soft);
+    border: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
   }
 
   .app-toast {
@@ -501,8 +536,6 @@ html {
     background: var(--audio-player-bg);
     border: 1px solid var(--audio-player-border);
     box-shadow: var(--audio-player-shadow);
-    backdrop-filter: blur(18px) saturate(165%);
-    -webkit-backdrop-filter: blur(18px) saturate(165%);
   }
 
   .audio-play-button {

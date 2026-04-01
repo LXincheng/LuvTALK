@@ -143,11 +143,11 @@ curl https://your-app.up.railway.app/api/health/db
 | ---- | ---------------------- | ------------------------------ |
 | 1    | 登录并进入聊天页       | 用户登录正常，页面无白屏       |
 | 2    | 新建会话并发送文字消息 | 会话可正常写入和读取           |
-| 3    | 在语音模式发送文字消息 | 导师回复自然，可生成 TTS       |
-| 4    | 上传一条语音           | 转写、导师回复、音频播放器正常 |
-| 5    | 收藏一个表达           | 收藏写入成功                   |
-| 6    | 进入每日复习并提交反馈 | 复习卡片和反馈正常             |
-| 7    | 打开成就和等级页       | 成就数据可读取                 |
+| 3    | 发送语音或上传语音     | 转写、导师回复、音频播放器正常 |
+| 4    | 上传一张图片到 chat    | 选中后有 toast、图片可预览、可发送、可正常识别 |
+| 5    | 切换学习语言与音色     | chat 只显示当前语言可用音色    |
+| 6    | 进入场景练习并结束     | 语音可用、反馈可生成、无 mock  |
+| 7    | 收藏一个表达           | 收藏写入成功                   |
 | 8    | 刷新页面并恢复历史会话 | 会话、标题、历史记录一致       |
 | 9    | 打开健康接口           | `/api/health` 返回 `ok`        |
 
@@ -160,10 +160,14 @@ curl https://your-app.up.railway.app/api/health/db
 | 服务启动就报数据库错误  | `DATABASE_URL`、`DIRECT_URL` 是否正确                        |
 | 迁移失败                | `DIRECT_URL` 是否误用了 `:6543` transaction pooler           |
 | 健康接口显示 `degraded` | `/api/health/db` 中 `connected` 和 `reconnectScheduled` 状态 |
-| 文本能聊、语音不能用    | `PRIMARY_AUDIO_API_URL`、`STT_MODEL`、`TTS_MODEL` 是否配置   |
+| 文本能聊、语音不能用    | `PRIMARY_AUDIO_API_URL`、`STT_MODEL`、`TTS_MODEL` 是否配置 |
+| chat 一直初始化        | 数据库连接、`/api/health/db`、会话历史接口是否超时或关闭   |
 | 沉浸模式异常            | `PRIMARY_REALTIME_API_URL`、`REALTIME_MODEL` 是否配置        |
 | 数据写入偶发丢失        | 是否误开了 `ALLOW_IN_MEMORY_FALLBACK=true`                   |
 | 前端请求 404 / 跨域     | `vercel.json` 中 API 代理地址是否正确                        |
+
+> 音色目录已经固定在服务端官方映射里，部署时不再配置 `TTS_VOICE_*` 或 `VITE_TTS_VOICE_*`。
+> 当前推荐音色为：普通话 `Serena`，粤语 `Kiki / Rocky`，英语 `Ethan`。
 
 ---
 

@@ -135,7 +135,7 @@ export default function AudioPlayer({ src, compact, autoPlay }: AudioPlayerProps
           style={{ width: `${progress * 100}%` }}
         />
         <div
-          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-primary shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+          className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-primary opacity-0 transition-opacity group-hover:opacity-100"
           style={{ left: `calc(${progress * 100}% - 6px)` }}
         />
       </div>

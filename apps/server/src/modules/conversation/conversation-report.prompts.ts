@@ -9,10 +9,16 @@ interface ScenarioFeedbackPromptInput {
   reportLanguage: "zh" | "en";
   scenarioId: string;
   scenarioLabel: string;
+  scenarioGoals: string[];
+  completionSignals: string[];
+  reportFocus: string[];
   userTurns: number;
   aiTurns: number;
   averageScore: number | null;
   latestScore: number | null;
+  targetLanguageUserTurns: number;
+  nativeLanguageUserTurns: number;
+  mixedLanguageUserTurns: number;
   pronunciationMentions: number;
   grammarMentions: number;
   rhythmMentions: number;
@@ -76,8 +82,10 @@ export const buildScenarioFeedbackSystemPrompt = (
     `Write the result in ${resolveOutputLanguage(reportLanguage)}.`,
     "Use only the session metrics and transcript provided.",
     "Never confuse the learner's native/interface language with the learner's target study language.",
+    "Judge task completion from the scenario goals and completion signals, not from generic fluency alone.",
     "Score conservatively. If the learner barely practiced, keep the score clearly low.",
     "Do not reward empty or one-turn sessions with inflated scores.",
+    "Ground your suggestions in the actual scene and the learner's real missed opportunities.",
     "Return ONLY one valid JSON object.",
     "JSON shape:",
     "{",
@@ -106,11 +114,24 @@ export const buildConversationReportUserPrompt = (
     `Learner native/interface language: ${describeLanguage(input.nativeLanguage)}`,
     `Learner target study language: ${describeLanguage(input.targetLanguage)}`,
     `Output report language: ${input.reportLanguage === "zh" ? "Chinese" : "English"}`,
+    `Scenario goals: ${JSON.stringify(input.scenarioGoals)}`,
+    `Scenario completion signals: ${JSON.stringify(input.completionSignals)}`,
+    `Scenario analysis focus: ${JSON.stringify(input.reportFocus)}`,
     `Session type: ${resolveSourceModeLabel(input.sourceMode)}`,
     `Tutor system voice: ${input.voiceStyle ?? "not provided"}`,
     "If a tutor system voice is provided, align pacing and delivery feedback to that voice style.",
     "Session metrics:",
     JSON.stringify(input.summary, null, 2),
+    "Language-use metrics:",
+    JSON.stringify(
+      {
+        targetLanguageUserTurns: input.targetLanguageUserTurns,
+        nativeLanguageUserTurns: input.nativeLanguageUserTurns,
+        mixedLanguageUserTurns: input.mixedLanguageUserTurns,
+      },
+      null,
+      2,
+    ),
     "Pronunciation tips:",
     JSON.stringify(input.pronunciationTips, null, 2),
     "Grammar tips:",
@@ -119,9 +140,9 @@ export const buildConversationReportUserPrompt = (
     JSON.stringify(input.rhythmTips, null, 2),
     "Score reasons:",
     JSON.stringify(input.scoreReasons, null, 2),
-    "Transcript excerpts:",
+    "Full transcript:",
     input.transcriptLines.join("\n"),
-    "Write a polished premium review report with clear coaching suggestions.",
+    "Write a polished premium review report that reflects the full scenario flow, not just isolated lines.",
   ].join("\n\n");
 };
 
@@ -134,16 +155,22 @@ export const buildScenarioFeedbackUserPrompt = (
     `Learner native/interface language: ${describeLanguage(input.nativeLanguage)}`,
     `Learner target study language: ${describeLanguage(input.targetLanguage)}`,
     `Output language: ${input.reportLanguage === "zh" ? "Chinese" : "English"}`,
+    `Scenario goals: ${JSON.stringify(input.scenarioGoals)}`,
+    `Scenario completion signals: ${JSON.stringify(input.completionSignals)}`,
+    `Scenario analysis focus: ${JSON.stringify(input.reportFocus)}`,
     `Learner turns: ${input.userTurns}`,
     `Tutor turns: ${input.aiTurns}`,
     `Average score: ${input.averageScore ?? "null"}`,
     `Latest score: ${input.latestScore ?? "null"}`,
+    `Target-language user turns: ${input.targetLanguageUserTurns}`,
+    `Native-language user turns: ${input.nativeLanguageUserTurns}`,
+    `Mixed-language user turns: ${input.mixedLanguageUserTurns}`,
     `Pronunciation mentions: ${input.pronunciationMentions}`,
     `Grammar mentions: ${input.grammarMentions}`,
     `Rhythm mentions: ${input.rhythmMentions}`,
     `Strength hints: ${JSON.stringify(input.strengths)}`,
     `Improvement hints: ${JSON.stringify(input.improvements)}`,
-    "Recent transcript:",
+    "Full scenario transcript:",
     input.transcriptLines.join("\n"),
   ].join("\n\n");
 };

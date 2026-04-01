@@ -24,6 +24,8 @@ export interface ConversationPromptContext {
   scenarioGoals: string[];
   scenarioFocus: string[];
   coachingFocus: string[];
+  roleplayRules: string[];
+  completionSignals: string[];
   interactionMode: TutorInteractionMode;
   learnerLevel: TutorLearnerLevel;
 }

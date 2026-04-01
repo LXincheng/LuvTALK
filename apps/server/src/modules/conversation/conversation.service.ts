@@ -1,6 +1,9 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
+import { createReadStream } from "fs";
+import { access, mkdir, readFile, writeFile } from "fs/promises";
+import { basename, extname, join } from "path";
 import { Observable, Subject } from "rxjs";
 import { envConfig } from "../../common/config/env.config";
 import {
@@ -15,6 +18,10 @@ import {
   buildConversationSystemPrompt,
   TutorInteractionMode,
 } from "../../common/config/prompt.config";
+import {
+  buildVisionLearnerPrompt,
+  buildVisionTutorPromptAddition,
+} from "../../common/config/prompts/conversation-vision";
 import {
   buildDefaultTeachingTips,
   buildDynamicScenarioGuidance,
@@ -38,7 +45,6 @@ import { AchievementService } from "../achievement/achievement.service";
 import { TranslationService } from "../translation/translation.service";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { StartConversationDto } from "./dto/start-conversation.dto";
-import { UpdateConversationPreferencesDto } from "./dto/update-conversation-preferences.dto";
 import { normalizeAiResponsePayload } from "./ai-response-normalizer";
 import {
   buildSessionSummary,
@@ -120,6 +126,25 @@ interface ProcessMessageOptions {
   userMessageMeta?: ConversationMessage["meta"];
 }
 
+interface ProcessImageMessageOptions {
+  question?: string;
+  mimeType: string;
+  buffer: Buffer;
+  originalName?: string;
+}
+
+interface TutorTurnInput {
+  latestMessageText: string;
+  userContent:
+    | string
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string } }
+      >;
+  promptAddition?: string;
+  requiresVision?: boolean;
+}
+
 interface RealtimeTranscriptEntry {
   role: "user" | "ai";
   text: string;
@@ -194,8 +219,6 @@ export class ConversationService {
       targetLanguage: dto.targetLanguage,
       nativeLanguage,
       accessKey: this.createConversationAccessKey(),
-      memoryEnabled: true,
-      deepThinkingEnabled: false,
       userId,
       title: this.buildConversationTitle(
         this.describeScenario(scenarioId, nativeLanguage),
@@ -352,27 +375,6 @@ export class ConversationService {
     await this.persistSession(session);
   }
 
-  async updateSessionPreferences(
-    conversationId: string,
-    dto: UpdateConversationPreferencesDto,
-    userId?: string,
-    conversationKey?: string,
-  ): Promise<ConversationSession> {
-    const session = await this.getAccessibleSession(conversationId, {
-      userId,
-      conversationKey,
-      bindUserIfAuthenticated: true,
-    });
-    session.memoryEnabled = true;
-    if (typeof dto.deepThinkingEnabled === "boolean") {
-      session.deepThinkingEnabled = dto.deepThinkingEnabled;
-    }
-    session.updatedAt = new Date().toISOString();
-    await this.persistSession(session);
-    this.broadcastSession(session);
-    return session;
-  }
-
   /** Public wrapper for persisting session (used by VoiceTutorService for TTS URL writeback) */
   async persistSessionPublic(session: ConversationSession): Promise<void> {
     await this.persistSession(session);
@@ -428,7 +430,14 @@ export class ConversationService {
       options?.userMessageMeta,
     );
     const rawAiPayload =
-      (await this.requestFastestTutorReply(session, trimmed, interactionMode)) ??
+      (await this.requestTieredTutorReply(
+        session,
+        {
+          latestMessageText: trimmed,
+          userContent: trimmed,
+        },
+        interactionMode,
+      )) ??
       this.composeAiResponse(
         trimmed,
         session.targetLanguage,
@@ -489,6 +498,159 @@ export class ConversationService {
       .catch((err) => {
         this.logger.warn(
           `Background translation failed: ${(err as Error).message}`,
+        );
+      });
+
+    this.achievementService.queueUserProgressSync(userId);
+    return session;
+  }
+
+  async processImageMessage(
+    conversationId: string,
+    options: ProcessImageMessageOptions,
+    userId?: string,
+    conversationKey?: string,
+  ): Promise<ConversationSession> {
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
+    if (!options.buffer?.length) {
+      return session;
+    }
+    if (options.buffer.length > MAX_IMAGE_FILE_SIZE_BYTES) {
+      throw new Error("IMAGE_TOO_LARGE");
+    }
+
+    const storedImage = await this.storeConversationImage(
+      conversationId,
+      options.buffer,
+      options.mimeType,
+      options.originalName,
+    );
+    const learnerText = options.question?.trim();
+    const visibleMessage =
+      learnerText ||
+      this.buildDefaultImageQuestion(
+        session.targetLanguage,
+        session.nativeLanguage ?? LanguageCode.Mandarin,
+      );
+
+    const userMessage = this.buildMessage(
+      "user",
+      visibleMessage,
+      session.targetLanguage,
+      session.nativeLanguage,
+      {
+        meta: {
+          imageUrl: this.buildImageReference(conversationId, storedImage.fileName),
+          imageMimeType: storedImage.mimeType,
+        },
+      },
+    );
+    session.messages.push(userMessage);
+
+    const userMessageCount = session.messages.filter(
+      (message) => message.sender === "user",
+    ).length;
+    if (userMessageCount === 1) {
+      session.title = this.summarizeTitle(
+        visibleMessage,
+        session.targetLanguage,
+        session.nativeLanguage,
+        session.scenarioId,
+      );
+    }
+
+    this.broadcastSession(session);
+
+    const rawAiPayload =
+      (await this.requestTieredTutorReply(
+        session,
+        {
+          latestMessageText: visibleMessage,
+          userContent: [
+            {
+              type: "text",
+              text: buildVisionLearnerPrompt({
+                targetLanguage: session.targetLanguage,
+                nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+                learnerText,
+              }),
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${storedImage.mimeType};base64,${options.buffer.toString("base64")}`,
+              },
+            },
+          ],
+          promptAddition: buildVisionTutorPromptAddition({
+            targetLanguage: session.targetLanguage,
+            nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
+          }),
+          requiresVision: true,
+        },
+        "text",
+      )) ??
+      this.composeVisionFallbackResponse(
+        session.targetLanguage,
+        session.nativeLanguage ?? LanguageCode.Mandarin,
+        learnerText,
+      );
+
+    const aiPayload = this.enrichPayloadForInteractionMode(
+      rawAiPayload,
+      "text",
+      session.targetLanguage,
+      session.nativeLanguage ?? LanguageCode.Mandarin,
+      session.scenarioId,
+    );
+    const normalizedKeyTerms = this.normalizeKeyTerms(
+      aiPayload.reply,
+      aiPayload.keyTerms,
+    );
+    const aiMessage = this.buildMessage(
+      "ai",
+      aiPayload.reply,
+      session.targetLanguage,
+      session.nativeLanguage,
+      {
+        meta: {
+          score: aiPayload.score,
+          scoreReason: aiPayload.scoreReason,
+          pronunciationTip: aiPayload.pronunciationTip || undefined,
+          rhythmTip: aiPayload.rhythmTip || undefined,
+          grammarTip: aiPayload.grammarTip || undefined,
+          keyTerms: normalizedKeyTerms,
+        },
+      },
+    );
+    session.messages.push(aiMessage);
+    session.coach = this.buildCoachNote(aiPayload);
+    session.updatedAt = new Date().toISOString();
+
+    await this.persistSession(session);
+    this.broadcastSession(session);
+
+    this.translateForNativeLanguage(
+      aiPayload.reply,
+      session.targetLanguage,
+      session.nativeLanguage ?? LanguageCode.Mandarin,
+    )
+      .then(async (translationText) => {
+        if (translationText) {
+          aiMessage.meta = { ...aiMessage.meta, translation: translationText };
+          await this.persistSession(session);
+          this.broadcastSession(session);
+        }
+      })
+      .catch((error) => {
+        this.logger.warn(
+          `Background translation failed after image analysis: ${
+            (error as Error).message
+          }`,
         );
       });
 
@@ -567,23 +729,11 @@ export class ConversationService {
   async getSession(conversationId: string): Promise<ConversationSession> {
     const cached = this.sessions.get(conversationId);
     if (cached) {
-      if (typeof cached.memoryEnabled !== "boolean") {
-        cached.memoryEnabled = true;
-      }
-      if (typeof cached.deepThinkingEnabled !== "boolean") {
-        cached.deepThinkingEnabled = false;
-      }
       return cached;
     }
 
     const cachedSnapshot = await this.sessionCache.getSession(conversationId);
     if (cachedSnapshot) {
-      if (typeof cachedSnapshot.memoryEnabled !== "boolean") {
-        cachedSnapshot.memoryEnabled = true;
-      }
-      if (typeof cachedSnapshot.deepThinkingEnabled !== "boolean") {
-        cachedSnapshot.deepThinkingEnabled = false;
-      }
       this.sessions.set(cachedSnapshot.id, cachedSnapshot);
       return cachedSnapshot;
     }
@@ -631,8 +781,6 @@ export class ConversationService {
           status: record.status ?? "active",
           createdAt: record.createdAt.toISOString(),
           updatedAt: record.updatedAt.toISOString(),
-          memoryEnabled: true,
-          deepThinkingEnabled: false,
           messages: persistedMessages,
           coach: record.score
             ? {
@@ -811,7 +959,7 @@ export class ConversationService {
 
   private async requestChatModelAi(
     session: ConversationSession,
-    latestMessage: string,
+    turn: TutorTurnInput,
     interactionMode: TutorInteractionMode,
     options: {
       model: string;
@@ -826,6 +974,9 @@ export class ConversationService {
       if (options.label === "primary") {
         this.logger.warn(CONVERSATION_LOG_COPY.missingPrimaryConfig);
       }
+      return null;
+    }
+    if (turn.requiresVision && isDeepSeekModel(route.model)) {
       return null;
     }
 
@@ -858,7 +1009,9 @@ export class ConversationService {
           interactionMode,
         });
     const promptWithMemory = this.appendMemoryPackToPrompt(
-      prompt,
+      turn.promptAddition?.trim()
+        ? `${prompt}\n${turn.promptAddition.trim()}`
+        : prompt,
       session,
       interactionMode,
     );
@@ -887,7 +1040,7 @@ export class ConversationService {
           }),
         },
         ...history,
-        { role: "user", content: latestMessage },
+        { role: "user", content: turn.userContent },
       ],
     };
     applyThinkingToggle(payload, route.model, useThinking);
@@ -933,7 +1086,7 @@ export class ConversationService {
               session.nativeLanguage ?? LanguageCode.Mandarin,
               interactionMode,
               session.scenarioId,
-              latestMessage,
+              turn.latestMessageText,
             )
           : parsed;
       }
@@ -944,7 +1097,7 @@ export class ConversationService {
         session.nativeLanguage ?? LanguageCode.Mandarin,
         interactionMode,
         session.scenarioId,
-        latestMessage,
+        turn.latestMessageText,
       );
     } catch (error) {
       if (this.isAbortError(error)) {
@@ -960,89 +1113,69 @@ export class ConversationService {
     }
   }
 
-  private async requestFastestTutorReply(
+  private async requestTieredTutorReply(
     session: ConversationSession,
-    latestMessage: string,
+    turn: TutorTurnInput,
     interactionMode: TutorInteractionMode,
   ): Promise<AiResponse | null> {
-    const wrapCandidate = (
-      task: Promise<AiResponse | null>,
-      label: string,
-    ): Promise<AiResponse> =>
-      task.then((payload) => {
-        if (!payload) {
-          throw new Error(`${label}_empty`);
-        }
-        return payload;
-      });
     const primaryModel = envConfig.modelRouting.primaryModel.trim();
     const secondaryModel = envConfig.modelRouting.secondaryModel.trim();
     const thirdModel = envConfig.modelRouting.thirdModel.trim();
-    const deepThinkingEnabled = session.deepThinkingEnabled === true;
-    const candidates: Array<Promise<AiResponse>> = [];
+    const attempts: Array<{
+      label: string;
+      model: string;
+      timeoutMs: number;
+      enableThinking?: boolean;
+      preferJson?: boolean;
+    }> = [];
 
-    const enqueueCandidate = (
+    const enqueueAttempt = (
       label: string,
       model: string,
       timeoutMs: number,
-      delayMs: number,
       options?: { enableThinking?: boolean; preferJson?: boolean },
     ) => {
       if (!model) {
         return;
       }
-      const run = () =>
-        wrapCandidate(
-          this.requestChatModelAi(session, latestMessage, interactionMode, {
-            model,
-            timeoutMs,
-            label,
-            enableThinking: options?.enableThinking,
-            preferJson: options?.preferJson,
-          }),
-          label,
-        );
-      if (delayMs <= 0) {
-        candidates.push(run());
-        return;
-      }
-      candidates.push(
-        new Promise<AiResponse>((resolve, reject) => {
-          windowLikeSetTimeout(() => {
-            run().then(resolve).catch(reject);
-          }, delayMs);
-        }),
-      );
+      attempts.push({
+        label,
+        model,
+        timeoutMs,
+        enableThinking: options?.enableThinking,
+        preferJson: options?.preferJson,
+      });
     };
 
-    if (deepThinkingEnabled) {
-      enqueueCandidate("primary-thinking", primaryModel, envConfig.modelTimeoutMs.primary, 0, {
-        enableThinking: true,
-        preferJson: false,
-      });
-      enqueueCandidate("secondary-fast", secondaryModel, envConfig.modelTimeoutMs.secondary, 900, {
-        preferJson: true,
-      });
-    } else {
-      enqueueCandidate("secondary-fast", secondaryModel, envConfig.modelTimeoutMs.secondary, 0, {
-        preferJson: true,
-      });
-      enqueueCandidate("primary-quality", primaryModel, envConfig.modelTimeoutMs.primary, 220, {
-        preferJson: true,
-      });
-    }
-    enqueueCandidate("third-fallback", thirdModel, envConfig.modelTimeoutMs.third, 350, {
+    enqueueAttempt("primary-quality", primaryModel, envConfig.modelTimeoutMs.primary, {
+      preferJson: true,
+    });
+    enqueueAttempt("secondary-fast", secondaryModel, envConfig.modelTimeoutMs.secondary, {
+      preferJson: true,
+    });
+    enqueueAttempt("third-fallback", thirdModel, envConfig.modelTimeoutMs.third, {
       preferJson: true,
     });
 
-    if (!candidates.length) {
-      return null;
+    for (const attempt of attempts) {
+      const payload = await this.requestChatModelAi(
+        session,
+        turn,
+        interactionMode,
+        {
+          model: attempt.model,
+          timeoutMs: attempt.timeoutMs,
+          label: attempt.label,
+          enableThinking: attempt.enableThinking,
+          preferJson: attempt.preferJson,
+        },
+      );
+      if (payload) {
+        return payload;
+      }
     }
-    try {
-      return await Promise.any(candidates);
-    } catch {
-      return null;
-    }
+
+    return null;
   }
 
   private parseAiResponseContent(
@@ -1293,9 +1426,6 @@ export class ConversationService {
     session: ConversationSession,
     interactionMode: TutorInteractionMode,
   ): string {
-    if (session.memoryEnabled === false) {
-      return basePrompt;
-    }
     const memoryPack = buildConversationMemoryPack({
       session,
       interactionMode,
@@ -1484,6 +1614,134 @@ export class ConversationService {
 
   private isCjk(text: string): boolean {
     return /[\u4e00-\u9fff]/.test(text);
+  }
+
+  private async storeConversationImage(
+    conversationId: string,
+    buffer: Buffer,
+    mimeType: string,
+    originalName?: string,
+  ): Promise<{ fileName: string; mimeType: string }> {
+    const directory = join(CONVERSATION_IMAGE_STORAGE_ROOT, conversationId);
+    await mkdir(directory, { recursive: true });
+    const extension = this.resolveImageExtension(mimeType, originalName);
+    const fileName = `img-${Date.now()}-${randomUUID()}${extension}`;
+    await writeFile(join(directory, fileName), buffer);
+    return {
+      fileName,
+      mimeType: this.normalizeImageMimeType(mimeType, extension),
+    };
+  }
+
+  async openImageStream(
+    conversationId: string,
+    fileName: string,
+    userId?: string,
+    conversationKey?: string,
+  ): Promise<{ stream: ReturnType<typeof createReadStream>; mimeType: string }> {
+    await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      allowBootstrapMissingAccessKey: true,
+    });
+    const safeFileName = basename(fileName);
+    const filePath = join(CONVERSATION_IMAGE_STORAGE_ROOT, conversationId, safeFileName);
+    await access(filePath);
+    return {
+      stream: createReadStream(filePath),
+      mimeType: this.normalizeImageMimeType(undefined, extname(safeFileName)),
+    };
+  }
+
+  private buildImageReference(conversationId: string, fileName: string): string {
+    return `/api/conversation/${conversationId}/image/${fileName}`;
+  }
+
+  private resolveImageExtension(mimeType?: string, originalName?: string): string {
+    const normalizedMime = mimeType?.trim().toLowerCase();
+    if (normalizedMime === "image/png") {
+      return ".png";
+    }
+    if (normalizedMime === "image/webp") {
+      return ".webp";
+    }
+    if (normalizedMime === "image/gif") {
+      return ".gif";
+    }
+    if (originalName) {
+      const originalExtension = extname(originalName).toLowerCase();
+      if (originalExtension) {
+        return originalExtension;
+      }
+    }
+    return ".jpg";
+  }
+
+  private normalizeImageMimeType(mimeType?: string, extension?: string): string {
+    const normalizedMime = mimeType?.trim().toLowerCase();
+    if (normalizedMime?.startsWith("image/")) {
+      return normalizedMime;
+    }
+    if (extension === ".png") {
+      return "image/png";
+    }
+    if (extension === ".webp") {
+      return "image/webp";
+    }
+    if (extension === ".gif") {
+      return "image/gif";
+    }
+    return "image/jpeg";
+  }
+
+  private buildDefaultImageQuestion(
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+  ): string {
+    if (nativeLanguage === LanguageCode.English) {
+      return `What is this in ${resolveLanguageLabel(targetLanguage, nativeLanguage)}? Please teach me how to say and use it.`;
+    }
+    if (nativeLanguage === LanguageCode.Cantonese) {
+      return `呢樣嘢用${resolveLanguageLabel(targetLanguage, nativeLanguage)}點講？可唔可以教我點讀同點用？`;
+    }
+    return `这个东西用${resolveLanguageLabel(targetLanguage, nativeLanguage)}怎么说？请教我怎么读、怎么用。`;
+  }
+
+  private composeVisionFallbackResponse(
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+    learnerText?: string,
+  ): AiResponse {
+    const tips = buildDefaultTeachingTips({
+      targetLanguage,
+      nativeLanguage,
+      interactionMode: "text",
+      scenarioId: "daily",
+    });
+    const reply =
+      nativeLanguage === LanguageCode.English
+        ? "I cannot read the image clearly this time, but you can retry with a sharper photo and simpler background."
+        : nativeLanguage === LanguageCode.Cantonese
+          ? "今次張圖未夠清晰，不過你可以換一張更清楚、背景更簡單嘅相再試。"
+          : "这次图片还不够清晰，不过你可以换一张更清楚、背景更简单的照片再试。";
+    return AiResponseSchema.parse({
+      reply,
+      correction: learnerText?.trim() || tips.correction,
+      cultureNote: tips.cultureNote,
+      associativePhrases: this.buildScenarioAssociativePhrases(
+        targetLanguage,
+        "daily",
+      ),
+      score: 68,
+      scoreReason:
+        nativeLanguage === LanguageCode.English
+          ? FALLBACK_SCORE_REASON.en
+          : FALLBACK_SCORE_REASON.zh,
+      pronunciationTip: tips.pronunciationTip,
+      rhythmTip: tips.rhythmTip,
+      grammarTip: tips.grammarTip,
+      keyTerms: [],
+    });
   }
 
   private buildMessage(
@@ -1878,9 +2136,19 @@ export class ConversationService {
   }
 
   private isDatabaseConnectionError(error: unknown): boolean {
-    return (
+    if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       (error.code === "P1001" || error.code === "P1002")
+    ) {
+      return true;
+    }
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return (
+      message.includes("server has closed the connection") ||
+      message.includes("connection terminated") ||
+      message.includes("connection closed") ||
+      message.includes("can't reach database server")
     );
   }
 
@@ -1994,6 +2262,9 @@ const resolveTimestamp = (timestamp?: string): string | undefined => {
   return date.toISOString();
 };
 
-const windowLikeSetTimeout = (callback: () => void, delayMs: number) => {
-  setTimeout(callback, delayMs);
-};
+const CONVERSATION_IMAGE_STORAGE_ROOT = join(
+  process.cwd(),
+  "tmp",
+  "conversation-images",
+);
+const MAX_IMAGE_FILE_SIZE_BYTES = 6 * 1024 * 1024;

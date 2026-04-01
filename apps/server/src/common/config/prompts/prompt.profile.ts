@@ -30,7 +30,7 @@ export const buildConversationSystemPromptWithProfile = (
     "",
     "QUALITY GUARD (exp_teaching_v1):",
     "- Keep outputs scenario-tied and learner-actionable.",
-    "- In text mode, ensure the reply includes 1-2 numbered coaching steps in the learner's native language.",
+    "- In text mode, keep reply fully in the target language and move native-language coaching into correction and tip fields.",
     "- Avoid generic encouragement without a concrete next step.",
   ].join("\n");
 };

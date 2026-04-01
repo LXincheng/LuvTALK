@@ -1,7 +1,6 @@
 # LuvTALK 模型服务方案
 
 > 更新时间：2026-04-01
-> 结论先行：**当前不建议把全系统直接收口为单一 `qwen3.5-omni` 模型 ID。**
 
 ## 1. 结论
 
@@ -11,6 +10,16 @@
 | 主要原因 | `realtime` 与非实时 Omni 是不同模型；普通 Omni 要求 `stream=true`；`Qwen3.5-Omni` 官方标注**不支持深度思考** |
 | 当前建议 | 保持 **Qwen 分模块接入**：文本、翻译、STT、TTS 分开，`realtime` 暂不改 |
 | 最后一级兜底 | 保留 `deepseek-chat` |
+
+## 1.1 当前配置原则
+
+| 原则 | 说明 |
+| --- | --- |
+| 单一事实源 | 模型路由只看根目录 `.env`；不要再维护重复 env 变量 |
+| 严格串行回退 | 对话链路固定 `qwen3.5-plus -> qwen3.5-flash -> deepseek-chat`，逐级超时，不竞争返回 |
+| 音色服务端收口 | 音色目录由服务端 `voice-config` 提供，前端不再维护独立 `TTS_VOICE_*` 配置 |
+| 混合语言识别 | STT 不强制指定单一识别语言，兼容英语、普通话、粤语混说 |
+| Scenario 角色约束 | 场景 prompt 统一由服务端 scenario 配置生成，强调角色扮演、任务推进与收尾条件 |
 
 ## 2. 官方调研结论
 
@@ -40,16 +49,49 @@
 
 | 模块 | 当前模型 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| 普通聊天 / 场景对话 | `qwen3.5-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认开启 session 上下文，支持深度思考开关 |
+| 普通聊天 / 场景对话 | `qwen3.5-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认开启 session 上下文；严格串行超时回退，不再竞争返回 |
 | 场景反馈 | `qwen3.5-flash` → `qwen3.5-plus` → `deepseek-chat` | 已接入、已实测 | 轻量快反馈 |
-| 报告 | `qwen3.5-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 深度思考开启时优先走 `plus` |
+| 报告 | `qwen3.5-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认关闭深度思考，保持结果稳定 |
 | 翻译 | `qwen-mt-flash` | 已接入、已实测 | 已按官方兼容格式修正请求体 |
 | 文化卡片 | `qwen3.5-flash` | 已接入、已实测 | 保留本地兜底 |
-| STT | `qwen3-asr-flash` | 已接入、已实测 | 已按官方 ASR 兼容格式修正 |
-| TTS | `qwen3-tts-instruct-flash`，粤语音色自动走 `qwen3-tts-flash` | 已接入、已实测 | 英文/普通话/粤语均已跑通 |
+| STT | `qwen3-asr-flash` | 已接入、已实测 | 混合语言语音默认不再强绑单一语言，避免英文/普通话/粤语夹杂时误识别 |
+| TTS | `qwen3-tts-instruct-flash`，`Jennifer / Aiden / Kiki / Rocky` 自动走 `qwen3-tts-flash` | 已接入、已实测 | 英文/普通话/粤语均已跑通；音色由服务端 `voice-config` 单点下发 |
+| Chat 图像理解 | `qwen3.5-plus`（主） → `qwen3.5-flash`（补位） | 已接入、已实测 | 支持图片上传、预览、识别与语言教学解释 |
 | Realtime | 现有方案保留 | **本轮不改** | 不迁到 Omni Realtime |
 
-## 4. 当前实测数据
+## 3.3 Scenario 当前规则
+
+| 项目 | 当前要求 |
+| --- | --- |
+| 主回复 | 保持目标语言，不把母语提示塞进场景主回复 |
+| 角色感 | AI 先是场景角色，再是教学者 |
+| 反馈输入 | 报告与评分尽量基于整段场景对话，而不是只看尾部片段 |
+| 英语模式 | 前端消息气泡不再额外显示中文翻译，避免干扰沉浸感 |
+
+## 3.1 当前推荐 `.env` 路由
+
+> 文本、翻译、STT、TTS 继续走已经验证过的分模块方案，不要再在代码里写第二套路由规则。
+
+| 变量 | 推荐值 | 用途 |
+| --- | --- | --- |
+| `PRIMARY_MODEL` | `qwen3.5-plus` | 主聊天 / 主报告模型 |
+| `SECONDARY_MODEL` | `qwen3.5-flash` | 快速补位与轻量回退 |
+| `THIRD_MODEL` | `deepseek-chat` | 最后一级兜底 |
+| `STT_MODEL` | `qwen3-asr-flash` | 语音识别 |
+| `TTS_MODEL` | `qwen3-tts-instruct-flash` | 语音合成 |
+| `TRANSLATION_MODEL` | `qwen-mt-flash` | 翻译 |
+
+## 3.2 官方音色映射
+
+| 语言 | 默认音色 | 推荐候选 |
+| --- | --- | --- |
+| 普通话 | `Serena` | `Serena, Ethan` |
+| 粤语 | `Kiki` | `Kiki, Rocky` |
+| 英语 | `Jennifer` | `Jennifer, Aiden` |
+
+> 现在以服务端固定映射为唯一音色事实源。英语已移除用户反馈不自然的 `Cherry`；聊天页只展示当前学习语言下的两种自然音色，并用简短特征词按钮展示；场景页不再提供音色切换。
+
+## 4. 运行结论
 
 ### 4.1 2026-04-01 最新有效数据
 
@@ -57,8 +99,6 @@
 | --- | --- | --- |
 | `start_session` | 成功 | `517ms` |
 | `chat_normal` | 成功 | `3672ms` |
-| `enable_deep_thinking` | 成功 | `332ms` |
-| `chat_deep` | 成功 | `7007ms` |
 | `translation` | 成功，返回 `Could I please have a cup of oat milk latte?` | `558ms` |
 | `culture` | 成功，返回 `3` 张卡片 | `3210ms` |
 | `scenario_feedback` | 成功 | `2254ms` |
@@ -69,18 +109,6 @@
 | `tts_cantonese` | 成功 | `979ms` |
 | `stt_cantonese` | 成功，返回 `你好啊，今日我哋練習日常對話。` | `7239ms` |
 
-### 4.2 与上一轮 fallback 数据对比
-
-| 模块 | 旧结果（API Key 无效 / fallback） | 新结果（已修正并实测） | 结论 |
-| --- | --- | --- | --- |
-| Chat | 可返回，但主要走 fallback 内容 | `3672ms` 真 Qwen 回复 | 质量已恢复 |
-| Translation | 保留原文 / 未真正翻译 | `558ms` 真翻译结果 | 已修复 |
-| Culture | `13461ms`，本地卡片兜底 | `3210ms`，真实生成 | 明显改善 |
-| Scenario Feedback | 本地兜底反馈 | `2254ms`，真实结构化反馈 | 已恢复 |
-| Report | 本地兜底报告 | `12582ms`，真实报告 | 质量恢复，但耗时较高 |
-| TTS | 失败 | 英文/普通话/粤语均成功 | 已恢复 |
-| STT | `TRANSCRIPTION_FAILED` | 英文/粤语回读成功 | 已恢复 |
-
 ## 5. 本轮关键修复
 
 | 修复项 | 结果 |
@@ -89,6 +117,8 @@
 | STT 按官方 `qwen3-asr-flash` 兼容格式改写 | 语音识别恢复可用 |
 | Translation 按官方 `qwen-mt-flash` 兼容格式改写 | 翻译恢复可用 |
 | 删除游客报告 mock 数据 | 报告页不再混入假样本 |
+| 聊天图片问答改走 `qwen3.5-plus` 视觉理解 | 图片识别、命名、读法、用法可直接教学 |
+| 音色映射固定到服务端 | 避免英语出现普通话音色、普通话出现英语音色 |
 
 ## 6. 当前代码结论
 
@@ -97,7 +127,7 @@
 | 是否现在切单一 Omni | **不建议** |
 | 是否可以后续做成“单一 Omni 家族” | **可以评估**，但至少仍要区分 `qwen3.5-omni-plus` 与 `qwen3.5-omni-plus-realtime` |
 | 当前最稳方案 | 继续使用已验证的 Qwen 分模块方案 |
-| 下一步最值得做 | 若未来要上 Omni，建议新开一轮“流式协议重构”，不要在现有非流式接口上硬替换 |
+| 下一步 | 若未来要上 Omni，单独做流式协议重构，不要在现有非流式接口上硬替换 |
 
 ## 7. 官方参考
 

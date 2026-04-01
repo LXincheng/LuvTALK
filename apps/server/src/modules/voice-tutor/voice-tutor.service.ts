@@ -12,6 +12,11 @@ import {
   resolveDashscopeGenerationEndpoint,
 } from "../../common/config/model-provider.config";
 import {
+  FLASH_ONLY_TTS_VOICES,
+  OFFICIAL_TTS_VOICE_CATALOG,
+  resolveLanguageVoiceSettings,
+} from "../../common/config/voice.config";
+import {
   VoiceOperationCacheService,
   VoiceOperationSnapshot,
 } from "../../common/cache/voice-operation-cache.service";
@@ -23,6 +28,7 @@ const DEFAULT_STORAGE_ROOT = join(process.cwd(), "tmp", "voice-uploads");
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const CONVERTIBLE_AUDIO_EXTENSIONS = new Set([
   ".webm",
+  ".ogg",
   ".wav",
   ".m4a",
   ".mp4",
@@ -31,14 +37,12 @@ const CONVERTIBLE_AUDIO_EXTENSIONS = new Set([
 
 interface LanguageHint {
   languageCode: string;
-  transcriptionPrompt: string;
   ttsLanguageType: string;
-  ttsVoice: string;
+  defaultVoice: string;
+  options: string[];
 }
 
 type TtsSpeed = "slow" | "normal" | "fast";
-
-const FLASH_ONLY_TTS_VOICES = new Set(["Kiki", "Rocky"]);
 
 export interface VoiceUploadFile {
   buffer: Buffer;
@@ -54,6 +58,11 @@ export interface VoiceUploadResult {
   conversationKey?: string;
 }
 
+export interface VoiceCatalogItem {
+  defaultVoice: string;
+  options: string[];
+}
+
 @Injectable()
 export class VoiceTutorService {
   private readonly logger = new Logger(VoiceTutorService.name);
@@ -67,7 +76,7 @@ export class VoiceTutorService {
   }
 
   private validateVoiceSetup(): void {
-    const { apiKey, apiUrl } = envConfig.openai;
+    const { apiKey, apiUrl, audioApiUrl } = envConfig.openai;
     const transcribeModel = envConfig.modelRouting.sttModel;
     const ttsModel = envConfig.modelRouting.ttsModel;
     if (!apiKey) {
@@ -75,7 +84,7 @@ export class VoiceTutorService {
       return;
     }
     this.logger.log(
-      `Voice provider ready | base=${apiUrl || "unset"} | stt=${transcribeModel || "unset"} | tts=${ttsModel || "unset"}`,
+      `Voice provider ready | sttBase=${apiUrl || "unset"} | ttsBase=${audioApiUrl || "unset"} | stt=${transcribeModel || "unset"} | tts=${ttsModel || "unset"}`,
     );
   }
 
@@ -151,6 +160,9 @@ export class VoiceTutorService {
     }
     if (file.mimetype === "audio/wav") {
       return ".wav";
+    }
+    if (file.mimetype === "audio/ogg") {
+      return ".ogg";
     }
     if (
       file.mimetype === "audio/m4a" ||
@@ -339,7 +351,7 @@ export class VoiceTutorService {
       await this.synthesizeSpeech(
         conversationId,
         latestAiMessage.text,
-        languageHint.ttsVoice,
+        languageHint.defaultVoice,
         "normal",
         undefined,
         conversationKey,
@@ -452,7 +464,6 @@ export class VoiceTutorService {
             },
           ],
           asr_options: {
-            language: languageHint.languageCode,
             enable_itn: true,
           },
         }),
@@ -501,9 +512,9 @@ export class VoiceTutorService {
     userId?: string,
     conversationKey?: string,
   ): Promise<{ audioUrl: string; fileName: string } | undefined> {
-    const { apiKey, apiUrl } = envConfig.openai;
+    const { apiKey, audioApiUrl } = envConfig.openai;
     const configuredTtsModel = envConfig.modelRouting.ttsModel;
-    if (!apiKey || !configuredTtsModel || !apiUrl) {
+    if (!apiKey || !configuredTtsModel || !audioApiUrl) {
       this.logger.warn("Primary provider TTS 配置缺失，无法执行语音合成");
       return undefined;
     }
@@ -516,7 +527,7 @@ export class VoiceTutorService {
       },
     );
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
-    const resolvedVoice = voice ?? languageHint.ttsVoice;
+    const resolvedVoice = this.resolveRequestedVoice(voice, languageHint);
     const resolvedTtsModel = this.resolveTtsModel(configuredTtsModel, resolvedVoice);
     const directory = join(this.storageRoot, conversationId);
     const speechInput = buildProsodyReadyTtsInput(
@@ -540,27 +551,30 @@ export class VoiceTutorService {
       return reusable;
     }
     try {
-      const response = await fetch(resolveDashscopeGenerationEndpoint(apiUrl), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: resolvedTtsModel,
-          input: {
-            text: speechInput,
-            voice: resolvedVoice,
-            language_type: languageHint.ttsLanguageType,
+      const response = await fetch(
+        resolveDashscopeGenerationEndpoint(audioApiUrl),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
           },
-          parameters: this.buildTtsParameters(
-            resolvedTtsModel,
-            resolvedVoice,
-            speed,
-            session.targetLanguage,
-          ),
-        }),
-      });
+          body: JSON.stringify({
+            model: resolvedTtsModel,
+            input: {
+              text: speechInput,
+              voice: resolvedVoice,
+              language_type: languageHint.ttsLanguageType,
+            },
+            parameters: this.buildTtsParameters(
+              resolvedTtsModel,
+              resolvedVoice,
+              speed,
+              session.targetLanguage,
+            ),
+          }),
+        },
+      );
       if (!response.ok) {
         const errorText = await response.text();
         this.logger.error(
@@ -708,6 +722,9 @@ export class VoiceTutorService {
     if (ext === ".wav") {
       return "audio/wav";
     }
+    if (ext === ".ogg") {
+      return "audio/ogg";
+    }
     if (ext === ".webm") {
       return "audio/webm";
     }
@@ -717,58 +734,43 @@ export class VoiceTutorService {
     return "application/octet-stream";
   }
 
-  private resolveAudioFormat(fileName: string, mimeType?: string): string {
-    const ext = extname(fileName).replace(/^\./, "").toLowerCase();
-    if (ext) {
-      return ext === "mpeg" ? "mp3" : ext;
-    }
-    if (!mimeType) {
-      return "mp3";
-    }
-    if (mimeType.includes("webm")) {
-      return "webm";
-    }
-    if (mimeType.includes("wav")) {
-      return "wav";
-    }
-    if (mimeType.includes("mp4") || mimeType.includes("m4a")) {
-      return "m4a";
-    }
-    return "mp3";
+  private resolveLanguageHint(language?: LanguageCode | string): LanguageHint {
+    return resolveLanguageVoiceSettings(language);
   }
 
-  private resolveLanguageHint(language?: LanguageCode | string): LanguageHint {
-    switch (language) {
-      case LanguageCode.Mandarin:
-        return {
-          languageCode: "zh",
-          transcriptionPrompt:
-            "Please transcribe this Mandarin Chinese speech accurately and return only the transcript.",
-          ttsLanguageType: "Chinese",
-          ttsVoice: "Serena",
-        };
-      case LanguageCode.Cantonese:
-        return {
-          languageCode: "yue",
-          transcriptionPrompt:
-            "Please transcribe this Cantonese speech accurately and return only the transcript in written Chinese that matches the spoken Cantonese content.",
-          ttsLanguageType: "Chinese",
-          ttsVoice: "Kiki",
-        };
-      case LanguageCode.English:
-      default:
-        return {
-          languageCode: "en",
-          transcriptionPrompt:
-            "Please transcribe this English speech accurately and return only the transcript.",
-          ttsLanguageType: "English",
-          ttsVoice: "Cherry",
-        };
+  getVoiceCatalog(): Record<LanguageCode, VoiceCatalogItem> {
+    return {
+      [LanguageCode.Mandarin]: {
+        defaultVoice: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Mandarin].defaultVoice,
+        options: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Mandarin].options,
+      },
+      [LanguageCode.Cantonese]: {
+        defaultVoice: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Cantonese].defaultVoice,
+        options: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Cantonese].options,
+      },
+      [LanguageCode.English]: {
+        defaultVoice: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.English].defaultVoice,
+        options: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.English].options,
+      },
+    };
+  }
+
+  private resolveRequestedVoice(
+    voice: string | undefined,
+    languageHint: LanguageHint,
+  ): string {
+    const normalized = voice?.trim();
+    if (normalized && languageHint.options.includes(normalized)) {
+      return normalized;
     }
+    return languageHint.defaultVoice;
   }
 
   private resolveTtsModel(configuredModel: string, voice: string): string {
-    if (FLASH_ONLY_TTS_VOICES.has(voice) && /instruct/i.test(configuredModel)) {
+    if (FLASH_ONLY_TTS_VOICES.has(voice)) {
+      if (/^qwen3-tts-flash(?:-|$)/i.test(configuredModel)) {
+        return configuredModel;
+      }
       return "qwen3-tts-flash";
     }
     return configuredModel;
@@ -843,7 +845,10 @@ export class VoiceTutorService {
   }
 
   private buildFallbackUserText(languageHint: LanguageHint): string {
-    if (languageHint.languageCode === "zh") {
+    if (
+      languageHint.languageCode === "zh" ||
+      languageHint.languageCode === "yue"
+    ) {
       return "（系统提示：上一条语音暂时无法转写，请导师继续当前情境，对我进行鼓励并提示可以改用文字或重新录音。）";
     }
     return "(System note: my latest voice clip could not be transcribed. Please stay in character, reply in the practice language, and encourage me to retry or switch to text.)";

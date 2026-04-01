@@ -9,17 +9,19 @@ import type { Message, Annotation } from '../../types/chat';
 interface MessageBubbleProps {
   message: Message;
   onSaveVocabulary?: (payload: Annotation) => void;
+  showTranslation?: boolean;
 }
 
 export default function MessageBubble({
   message,
   onSaveVocabulary,
+  showTranslation = true,
 }: MessageBubbleProps) {
   const { t } = useLocale();
   const [translationExpanded, setTranslationExpanded] = useState(false);
   const [tipsExpanded, setTipsExpanded] = useState(false);
 
-  const translationBlock = message.translation ? (
+  const translationBlock = showTranslation && message.translation ? (
     <div className="px-2">
       <button
         onClick={() => setTranslationExpanded(!translationExpanded)}
@@ -61,7 +63,7 @@ export default function MessageBubble({
 
   const scoreBlock =
     message.pronunciationScore !== undefined && message.audioUrl ? (
-      <div className="mx-1 rounded-xl border border-separator glass-card overflow-hidden shadow-sm">
+      <div className="mx-1 overflow-hidden rounded-xl border border-separator glass-card">
         <button
           type="button"
           onClick={() => hasTips && setTipsExpanded(!tipsExpanded)}
@@ -111,6 +113,17 @@ export default function MessageBubble({
     </div>
   ) : null;
 
+  const imageBlock = message.imageUrl ? (
+    <div className="w-fit max-w-[11rem] overflow-hidden rounded-2xl border border-separator/80 bg-black/5">
+      <img
+        src={message.imageUrl}
+        alt={message.content || 'uploaded image'}
+        className="max-h-40 w-full object-cover"
+        loading="lazy"
+      />
+    </div>
+  ) : null;
+
   const loadingBlock =
     message.type === 'ai' && message.isLoading ? (
       <div className="flex items-center gap-3 px-1 py-1">
@@ -152,6 +165,10 @@ export default function MessageBubble({
       <div className="flex justify-end">
         <div className="max-w-[85%] sm:max-w-md md:max-w-lg space-y-2">
           <div className="bg-primary text-white px-4 py-3 rounded-2xl rounded-tr-sm shadow-lg">
+            {imageBlock}
+            {imageBlock && message.content ? (
+              <div className="h-3" />
+            ) : null}
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           </div>
           {translationBlock}
@@ -166,7 +183,9 @@ export default function MessageBubble({
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] sm:max-w-md md:max-w-lg space-y-2">
-        <div className="glass-card border border-separator shadow-lg px-4 py-3 rounded-2xl rounded-tl-sm">
+        <div className="glass-card rounded-2xl rounded-tl-sm border border-separator px-4 py-3">
+          {imageBlock}
+          {imageBlock && !loadingBlock ? <div className="h-3" /> : null}
           {loadingBlock ? (
             loadingBlock
           ) : (

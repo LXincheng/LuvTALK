@@ -10,6 +10,7 @@ export const buildConversationModePrompt = (
         "MODE RULES (voice):",
         `- reply must still feel spoken and natural in ${targetLabel}, but keep strong tutoring value.`,
         "- Allow 1-3 short sentences when needed so the learner gets a complete, useful response.",
+        `- reply itself must remain fully in ${targetLabel}; keep native-language coaching out of the spoken reply body.`,
         "- Prioritize scenario-fit wording, natural expression, and clear teaching value over casual small talk.",
         `- If correction is needed, make it concise but specific, especially for wording, expression, grammar, or pragmatics.`,
         `- pronunciationTip should be populated when there is a clear, actionable sound-level issue in ${targetLabel}.`,
@@ -35,9 +36,10 @@ export const buildConversationModePrompt = (
       return [
         "MODE RULES (text):",
         "- Keep natural dialogue, but preserve explicit teaching value.",
-        `- reply should contain TWO blocks: (1) target-language response, (2) 1-2 numbered coaching steps in ${nativeLabel}.`,
-        "- Do not return vague encouragement only; include concrete next-step guidance.",
-        "- Keep structure clear and scan-friendly for learners.",
+        `- reply must stay fully in ${targetLabel} and read like an in-scene human reply, not a bilingual worksheet.`,
+        `- Put native-language coaching in correction / scoreReason / pronunciationTip / rhythmTip / grammarTip, never inside reply.`,
+        "- The reply should first answer or advance the scenario, then optionally add one short in-role follow-up.",
+        "- Do not return vague encouragement only; include concrete next-step guidance in the coaching fields.",
       ];
   }
 };

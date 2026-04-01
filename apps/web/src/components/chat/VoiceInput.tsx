@@ -1,4 +1,6 @@
-import { Mic, Send } from 'lucide-react';
+import { useRef } from 'react';
+import { ImagePlus, Mic, Send, X } from 'lucide-react';
+import { IMAGE_UPLOAD_ACCEPT } from '../../utils/media';
 
 interface VoiceInputProps {
   value: string;
@@ -8,9 +10,13 @@ interface VoiceInputProps {
   hideVoice?: boolean;
   placeholder?: string;
   recordingLabel?: string;
+  imagePreviewUrl?: string | null;
+  imageButtonLabel?: string;
   onChange: (value: string) => void;
   onSend: () => void;
   onToggleRecording: () => void;
+  onImageFileSelect?: (file: File) => void;
+  onClearImage?: () => void;
 }
 
 export default function VoiceInput({
@@ -21,17 +27,22 @@ export default function VoiceInput({
   hideVoice = false,
   placeholder = 'Type a message or use the microphone...',
   recordingLabel = 'Recording...',
+  imagePreviewUrl,
+  imageButtonLabel = 'Upload image',
   onChange,
   onSend,
   onToggleRecording,
+  onImageFileSelect,
+  onClearImage,
 }: VoiceInputProps) {
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const disableInput = isDisabled || isSending;
-  const disableSend = disableInput || isRecording || !value.trim();
+  const disableSend = disableInput || isRecording || (!value.trim() && !imagePreviewUrl);
   const disableToggle = isDisabled || (isSending && !isRecording);
-  const hasDraft = value.trim().length > 0;
+  const hasDraft = value.trim().length > 0 || Boolean(imagePreviewUrl);
 
   return (
-    <div className="glass-sidebar border-t border-separator px-3 py-2 sm:px-4 sm:py-3 md:glass-card">
+    <div className="glass-sidebar border-t border-separator px-3 py-2 sm:px-4 sm:py-3 md:bg-[var(--surface-panel)]">
       <div className="max-w-4xl mx-auto space-y-2">
         {isRecording && (
           <div className="relative overflow-hidden rounded-xl glass-status px-3 py-1.5">
@@ -46,7 +57,56 @@ export default function VoiceInput({
           </div>
         )}
 
+        {imagePreviewUrl ? (
+          <div className="page-panel rounded-2xl p-2">
+            <div className="relative inline-flex">
+              <img
+                src={imagePreviewUrl}
+                alt="image draft"
+                className="h-16 w-16 rounded-xl object-cover"
+              />
+              {onClearImage ? (
+                <button
+                  type="button"
+                  onClick={onClearImage}
+                  className="page-chip press-scale absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-surface/90 text-label-secondary transition-colors hover:bg-fill-secondary"
+                  aria-label="Clear image"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex items-center gap-2">
+          {onImageFileSelect ? (
+            <>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept={IMAGE_UPLOAD_ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    onImageFileSelect(file);
+                  }
+                  event.currentTarget.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={disableInput}
+                className="press-scale glass-card shrink-0 flex h-10 w-10 items-center justify-center rounded-xl border border-separator text-label-secondary transition-all hover:bg-fill-secondary disabled:cursor-not-allowed disabled:opacity-45"
+                aria-label={imageButtonLabel}
+                title={imageButtonLabel}
+              >
+                <ImagePlus className="w-4 h-4" />
+              </button>
+            </>
+          ) : null}
           <input
             type="text"
             value={value}

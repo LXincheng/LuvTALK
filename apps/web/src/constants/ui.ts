@@ -20,14 +20,6 @@ export const PREFERRED_AUDIO_MIMES = [
   'audio/webm',
 ] as const;
 
-// Voice recording MIME type preferences (browser MediaRecorder)
-// mp4 preferred — Yunwu transcription API has issues parsing webm duration
-export const PREFERRED_RECORDING_MIMES = [
-  'audio/mp4',
-  'audio/webm;codecs=opus',
-  'audio/webm',
-] as const;
-
 // Default values for conversation settings
 export const DEFAULTS = {
   targetLanguage: 'cantonese',
@@ -69,15 +61,6 @@ export const PROFILE_DEFAULT_PROGRESS = [
   { labelKey: 'profileGrammar', progressKey: 'profileGrammarProgress', width: '0%', color: PROGRESS_COLORS.green },
   { labelKey: 'profilePronunciation', progressKey: 'profilePronunciationProgress', width: '0%', color: PROGRESS_COLORS.purple },
 ] as const;
-
-// Available TTS voice options for Bailian/Qwen speech.
-export const TTS_VOICE_OPTIONS = [
-  { id: 'Kiki', labelKey: 'voiceKiki' },
-  { id: 'Serena', labelKey: 'voiceSerena' },
-  { id: 'Cherry', labelKey: 'voiceCherry' },
-] as const;
-
-export const DEFAULT_TTS_VOICE = 'Kiki';
 
 export const TTS_SPEED_OPTIONS = [
   { id: 'slow', labelKey: 'voiceSpeedSlow' },

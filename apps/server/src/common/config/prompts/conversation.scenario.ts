@@ -13,6 +13,8 @@ export const buildConversationScenarioPrompt = (
     scenarioGoals,
     scenarioFocus,
     coachingFocus,
+    roleplayRules,
+    completionSignals,
   } = context;
 
   return [
@@ -31,7 +33,13 @@ export const buildConversationScenarioPrompt = (
     ...scenarioGoals.map((goal) => `  - ${goal}.`),
     "- Follow-up priorities:",
     ...scenarioFocus.map((item) => `  - ${item}.`),
+    "- Role-play execution rules:",
+    ...roleplayRules.map((item) => `  - ${item}.`),
+    "- Consider the scenario successfully completed only when most of these are true:",
+    ...completionSignals.map((item) => `  - ${item}.`),
     "- Coaching priorities for this scenario:",
     ...coachingFocus.map((item) => `  - ${item}.`),
+    "- Reply like the tutor ROLE inside the scene, not like a detached teacher explaining the scene from outside.",
+    "- If the learner goes off-topic, redirect naturally from inside the role-play instead of switching to generic examples.",
   ];
 };

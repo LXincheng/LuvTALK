@@ -92,10 +92,16 @@ export interface ConversationReportPromptInput {
   summary: SessionSummaryPayload;
   scenarioId: string;
   scenarioLabel: string;
+  scenarioGoals: string[];
+  completionSignals: string[];
+  reportFocus: string[];
   targetLanguage: LanguageCode;
   nativeLanguage: LanguageCode;
   reportLanguage: "zh" | "en";
   transcriptLines: string[];
+  targetLanguageUserTurns: number;
+  nativeLanguageUserTurns: number;
+  mixedLanguageUserTurns: number;
   pronunciationTips: string[];
   grammarTips: string[];
   rhythmTips: string[];

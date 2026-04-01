@@ -25,6 +25,8 @@ export interface ConversationMessage {
     grammarTip?: string;
     translation?: string;
     audioUrl?: string;
+    imageUrl?: string;
+    imageMimeType?: string;
     ttsVoice?: string;
     ttsSpeed?: 'slow' | 'normal' | 'fast';
     source?: 'default' | 'realtime';
@@ -45,8 +47,6 @@ export interface ConversationSession {
   targetLanguage: LanguageCode;
   nativeLanguage?: LanguageCode;
   accessKey?: string;
-  memoryEnabled?: boolean;
-  deepThinkingEnabled?: boolean;
   userId?: string;
   title?: string;
   status?: string;
@@ -87,6 +87,11 @@ export interface FavoriteItem {
 export interface VoiceUploadResponse {
   operationId: string;
   status: 'received';
+}
+
+export interface VoiceCatalogItem {
+  defaultVoice: string;
+  options: string[];
 }
 
 export type VoiceOperationStatus =

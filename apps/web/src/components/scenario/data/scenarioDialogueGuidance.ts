@@ -1,7 +1,7 @@
 import type { LocaleKey } from '../../../providers/LocaleContext';
 import type { ConversationSession, LanguageCode } from '../../../types/api';
 import type { QuickReplyOption } from '../../chat/ChatQuickReplies';
-import type { ScenarioDefinition, ScenarioKey } from '../types';
+import type { ScenarioDefinition } from '../types';
 
 type Translator = (key: LocaleKey) => string;
 
@@ -9,95 +9,32 @@ const QUESTION_PATTERN =
   /^(what|when|where|which|how|can|could|would|do|did|are|is)\b/i;
 const CLOSING_PATTERN = /thank|thanks|完成|好了|冇問題|结账|that's all|all set/i;
 
-const SCENARIO_OPENING_REPLIES: Record<
-  ScenarioKey,
-  Record<LanguageCode, string[]>
-> = {
-  hotel_checkin: {
-    english: [
-      "Hi, I'd like to check in.",
-      'Hello, I have a reservation under Chan.',
-      "Hi, I'm checking in for tonight.",
-    ],
-    mandarin: [
-      '你好，我想办理入住。',
-      '你好，我有预订，名字是陈。',
-      '我今晚入住，麻烦帮我确认一下。',
-    ],
-    cantonese: [
-      '你好，我想辦理入住。',
-      '你好，我有預訂，名係陳。',
-      '我今晚入住，麻煩幫我確認一下。',
-    ],
-  },
-  doctor_visit_fever: {
-    english: [
-      "Hi doctor, I've had a fever since yesterday.",
-      "I've been coughing and I feel weak.",
-      'I took some medicine this morning, but I still feel sick.',
-    ],
-    mandarin: [
-      '医生你好，我从昨天开始发烧。',
-      '我一直咳嗽，而且觉得很没力气。',
-      '我今天早上吃过药了，但还是不舒服。',
-    ],
-    cantonese: [
-      '醫生你好，我由琴日開始發燒。',
-      '我一直咳，仲覺得好攰。',
-      '我今朝食過藥，但仲係唔舒服。',
-    ],
-  },
-  restaurant_ordering: {
-    english: [
-      "Hi, I'd like to order a main dish, please.",
-      'Could I get a latte with oat milk, please?',
-      "I'd like this dish, but not too spicy.",
-    ],
-    mandarin: [
-      '你好，我想点一份主菜。',
-      '请给我一杯燕麦奶拿铁。',
-      '我想点这个，但是不要太辣。',
-    ],
-    cantonese: [
-      '你好，我想叫一份主菜。',
-      '唔該，俾杯燕麥奶拿鐵我。',
-      '我想叫呢個，但唔好太辣。',
-    ],
-  },
-  shopping_in_store: {
-    english: [
-      "Hi, I'm looking for this in a larger size.",
-      'Could you tell me how much this costs?',
-      'Can I try this on first?',
-    ],
-    mandarin: [
-      '你好，我想看看大一点的尺码。',
-      '请问这个多少钱？',
-      '我可以先试穿一下吗？',
-    ],
-    cantonese: [
-      '你好，我想睇大一個碼。',
-      '唔該，呢件幾多錢？',
-      '我可唔可以試着先？',
-    ],
-  },
-  asking_directions: {
-    english: [
-      "Excuse me, how do I get to the station?",
-      'How long does it take to get there from here?',
-      'Would you recommend walking or taking a taxi?',
-    ],
-    mandarin: [
-      '请问去车站怎么走？',
-      '从这里过去大概要多久？',
-      '你觉得走路还是打车更方便？',
-    ],
-    cantonese: [
-      '唔好意思，去車站點行？',
-      '由呢度去大概要幾耐？',
-      '你覺得行路定搭的士方便啲？',
-    ],
-  },
+const buildOpeningReplies = (
+  scenario: ScenarioDefinition,
+  language: LanguageCode,
+  t: Translator,
+): string[] => {
+  const firstGoal = t(scenario.goals[0]).replace(/\s+/g, ' ').trim();
+  const secondGoal = t(scenario.goals[1]).replace(/\s+/g, ' ').trim();
+  if (language === 'english') {
+    return [
+      `Let me start with ${firstGoal.toLowerCase()}.`,
+      `First I'll handle ${firstGoal.toLowerCase()}, then add ${secondGoal.toLowerCase()}.`,
+      'Please ask me the first natural question.',
+    ];
+  }
+  if (language === 'cantonese') {
+    return [
+      `我想先處理${firstGoal}。`,
+      `我會先講${firstGoal}，再補${secondGoal}。`,
+      '你可以先問我第一條自然啲嘅問題嗎？',
+    ];
+  }
+  return [
+    `我想先处理${firstGoal}。`,
+    `我会先说${firstGoal}，再补${secondGoal}。`,
+    '你可以先问我第一个更自然的问题吗？',
+  ];
 };
 
 const buildClosingReplies = (language: LanguageCode): string[] => {
@@ -215,7 +152,7 @@ export const buildScenarioQuickReplyOptions = (
   const language = targetLanguage;
 
   if (userTurns === 0) {
-    return (SCENARIO_OPENING_REPLIES[scenario.key][language] ?? []).map((text, index) => ({
+    return buildOpeningReplies(scenario, language, t).map((text, index) => ({
       id: `starter-${scenario.key}-${index}`,
       text,
     }));

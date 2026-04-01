@@ -1,4 +1,8 @@
 import { apiClient } from './apiClient';
+import {
+  CONVERSATION_ACCESS_KEYS_STORAGE_KEY,
+  CONVERSATION_REPORT_CACHE_KEY,
+} from '../constants/storage';
 import type {
   ConversationHistorySummary,
   ConversationReportHistoryItem,
@@ -8,6 +12,7 @@ import type {
   ScenarioFeedbackPayload,
   ScenarioHintPayload,
   SessionSummaryPayload,
+  VoiceCatalogItem,
   VoiceOperationSnapshot,
   VoiceUploadResponse,
 } from '../types/api';
@@ -22,9 +27,6 @@ export interface StartConversationPayload {
 export interface ResumeConversationPayload extends StartConversationPayload {
   conversationId?: string;
 }
-
-const CONVERSATION_ACCESS_KEYS_STORAGE_KEY = 'conversationAccessKeys';
-const CONVERSATION_REPORT_CACHE_KEY = 'conversationReportsCache';
 
 const readStoredConversationAccessKeys = (): Record<string, string> => {
   if (typeof window === 'undefined') {
@@ -308,15 +310,8 @@ export function sendConversationMessage(
   );
 }
 
-export function updateConversationPreferences(
-  conversationId: string,
-  payload: { deepThinkingEnabled?: boolean },
-) {
-  return apiClient.postWithOptions<ConversationSession, { deepThinkingEnabled?: boolean }>(
-    `/conversation/${conversationId}/preferences`,
-    payload,
-    { headers: buildConversationAccessHeaders(conversationId) },
-  );
+export function fetchVoiceConfig() {
+  return apiClient.get<Record<LanguageCode, VoiceCatalogItem>>('/conversation/voice-config');
 }
 
 export function uploadConversationVoice(conversationId: string, audio: Blob) {
@@ -343,6 +338,23 @@ export function uploadConversationVoice(conversationId: string, audio: Blob) {
   formData.append('audio', audio, fileName);
   return apiClient.postForm<VoiceUploadResponse>(
     `/conversation/${conversationId}/voice`,
+    formData,
+    { headers: buildConversationAccessHeaders(conversationId) },
+  );
+}
+
+export function sendConversationImageMessage(
+  conversationId: string,
+  image: File,
+  message?: string,
+) {
+  const formData = new FormData();
+  formData.append('image', image, image.name || 'image-upload.jpg');
+  if (message?.trim()) {
+    formData.append('message', message.trim());
+  }
+  return apiClient.postForm<ConversationSession>(
+    `/conversation/${conversationId}/image-message`,
     formData,
     { headers: buildConversationAccessHeaders(conversationId) },
   );

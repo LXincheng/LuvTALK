@@ -2,21 +2,28 @@ import {
   Body,
   Controller,
   Get,
+  BadRequestException,
   Param,
   Post,
   Query,
   Req,
+  Res,
   Sse,
   MessageEvent,
   UseGuards,
+  UploadedFile,
+  UseInterceptors,
+  StreamableFile,
 } from "@nestjs/common";
-import { Request } from "express";
+import { Request, Response } from "express";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { from, Observable } from "rxjs";
 import { map, switchMap } from "rxjs/operators";
 import { ConversationService } from "./conversation.service";
 import { StartConversationDto } from "./dto/start-conversation.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
-import { UpdateConversationPreferencesDto } from "./dto/update-conversation-preferences.dto";
+import { SendImageMessageDto } from "./dto/send-image-message.dto";
 import { AuthService } from "../auth/auth.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { SessionSummaryPayload } from "./conversation-summary.types";
@@ -63,21 +70,6 @@ export class ConversationController {
     return { status: "archived" };
   }
 
-  @Post(":conversationId/preferences")
-  async updatePreferences(
-    @Param("conversationId") conversationId: string,
-    @Body() dto: UpdateConversationPreferencesDto,
-    @Req() req: Request,
-  ) {
-    const profile = await this.authService.resolveUserFromRequest(req);
-    return this.conversationService.updateSessionPreferences(
-      conversationId,
-      dto,
-      profile?.id,
-      resolveConversationKey(req),
-    );
-  }
-
   @Post(":conversationId/message")
   async sendMessage(
     @Param("conversationId") conversationId: string,
@@ -89,6 +81,42 @@ export class ConversationController {
       conversationId,
       dto,
       undefined,
+      profile?.id,
+      resolveConversationKey(req),
+    );
+  }
+
+  @Post(":conversationId/image-message")
+  @UseInterceptors(
+    FileInterceptor("image", {
+      storage: memoryStorage(),
+      limits: { fileSize: 6 * 1024 * 1024 },
+      fileFilter: (_req, file, callback) => {
+        if (!/^image\/(jpeg|jpg|png|webp|gif)$/i.test(file.mimetype)) {
+          return callback(new BadRequestException("不支持的图片格式"), false);
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  async sendImageMessage(
+    @Param("conversationId") conversationId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: SendImageMessageDto,
+    @Req() req: Request,
+  ) {
+    if (!file) {
+      throw new BadRequestException("缺少图片文件");
+    }
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.processImageMessage(
+      conversationId,
+      {
+        question: dto.message,
+        mimeType: file.mimetype,
+        buffer: file.buffer,
+        originalName: file.originalname,
+      },
       profile?.id,
       resolveConversationKey(req),
     );
@@ -221,6 +249,26 @@ export class ConversationController {
       conversationId,
       req.user!.id,
     );
+  }
+
+  @Get(":conversationId/image/:fileName")
+  async streamImageFile(
+    @Param("conversationId") conversationId: string,
+    @Param("fileName") fileName: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    const { stream, mimeType } = await this.conversationService.openImageStream(
+      conversationId,
+      fileName,
+      profile?.id,
+      resolveConversationKey(req),
+    );
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    res.setHeader("Content-Disposition", `inline; filename=\"${fileName}\"`);
+    return new StreamableFile(stream);
   }
 
   @Sse(":conversationId/events")

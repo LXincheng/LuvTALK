@@ -1,8 +1,9 @@
 import { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { History } from 'lucide-react';
+import { History, LoaderCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ChatQuickReplies, { type QuickReplyOption } from '../components/chat/ChatQuickReplies';
+import { buildChatQuickReplyOptions } from '../components/chat/chatQuickReplyGuidance';
 import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
@@ -14,16 +15,17 @@ import type { ConversationRecoveryState } from '../components/chat/ConversationR
 import { API_BASE_URL } from '../services/apiClient';
 import {
   storeConversationAccessKey,
+  fetchVoiceConfig,
   fetchConversationSummary,
   fetchConversationById,
   fetchConversationHistory,
   fetchVoiceOperationStatus,
   generateConversationReport,
   resumeConversation,
+  sendConversationImageMessage,
   sendConversationMessage,
   startConversation,
   synthesizeConversationSpeech,
-  updateConversationPreferences,
   uploadConversationVoice,
   withConversationAccessQuery,
 } from '../services/conversationService';
@@ -32,12 +34,18 @@ import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
+import { REALTIME_VOICE_OPTIONS } from '../constants/ui';
 import {
-  DEFAULT_TTS_SPEED,
-  DEFAULT_TTS_VOICE,
-  PREFERRED_RECORDING_MIMES,
-  REALTIME_VOICE_OPTIONS,
-} from '../constants/ui';
+  ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY,
+  CONVERSATION_IDS_STORAGE_KEY,
+  REALTIME_VOICE_STORAGE_KEY,
+} from '../constants/storage';
+import {
+  getDefaultTtsVoice,
+  getTtsVoiceOptions,
+  isTtsVoiceSupported,
+  setVoiceCatalog,
+} from '../config/voice';
 import { CONVERSATION_REPORT_TOAST_ID } from '../constants/report';
 import type { Annotation, ChatMode, Message, MessageStatusTone } from '../types/chat';
 import type {
@@ -48,6 +56,18 @@ import type {
   FavoriteType,
   LanguageCode,
 } from '../types/api';
+import {
+  getStoredTtsSpeed,
+  getStoredTtsVoice,
+  setStoredTtsSpeed,
+  setStoredTtsVoice,
+} from '../utils/voicePreferences';
+import {
+  formatUploadLimit,
+  getPreferredRecordingMime,
+  isVoiceRecordingSupported,
+  MAX_IMAGE_UPLOAD_BYTES,
+} from '../utils/media';
 
 interface PendingTutorReply {
   channel: 'text' | 'voice';
@@ -86,7 +106,7 @@ const getInitialTargetLanguage = (): LanguageCode => {
 const getStoredConversationIds = (): string[] => {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = window.localStorage.getItem('conversationIds');
+    const raw = window.localStorage.getItem(CONVERSATION_IDS_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -96,13 +116,34 @@ const getStoredConversationIds = (): string[] => {
 };
 
 const GUEST_MAX_HISTORY = 5;
-const ACTIVE_CONVERSATION_BY_LANGUAGE_KEY = 'activeConversationIdByLanguage';
 const MEANINGFUL_HISTORY_MIN_MESSAGES = 2;
 const NEW_CHAT_QUICK_REPLY_DELAY_MS = 1400;
 const EXISTING_CHAT_QUICK_REPLY_DELAY_MS = 5000;
-const TTS_SPEED_STORAGE_KEY = 'ttsSpeed';
+const SESSION_BOOTSTRAP_TIMEOUT_MS = 12_000;
+const SESSION_SWITCH_TIMEOUT_MS = 10_000;
 
 let startupSessionPromise: Promise<ConversationSession> | null = null;
+
+const withAsyncTimeout = <T,>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string,
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
 
 type ActiveConversationByLanguage = Partial<Record<LanguageCode, string>>;
 
@@ -112,7 +153,7 @@ const isLanguageCode = (value: unknown): value is LanguageCode =>
 const getStoredActiveConversationByLanguage = (): ActiveConversationByLanguage => {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(ACTIVE_CONVERSATION_BY_LANGUAGE_KEY);
+    const raw = window.localStorage.getItem(ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return {};
@@ -142,7 +183,7 @@ const storeActiveConversationIdByLanguage = (
   const next = getStoredActiveConversationByLanguage();
   next[language] = conversationId;
   window.localStorage.setItem(
-    ACTIVE_CONVERSATION_BY_LANGUAGE_KEY,
+    ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY,
     JSON.stringify(next),
   );
 };
@@ -154,7 +195,7 @@ const trackConversationId = (id: string) => {
   ids.unshift(id);
   // Keep at most 5 entries for guest users
   window.localStorage.setItem(
-    'conversationIds',
+    CONVERSATION_IDS_STORAGE_KEY,
     JSON.stringify(ids.slice(0, GUEST_MAX_HISTORY)),
   );
 };
@@ -205,6 +246,7 @@ const mapSessionToMessages = (
     audioUrl:
       resolveAudioUrl(message.meta?.audioUrl, session.id) ??
       ttsAudioMap[message.id],
+    imageUrl: resolveAudioUrl(message.meta?.imageUrl, session.id),
     annotations:
       message.sender === 'ai' && index > 0
         ? message.meta?.keyTerms?.map((term) => ({
@@ -351,96 +393,6 @@ const buildLocalSessionSummary = (
   };
 };
 
-const STARTER_QUICK_REPLIES: Record<LanguageCode, string[]> = {
-  cantonese: [
-    '你好呀，我想練習日常對話。',
-    '你可唔可以先問我幾條簡單問題？',
-    '今日我想練餐廳同點餐表達。',
-  ],
-  mandarin: [
-    '你好，我想练习日常聊天。',
-    '你可以先问我几个简单问题吗？',
-    '今天我想练习点餐和购物表达。',
-  ],
-  english: [
-    'Hi, I want to practice everyday conversation.',
-    'Can you ask me a few simple questions first?',
-    'Today I want to practice ordering food and shopping.',
-  ],
-};
-
-const cleanSnippet = (value?: string): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  const compact = value.replace(/\s+/g, ' ').trim();
-  if (!compact) {
-    return undefined;
-  }
-  return compact.length > 48 ? `${compact.slice(0, 48).trim()}...` : compact;
-};
-
-const buildContextAwareReplies = (
-  session: ConversationSession,
-  language: LanguageCode,
-): QuickReplyOption[] => {
-  const messages = session.messages;
-  const lastAiMessage = [...messages].reverse().find((message) => message.sender === 'ai');
-  const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
-
-  if (!lastAiMessage) {
-    return STARTER_QUICK_REPLIES[language].map((text, index) => ({
-      id: `starter-${language}-${index}`,
-      text,
-    }));
-  }
-
-  const aiText = lastAiMessage.text.trim();
-  const topic = cleanSnippet(lastUserMessage?.text ?? aiText);
-  const aiAskedQuestion = /[?？]$/.test(aiText) || /^(what|why|how|when|where|which|do|did|can|could|would|will|are|is)\b/i.test(aiText);
-
-  const byLanguage: Record<LanguageCode, string[]> = aiAskedQuestion
-    ? {
-        cantonese: [
-          topic ? `對我嚟講，${topic}都算幾常見。` : '對我嚟講，呢種情況都幾常見。',
-          '如果係我，我通常會先確認一下。',
-          '呢句可唔可以講得再自然啲？',
-        ],
-        mandarin: [
-          topic ? `对我来说，${topic}这种情况挺常见的。` : '对我来说，这种情况挺常见的。',
-          '如果是我，我通常会先确认一下。',
-          '这个说法有没有更自然的表达？',
-        ],
-        english: [
-          topic ? `For me, ${topic.toLowerCase()} is pretty common.` : 'For me, that situation is pretty common.',
-          'If it were me, I would usually confirm it first.',
-          'How can I say that in a more natural way?',
-        ],
-      }
-    : {
-        cantonese: [
-          '你可唔可以再俾我一個例句？',
-          '如果用母語者口吻，通常會點講？',
-          '我想就呢個話題再練多一輪。',
-        ],
-        mandarin: [
-          '你可以再给我一个例句吗？',
-          '如果用母语者口吻，通常会怎么说？',
-          '我想围绕这个话题再练一轮。',
-        ],
-        english: [
-          'Can you give me one more example?',
-          'How would a native speaker say this?',
-          'Can we practice one more turn on this topic?',
-        ],
-      };
-
-  return byLanguage[language].map((text, index) => ({
-    id: `reply-${session.id}-${lastAiMessage.id}-${index}`,
-    text,
-  }));
-};
-
 export default function ConversationPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
@@ -450,6 +402,8 @@ export default function ConversationPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isSessionSwitching, setIsSessionSwitching] = useState(false);
+  const [pendingLanguage, setPendingLanguage] = useState<LanguageCode | null>(null);
   const [recoveryState, setRecoveryState] = useState<ConversationRecoveryState | null>(
     'initializing',
   );
@@ -477,19 +431,14 @@ export default function ConversationPage() {
   const [nativeLanguage, setNativeLanguage] = useState<LanguageCode>(
     locale === 'zh' ? 'mandarin' : 'english',
   );
-  const [ttsVoice, setTtsVoice] = useState<string>(() => {
-    if (typeof window === 'undefined') return DEFAULT_TTS_VOICE;
-    return localStorage.getItem('ttsVoice') || DEFAULT_TTS_VOICE;
-  });
+  const [ttsVoice, setTtsVoice] = useState<string>(() =>
+    getStoredTtsVoice(getInitialTargetLanguage()),
+  );
   const [realtimeVoice, setRealtimeVoice] = useState<string>(() => {
     if (typeof window === 'undefined') return REALTIME_VOICE_OPTIONS[0].id;
-    return localStorage.getItem('realtimeVoice') || REALTIME_VOICE_OPTIONS[0].id;
+    return localStorage.getItem(REALTIME_VOICE_STORAGE_KEY) || REALTIME_VOICE_OPTIONS[0].id;
   });
-  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(() => {
-    if (typeof window === 'undefined') return DEFAULT_TTS_SPEED;
-    const stored = window.localStorage.getItem(TTS_SPEED_STORAGE_KEY);
-    return stored === 'slow' || stored === 'fast' ? stored : DEFAULT_TTS_SPEED;
-  });
+  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(getStoredTtsSpeed);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -498,6 +447,9 @@ export default function ConversationPage() {
   const ttsRequestsRef = useRef<Set<string>>(new Set());
   const [ttsAudioMap, setTtsAudioMap] = useState<Record<string, string>>({});
   const voiceDraftUrlRef = useRef<string | null>(null);
+  const imageDraftUrlRef = useRef<string | null>(null);
+  const [imageDraftFile, setImageDraftFile] = useState<File | null>(null);
+  const [imageDraftUrl, setImageDraftUrl] = useState<string | null>(null);
   const ttsAudioMapRef = useRef<Record<string, string>>({});
   const ttsVoiceRef = useRef(ttsVoice);
   const ttsSpeedRef = useRef(ttsSpeed);
@@ -509,6 +461,7 @@ export default function ConversationPage() {
   const pendingVoiceStatusTimerRef = useRef<number | null>(null);
   const voiceOperationPollTimerRef = useRef<number | null>(null);
   const voiceCompletionSyncTimerRef = useRef<number | null>(null);
+  const sessionTransitionLockRef = useRef(false);
   const activeVoiceOperationRef = useRef<ActiveVoiceOperation | null>(null);
   const pendingTutorReplyRef = useRef<PendingTutorReply | null>(null);
   const focusBufferRef = useRef(0);
@@ -517,13 +470,31 @@ export default function ConversationPage() {
   const lastSummaryAiCountRef = useRef(0);
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
-  const [isPreferenceSaving, setIsPreferenceSaving] = useState(false);
   const [quickReplyOptions, setQuickReplyOptions] = useState<QuickReplyOption[]>([]);
   const [quickRepliesVisible, setQuickRepliesVisible] = useState(false);
   const [dismissedQuickReplyKey, setDismissedQuickReplyKey] = useState<string | null>(null);
   const targetLanguageRef = useRef<LanguageCode>(targetLanguage);
   const nativeLanguageRef = useRef<LanguageCode>(nativeLanguage);
   const quickReplyTimerRef = useRef<number | null>(null);
+  const ttsVoiceOptions = useMemo(
+    () => getTtsVoiceOptions(targetLanguage),
+    [targetLanguage],
+  );
+
+  useEffect(() => {
+    void fetchVoiceConfig()
+      .then((catalog) => {
+        setVoiceCatalog(catalog);
+        setTtsVoice((currentVoice) =>
+          isTtsVoiceSupported(targetLanguageRef.current, currentVoice)
+            ? currentVoice
+            : getDefaultTtsVoice(targetLanguageRef.current),
+        );
+      })
+      .catch(() => {
+        // Keep local fallback catalog when the server config is unavailable.
+      });
+  }, []);
 
   const syncActiveSession = useCallback((nextSession: ConversationSession) => {
     setSession(nextSession);
@@ -534,6 +505,24 @@ export default function ConversationPage() {
       trackConversationId(nextSession.id);
       storeConversationAccessKey(nextSession.id, nextSession.accessKey);
     }
+  }, []);
+
+  const beginSessionTransition = useCallback((language?: LanguageCode) => {
+    if (sessionTransitionLockRef.current) {
+      return false;
+    }
+    sessionTransitionLockRef.current = true;
+    setIsSessionSwitching(true);
+    setPendingLanguage(language ?? null);
+    setIsInitializing(true);
+    return true;
+  }, []);
+
+  const finishSessionTransition = useCallback(() => {
+    sessionTransitionLockRef.current = false;
+    setIsSessionSwitching(false);
+    setPendingLanguage(null);
+    setIsInitializing(false);
   }, []);
 
   useEffect(() => {
@@ -683,7 +672,7 @@ export default function ConversationPage() {
             hasTriggeredSnapshotPull = true;
             void fetchConversationById(session.id)
               .then((latestSession) => {
-                setSession(latestSession);
+                syncActiveSession(latestSession);
               })
               .catch(() => {
                 // Best-effort pull; SSE remains primary source of truth.
@@ -719,7 +708,7 @@ export default function ConversationPage() {
           const aiCount = latestSession.messages.filter(
             (message) => message.sender === 'ai',
           ).length;
-          setSession(latestSession);
+          syncActiveSession(latestSession);
           if (aiCount > baseAiCount) {
             return;
           }
@@ -739,7 +728,7 @@ export default function ConversationPage() {
           }, 250);
         });
     },
-    [clearVoiceCompletionSync],
+    [clearVoiceCompletionSync, syncActiveSession],
   );
 
   const startVoiceOperationPoll = useCallback(
@@ -822,7 +811,11 @@ export default function ConversationPage() {
     try {
       const runBootstrap = async (): Promise<ConversationSession> => {
         const ids = getStoredConversationIds();
-        const history = await fetchConversationHistory(ids).catch(
+        const history = await withAsyncTimeout(
+          fetchConversationHistory(ids),
+          SESSION_SWITCH_TIMEOUT_MS,
+          'SESSION_HISTORY_TIMEOUT',
+        ).catch(
           () => [] as ConversationHistorySummary[],
         );
         const normalizedHistory = normalizeHistoryList(history);
@@ -841,13 +834,25 @@ export default function ConversationPage() {
             history.find((item) => item.id === activeConversationId) ??
             history.find(isMeaningfulHistoryItem) ??
             history[0];
-          return fetchConversationById(preferred.id);
+          try {
+            return await withAsyncTimeout(
+              fetchConversationById(preferred.id),
+              SESSION_SWITCH_TIMEOUT_MS,
+              'SESSION_FETCH_TIMEOUT',
+            );
+          } catch {
+            // Stale guest history or a dropped DB connection should not block boot.
+          }
         }
 
-        return resumeConversation({
-          targetLanguage: targetLanguageRef.current,
-          nativeLanguage: nativeLanguageRef.current,
-        });
+        return withAsyncTimeout(
+          resumeConversation({
+            targetLanguage: targetLanguageRef.current,
+            nativeLanguage: nativeLanguageRef.current,
+          }),
+          SESSION_BOOTSTRAP_TIMEOUT_MS,
+          'SESSION_RESUME_TIMEOUT',
+        );
       };
 
       const inFlight =
@@ -905,22 +910,22 @@ export default function ConversationPage() {
   }, [chatMode]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('ttsVoice', ttsVoice);
-    }
-  }, [ttsVoice]);
+    setStoredTtsVoice(targetLanguage, ttsVoice);
+  }, [targetLanguage, ttsVoice]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('realtimeVoice', realtimeVoice);
+      window.localStorage.setItem(REALTIME_VOICE_STORAGE_KEY, realtimeVoice);
     }
   }, [realtimeVoice]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(TTS_SPEED_STORAGE_KEY, ttsSpeed);
-    }
+    setStoredTtsSpeed(ttsSpeed);
   }, [ttsSpeed]);
+
+  useEffect(() => {
+    setTtsVoice(getStoredTtsVoice(targetLanguage));
+  }, [targetLanguage]);
 
   useEffect(() => {
     ttsAudioMapRef.current = ttsAudioMap;
@@ -957,14 +962,8 @@ export default function ConversationPage() {
     if (!session) {
       return [];
     }
-    if (isNewChatSession) {
-      return STARTER_QUICK_REPLIES[session.targetLanguage].map((text, index) => ({
-        id: `starter-${session.targetLanguage}-${index}`,
-        text,
-      }));
-    }
-    return buildContextAwareReplies(session, session.targetLanguage);
-  }, [isNewChatSession, session]);
+    return buildChatQuickReplyOptions(session);
+  }, [session]);
   const refreshSessionSummary = useCallback(async () => {
     if (!session?.id) {
       setSessionSummary(null);
@@ -1254,7 +1253,7 @@ export default function ConversationPage() {
     try {
       if (session?.id) {
         const latest = await fetchConversationById(session.id);
-        setSession(latest);
+        syncActiveSession(latest);
       } else {
         await loadOrResumeSession();
       }
@@ -1264,7 +1263,7 @@ export default function ConversationPage() {
       setRecoveryState('error');
       setRecoveryReason(session?.id ? 'stream_unavailable' : 'init_failed');
     }
-  }, [clearStreamRecoveryTimer, loadOrResumeSession, session?.id]);
+  }, [clearStreamRecoveryTimer, loadOrResumeSession, session?.id, syncActiveSession]);
 
   useEffect(() => {
     if (!session?.id || chatMode === 'immersive') {
@@ -1292,7 +1291,7 @@ export default function ConversationPage() {
         clearStreamRecoveryTimer();
         setRecoveryState(null);
         setRecoveryReason(undefined);
-        setSession(payload);
+        syncActiveSession(payload);
       } catch {
         toast.error(t('streamParseError'), { id: 'stream' });
       }
@@ -1333,7 +1332,7 @@ export default function ConversationPage() {
       toast.dismiss('stream');
       clearStreamRecoveryTimer();
     };
-  }, [chatMode, clearStreamRecoveryTimer, session?.id, t]);
+  }, [chatMode, clearStreamRecoveryTimer, session?.id, syncActiveSession, t]);
 
   useEffect(() => {
     const prevMode = prevChatModeRef.current;
@@ -1347,7 +1346,7 @@ export default function ConversationPage() {
         if (cancelled) {
           return;
         }
-        setSession(latestSession);
+        syncActiveSession(latestSession);
       })
       .catch(() => {
         // Snapshot pull is best-effort; SSE will continue syncing.
@@ -1355,7 +1354,7 @@ export default function ConversationPage() {
     return () => {
       cancelled = true;
     };
-  }, [chatMode, session?.id]);
+  }, [chatMode, session?.id, syncActiveSession]);
 
   useEffect(() => {
     if (!session?.id || isInitializing) {
@@ -1418,6 +1417,12 @@ export default function ConversationPage() {
       URL.revokeObjectURL(voiceDraftUrlRef.current);
       voiceDraftUrlRef.current = null;
     }
+    if (imageDraftUrlRef.current) {
+      URL.revokeObjectURL(imageDraftUrlRef.current);
+      imageDraftUrlRef.current = null;
+    }
+    setImageDraftFile(null);
+    setImageDraftUrl(null);
   }, [clearPendingTutorReply, session?.id]);
 
   useEffect(() => {
@@ -1538,28 +1543,57 @@ export default function ConversationPage() {
       if (voiceDraftUrlRef.current) {
         URL.revokeObjectURL(voiceDraftUrlRef.current);
       }
+      if (imageDraftUrlRef.current) {
+        URL.revokeObjectURL(imageDraftUrlRef.current);
+      }
     };
   }, [clearPendingTutorReply, clearStreamRecoveryTimer]);
 
   const handleSelectConversation = async (conversationId: string) => {
+    if (isSending || isSessionSwitching || !beginSessionTransition()) {
+      return;
+    }
     setIsInitializing(true);
     setHistoryDrawerOpen(false);
     try {
-      const nextSession = await fetchConversationById(conversationId);
+      const selectedLanguage =
+        conversationHistory.find((item) => item.id === conversationId)?.targetLanguage ??
+        targetLanguageRef.current;
+      let nextSession: ConversationSession;
+      try {
+        nextSession = await withAsyncTimeout(
+          fetchConversationById(conversationId),
+          SESSION_SWITCH_TIMEOUT_MS,
+          'SESSION_FETCH_TIMEOUT',
+        );
+      } catch {
+        nextSession = await withAsyncTimeout(
+          resumeConversation({
+            targetLanguage: selectedLanguage,
+            nativeLanguage: nativeLanguageRef.current,
+            conversationId,
+          }),
+          SESSION_BOOTSTRAP_TIMEOUT_MS,
+          'SESSION_RESUME_TIMEOUT',
+        );
+      }
       syncActiveSession(nextSession);
     } catch {
       toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
-      setIsInitializing(false);
+      finishSessionTransition();
     }
   };
 
   const handleNewChat = async () => {
-    setHistoryDrawerOpen(false);
-    if (isFreshSession(session)) {
+    if (isSending || isSessionSwitching || !beginSessionTransition()) {
       return;
     }
-    setIsInitializing(true);
+    setHistoryDrawerOpen(false);
+    if (isFreshSession(session)) {
+      finishSessionTransition();
+      return;
+    }
     try {
       const newSession = await startConversation({
         targetLanguage,
@@ -1570,16 +1604,21 @@ export default function ConversationPage() {
     } catch {
       toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
-      setIsInitializing(false);
+      finishSessionTransition();
     }
   };
 
   const handleTargetLanguageChange = async (language: LanguageCode) => {
+    if (isSending || isSessionSwitching) {
+      return;
+    }
     if (!session || language === session.targetLanguage) {
       setTargetLanguage(language);
       return;
     }
-    setIsInitializing(true);
+    if (!beginSessionTransition(language)) {
+      return;
+    }
     try {
       const cachedMatch = conversationHistory.find(
         (item) => item.targetLanguage === language,
@@ -1598,16 +1637,33 @@ export default function ConversationPage() {
         history.find((item) => item.targetLanguage === language);
       let nextSession: ConversationSession;
       if (matchedHistory) {
-        nextSession = await fetchConversationById(matchedHistory.id);
+        try {
+          nextSession = await withAsyncTimeout(
+            fetchConversationById(matchedHistory.id),
+            SESSION_SWITCH_TIMEOUT_MS,
+            'SESSION_FETCH_TIMEOUT',
+          );
+        } catch {
+          nextSession = await withAsyncTimeout(
+            resumeConversation({
+              targetLanguage: language,
+              nativeLanguage: nativeLanguageRef.current,
+              conversationId: matchedHistory.id,
+            }),
+            SESSION_BOOTSTRAP_TIMEOUT_MS,
+            'SESSION_RESUME_TIMEOUT',
+          );
+        }
       } else {
-        const preferredConversationId = getStoredActiveConversationIdByLanguage(
-          language,
+        nextSession = await withAsyncTimeout(
+          resumeConversation({
+            targetLanguage: language,
+            nativeLanguage: nativeLanguageRef.current,
+            conversationId: getStoredActiveConversationIdByLanguage(language),
+          }),
+          SESSION_BOOTSTRAP_TIMEOUT_MS,
+          'SESSION_RESUME_TIMEOUT',
         );
-        nextSession = await resumeConversation({
-          targetLanguage: language,
-          nativeLanguage: nativeLanguageRef.current,
-          conversationId: preferredConversationId,
-        });
       }
       syncActiveSession(nextSession);
       void loadHistory();
@@ -1615,7 +1671,7 @@ export default function ConversationPage() {
       setTargetLanguage(session.targetLanguage);
       toast.error(t('sessionInitError'), { id: 'session-init' });
     } finally {
-      setIsInitializing(false);
+      finishSessionTransition();
     }
   };
 
@@ -1626,38 +1682,6 @@ export default function ConversationPage() {
     }
     setChatMode(nextMode);
   };
-
-  const handleToggleDeepThinking = useCallback(async () => {
-    if (!session || isPreferenceSaving) {
-      return;
-    }
-    const conversationId = session.id;
-    const previousValue = session.deepThinkingEnabled === true;
-    const nextValue = !previousValue;
-    setIsPreferenceSaving(true);
-    setSession((prev) =>
-      prev && prev.id === conversationId
-        ? { ...prev, deepThinkingEnabled: nextValue }
-        : prev,
-    );
-    try {
-      const updatedSession = await updateConversationPreferences(conversationId, {
-        deepThinkingEnabled: nextValue,
-      });
-      setSession((prev) =>
-        prev && prev.id === updatedSession.id ? updatedSession : prev,
-      );
-    } catch {
-      setSession((prev) =>
-        prev && prev.id === conversationId
-          ? { ...prev, deepThinkingEnabled: previousValue }
-          : prev,
-      );
-      toast.error(t('deepThinkingSaveError'), { id: 'session-preferences' });
-    } finally {
-      setIsPreferenceSaving(false);
-    }
-  }, [isPreferenceSaving, session, t]);
 
   const handleSend = useCallback(async (overrideText?: string) => {
     const messageText = (overrideText ?? inputValue).trim();
@@ -1683,7 +1707,7 @@ export default function ConversationPage() {
         chatMode,
       );
       clearPendingTutorReply();
-      setSession(nextSession);
+      syncActiveSession(nextSession);
       setOptimisticMessages([]);
       setRecoveryState(null);
       setRecoveryReason(undefined);
@@ -1759,8 +1783,41 @@ export default function ConversationPage() {
     updateOptimisticVoiceStatus(t('voiceWaiting'), 'waiting');
   };
 
+  const clearImageDraft = useCallback(() => {
+    setImageDraftFile(null);
+    setImageDraftUrl((current) => {
+      if (current) {
+        URL.revokeObjectURL(current);
+      }
+      return null;
+    });
+    imageDraftUrlRef.current = null;
+  }, []);
+
+  const handleImageFileSelect = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.warning(t('imageUnsupported'), { id: 'image-upload-type' });
+      return;
+    }
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
+      toast.warning(
+        t('imageTooLarge').replace('{size}', formatUploadLimit(MAX_IMAGE_UPLOAD_BYTES)),
+        { id: 'image-upload-limit' },
+      );
+      return;
+    }
+    const nextUrl = URL.createObjectURL(file);
+    if (imageDraftUrlRef.current) {
+      URL.revokeObjectURL(imageDraftUrlRef.current);
+    }
+    imageDraftUrlRef.current = nextUrl;
+    setImageDraftFile(file);
+    setImageDraftUrl(nextUrl);
+    toast.success(t('imageFileSelected'), { id: 'image-upload-picked' });
+  }, [t]);
+
   const startRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    if (!isVoiceRecordingSupported()) {
       toast.warning(t('voiceUnsupported'), { id: 'voice' });
       return;
     }
@@ -1770,9 +1827,7 @@ export default function ConversationPage() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const supportedType = PREFERRED_RECORDING_MIMES.find((type) =>
-        MediaRecorder.isTypeSupported(type),
-      );
+      const supportedType = getPreferredRecordingMime();
       const options = supportedType ? { mimeType: supportedType } : undefined;
       const recorder = new MediaRecorder(stream, options);
       streamRef.current = stream;
@@ -1840,6 +1895,67 @@ export default function ConversationPage() {
     }
   };
 
+  const handleSendImage = useCallback(async () => {
+    if (!session || !imageDraftFile || isSending) {
+      return;
+    }
+    const messageText = inputValue.trim();
+    const draftFile = imageDraftFile;
+    const draftUrl = imageDraftUrl;
+    setIsSending(true);
+    setQuickRepliesVisible(false);
+    setDismissedQuickReplyKey(quickReplySuggestionKey);
+    const optimisticUser = buildOptimisticUserMessage(
+      messageText || t('imageMessageLabel'),
+      undefined,
+    );
+    optimisticUser.imageUrl = draftUrl ?? undefined;
+    const loadingMessage = buildTutorLoadingMessage();
+    setOptimisticMessages([optimisticUser, loadingMessage]);
+    beginPendingTutorReply('text', optimisticUser.id, loadingMessage.id);
+    setInputValue('');
+    setImageDraftFile(null);
+    setImageDraftUrl(null);
+    imageDraftUrlRef.current = null;
+
+    try {
+      const nextSession = await sendConversationImageMessage(
+        session.id,
+        draftFile,
+        messageText,
+      );
+      clearPendingTutorReply();
+      if (draftUrl) {
+        URL.revokeObjectURL(draftUrl);
+      }
+      syncActiveSession(nextSession);
+      setOptimisticMessages([]);
+      setRecoveryState(null);
+      setRecoveryReason(undefined);
+    } catch {
+      clearPendingTutorReply();
+      toast.error(t('imageSendError'), { id: 'image-send' });
+      setOptimisticMessages([]);
+      setInputValue(messageText);
+      setImageDraftFile(draftFile);
+      setImageDraftUrl(draftUrl);
+      imageDraftUrlRef.current = draftUrl ?? null;
+    } finally {
+      setIsSending(false);
+    }
+  }, [
+    beginPendingTutorReply,
+    clearPendingTutorReply,
+    imageDraftFile,
+    imageDraftUrl,
+    inputValue,
+    isSending,
+    quickReplySuggestionKey,
+    session,
+    syncActiveSession,
+    t,
+  ]);
+
   useEffect(() => {
     if (chatMode !== 'immersive') {
       return;
@@ -1851,7 +1967,7 @@ export default function ConversationPage() {
   }, [chatMode]);
 
   const messageList = (
-    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+    <div className="flex-1 overflow-y-auto px-4 pt-6 pb-16 space-y-3 md:pb-16">
       <AnimatePresence>
         {mergedMessages.map((message) => (
           <motion.div
@@ -1864,6 +1980,7 @@ export default function ConversationPage() {
             <MessageBubble
               message={message}
               onSaveVocabulary={handleSaveVocabulary}
+              showTranslation={targetLanguage !== 'english'}
             />
           </motion.div>
         ))}
@@ -1881,47 +1998,23 @@ export default function ConversationPage() {
       hideVoice={chatMode === 'text'}
       placeholder={t('placeholder')}
       recordingLabel={t('recording')}
+      imagePreviewUrl={imageDraftUrl}
+      imageButtonLabel={t('imageUploadAction')}
       onChange={setInputValue}
       onSend={() => {
+        if (imageDraftFile) {
+          void handleSendImage();
+          return;
+        }
         void handleSend();
       }}
       onToggleRecording={toggleRecording}
+      onImageFileSelect={handleImageFileSelect}
+      onClearImage={clearImageDraft}
     />
   );
 
-  const deepThinkingEnabled = session?.deepThinkingEnabled === true;
-  const deepThinkingStatusText = deepThinkingEnabled ? t('deepThinkingOn') : t('deepThinkingOff');
-  const deepThinkingToggleControl = (
-    <button
-      type="button"
-      onClick={() => {
-        void handleToggleDeepThinking();
-      }}
-      disabled={!session || isInitializing || isPreferenceSaving}
-      className="press-scale inline-flex items-center gap-2 rounded-lg border border-separator glass-card px-2.5 py-1.5 text-xs text-label-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      title={t('deepThinkingToggle')}
-      aria-label={`${t('deepThinkingToggle')} ${deepThinkingStatusText}`}
-      aria-pressed={deepThinkingEnabled}
-    >
-      <span
-        className={`relative h-5 w-9 rounded-full transition-colors ${
-          deepThinkingEnabled
-            ? 'bg-success'
-            : 'bg-fill'
-        }`}
-      >
-        <span
-          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-            deepThinkingEnabled ? 'translate-x-4' : ''
-          }`}
-        />
-      </span>
-      <span className="font-medium">{t('deepThinkingToggle')}</span>
-      <span className="text-[11px] text-label-tertiary">
-        {deepThinkingStatusText}
-      </span>
-    </button>
-  );
+  const disableSessionButtons = isInitializing || isSessionSwitching || isSending;
 
   if (chatMode === 'immersive') {
     if (!session?.id) {
@@ -1970,12 +2063,12 @@ export default function ConversationPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-surface">
+    <div className="page-shell h-full flex flex-col">
       {historyDrawerMounted && (
         <Suspense
           fallback={(
             <div className="fixed inset-0 z-50">
-              <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" />
+              <div className="absolute inset-0 bg-black/40" />
               <div className="absolute left-0 top-0 bottom-0 w-[84vw] max-w-sm border-r border-separator glass-sidebar p-4">
                 <div className="animate-pulse space-y-3">
                   <div className="h-5 w-24 rounded bg-fill" />
@@ -1996,11 +2089,12 @@ export default function ConversationPage() {
             onSelectConversation={handleSelectConversation}
             onNewChat={handleNewChat}
             isLoading={isLoadingHistory}
+            isDisabled={disableSessionButtons}
           />
         </Suspense>
       )}
 
-      <div className="border-b border-separator glass-card">
+      <div className="border-b border-separator bg-[var(--surface-panel)]">
         {/* Mobile */}
         <div className="flex flex-col md:hidden">
           <div className="flex items-center gap-1.5 px-2 py-2 min-w-0">
@@ -2027,19 +2121,24 @@ export default function ConversationPage() {
               {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
                 (language) => {
                   const isActive = targetLanguage === language;
+                  const isPending = pendingLanguage === language && isSessionSwitching;
                   return (
                     <button
                       key={language}
                       onClick={() => {
                         void handleTargetLanguageChange(language);
                       }}
+                      disabled={disableSessionButtons}
                       className={`press-scale px-2 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                         isActive
                           ? 'glass-button text-white'
                           : 'text-label-secondary hover:bg-fill-secondary'
-                      }`}
+                      } disabled:cursor-not-allowed disabled:opacity-45`}
                     >
-                      {targetLanguageLabels[language]}
+                      <span className="inline-flex items-center gap-1.5">
+                        {isPending ? <LoaderCircle className="h-3 w-3 animate-spin" /> : null}
+                        {targetLanguageLabels[language]}
+                      </span>
                     </button>
                   );
                 },
@@ -2049,15 +2148,19 @@ export default function ConversationPage() {
               <>
                 <div className="w-px h-5 bg-separator shrink-0" />
                 <div className="shrink-0">
-                  <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
+                  <VoiceStyleSelector
+                    value={ttsVoice}
+                    onChange={setTtsVoice}
+                    options={ttsVoiceOptions}
+                    compact
+                    disabled={disableSessionButtons}
+                  />
                 </div>
                 <div className="shrink-0">
                   <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
                 </div>
               </>
             )}
-            <div className="w-px h-5 bg-separator shrink-0" />
-            <div className="shrink-0">{deepThinkingToggleControl}</div>
           </div>
         </div>
 
@@ -2080,24 +2183,32 @@ export default function ConversationPage() {
                 {session?.title || t('chatTitle')}
               </h2>
               <div className="flex items-center gap-1 mt-1 overflow-x-auto scrollbar-none">
-                <span className="text-xs text-label-tertiary shrink-0">{t('learningLanguage')}</span>
+                <span className="inline-flex items-center gap-1.5 text-xs text-label-tertiary shrink-0">
+                  {t('learningLanguage')}
+                  {isSessionSwitching ? <LoaderCircle className="h-3 w-3 animate-spin" /> : null}
+                </span>
                 <div className="inline-flex items-center gap-0.5 border border-separator rounded-lg p-0.5 glass-card shrink-0">
                   {(Object.keys(targetLanguageLabels) as LanguageCode[]).map(
                     (language) => {
                       const isActive = targetLanguage === language;
+                      const isPending = pendingLanguage === language && isSessionSwitching;
                       return (
                         <button
                           key={language}
                           onClick={() => {
                             void handleTargetLanguageChange(language);
                           }}
+                          disabled={disableSessionButtons}
                           className={`press-scale px-2 py-0.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                             isActive
                               ? 'glass-button text-white'
                               : 'text-label-secondary hover:bg-fill-secondary'
-                          }`}
+                          } disabled:cursor-not-allowed disabled:opacity-45`}
                         >
-                          {targetLanguageLabels[language]}
+                          <span className="inline-flex items-center gap-1.5">
+                            {isPending ? <LoaderCircle className="h-3 w-3 animate-spin" /> : null}
+                            {targetLanguageLabels[language]}
+                          </span>
                         </button>
                       );
                     },
@@ -2105,12 +2216,17 @@ export default function ConversationPage() {
                 </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-2 lg:gap-3 shrink-0 min-w-0">
-            {deepThinkingToggleControl}
+        </div>
+        <div className="flex items-center gap-2 lg:gap-3 shrink-0 min-w-0">
             {chatMode !== 'text' && (
               <>
-                <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
+                <VoiceStyleSelector
+                  value={ttsVoice}
+                  onChange={setTtsVoice}
+                  options={ttsVoiceOptions}
+                  compact
+                  disabled={disableSessionButtons}
+                />
                 <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
               </>
             )}

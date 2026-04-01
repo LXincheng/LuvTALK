@@ -22,10 +22,10 @@ export default function SessionSummaryCard({
   }
 
   return (
-    <section className="relative mx-3 mt-2 mb-1 overflow-hidden rounded-2xl border border-separator bg-white/92 shadow-[0_2px_8px_rgba(15,23,42,0.04)] backdrop-blur-[16px] sm:mx-4 dark:bg-[rgba(24,24,27,0.88)]">
+    <section className="page-panel relative mx-3 mt-2 mb-1 overflow-hidden rounded-2xl sm:mx-4">
       {/* Header row: badge + metrics + controls */}
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 sm:px-4">
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-separator bg-white/70 px-2 py-0.5 text-xs text-label-secondary dark:bg-white/8">
+        <span className="page-chip inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs text-label-secondary">
           <Sparkles className="h-3 w-3 text-primary" />
           <span className="hidden sm:inline">{t('sessionSummaryTitle')}</span>
         </span>
@@ -49,7 +49,7 @@ export default function SessionSummaryCard({
             type="button"
             onClick={onRefresh}
             disabled={isLoading}
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-separator bg-white/60 text-label-tertiary transition hover:bg-white/80 disabled:opacity-50 dark:bg-white/5"
+            className="page-chip flex h-7 w-7 items-center justify-center rounded-full text-label-tertiary transition hover:bg-fill-secondary disabled:opacity-50"
             aria-label={t('commonRetry')}
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -58,7 +58,7 @@ export default function SessionSummaryCard({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-separator bg-white/60 text-label-tertiary transition hover:bg-white/80 dark:bg-white/5"
+              className="page-chip flex h-7 w-7 items-center justify-center rounded-full text-label-tertiary transition hover:bg-fill-secondary"
               aria-label={expanded ? t('sessionSummaryCollapse') : t('sessionSummaryExpand')}
             >
               <ChevronDown className={`h-3.5 w-3.5 transition ${expanded ? 'rotate-180' : ''}`} />
@@ -83,7 +83,7 @@ export default function SessionSummaryCard({
             </p>
           ) : null}
           {summary.keyTerms[0] ? (
-            <span className="mt-1.5 inline-block rounded-full border border-separator bg-white/72 px-2.5 py-0.5 text-xs text-label-secondary dark:bg-white/8">
+            <span className="page-chip mt-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs text-label-secondary">
               {summary.keyTerms[0].term}
             </span>
           ) : null}

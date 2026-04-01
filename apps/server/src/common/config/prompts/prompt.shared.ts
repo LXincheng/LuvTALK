@@ -36,6 +36,8 @@ export const buildPromptContext = (
     scenarioGoals: scenarioDefinition.taskGoals,
     scenarioFocus: scenarioDefinition.followUpFocus,
     coachingFocus: scenarioDefinition.coachingFocus,
+    roleplayRules: scenarioDefinition.roleplayRules,
+    completionSignals: scenarioDefinition.completionSignals,
     interactionMode,
     learnerLevel,
   };

@@ -19,7 +19,7 @@ export default function VoiceSpeedSelector({
   const { t } = useLocale();
 
   return (
-    <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none border border-separator rounded-lg p-0.5 glass-card">
+    <div className="page-panel inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-lg p-0.5 scrollbar-none">
       <Gauge className="ml-1.5 h-3.5 w-3.5 shrink-0 text-label-tertiary" />
       {TTS_SPEED_OPTIONS.map((opt) => {
         const isActive = value === opt.id;

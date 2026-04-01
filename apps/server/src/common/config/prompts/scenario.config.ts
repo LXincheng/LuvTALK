@@ -15,6 +15,9 @@ export interface ScenarioPromptDefinition {
   taskGoals: string[];
   followUpFocus: string[];
   coachingFocus: string[];
+  roleplayRules: string[];
+  completionSignals: string[];
+  reportFocus: string[];
 }
 
 const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
@@ -43,6 +46,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       "more natural openings and follow-up questions",
       "smoother rhythm and less literal phrasing",
     ],
+    roleplayRules: [
+      "stay as a real conversation partner instead of a teacher giving mini lectures",
+      "respond to what the learner just said before moving the scene forward",
+      "keep the small-talk topic coherent instead of jumping to unrelated examples",
+    ],
+    completionSignals: [
+      "the learner greeted naturally and shared one concrete update",
+      "the learner handled at least one follow-up smoothly",
+      "the conversation reached a natural pause or closing line",
+    ],
+    reportFocus: [
+      "whether the learner kept the topic coherent across turns",
+      "whether the learner sounded natural in short back-and-forth exchange",
+      "whether the learner added detail instead of giving isolated one-line answers",
+    ],
   },
   {
     key: "business",
@@ -68,6 +86,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
     coachingFocus: [
       "register, politeness, and concise business phrasing",
       "clear action-oriented wording",
+    ],
+    roleplayRules: [
+      "stay inside a realistic business meetup and avoid generic classroom coaching",
+      "sound professional, concise, and socially appropriate",
+      "push the exchange toward a clear purpose, next step, or timing confirmation",
+    ],
+    completionSignals: [
+      "the learner opened professionally",
+      "the learner stated a purpose or agenda item clearly",
+      "the learner confirmed one next action or timeline detail",
+    ],
+    reportFocus: [
+      "professional tone and etiquette control",
+      "clarity of purpose and next-step language",
+      "concise business phrasing without sounding stiff",
     ],
   },
   {
@@ -95,6 +128,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       "polite request framing and concise travel vocabulary",
       "front-desk etiquette and confirmation phrases",
     ],
+    roleplayRules: [
+      "stay as a front-desk receptionist and keep the check-in flow realistic",
+      "ask only the next useful front-desk question instead of expanding into travel advice",
+      "close naturally once reservation, stay details, and extra request are settled",
+    ],
+    completionSignals: [
+      "reservation identity or booking details were confirmed",
+      "room, date, or stay preference was clearly stated",
+      "one extra guest request was handled or acknowledged",
+    ],
+    reportFocus: [
+      "whether the learner completed the core check-in flow",
+      "politeness and clarity in requests",
+      "ability to answer follow-up questions without drifting off-task",
+    ],
   },
   {
     key: "doctor_visit_fever",
@@ -120,6 +168,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
     coachingFocus: [
       "health vocabulary and time expressions",
       "clear symptom sequencing and concise answers",
+    ],
+    roleplayRules: [
+      "stay as a doctor gathering symptoms, not a lecturer explaining medicine theory",
+      "ask focused follow-up questions based on the learner's symptoms",
+      "keep the dialogue clinically natural and finish after the main complaint is clarified",
+    ],
+    completionSignals: [
+      "main symptom and duration were stated clearly",
+      "medicine, temperature, or condition details were added",
+      "at least one focused follow-up question was answered clearly",
+    ],
+    reportFocus: [
+      "symptom clarity and sequencing",
+      "accuracy when answering follow-up questions",
+      "ability to keep medical details concise and relevant",
     ],
   },
   {
@@ -148,6 +211,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       "service politeness, modifiers, and ordering phrases",
       "more natural request phrasing instead of literal translation",
     ],
+    roleplayRules: [
+      "stay as a server and keep the exchange moving like a real order flow",
+      "focus on order, preference, and payment details instead of random food discussion",
+      "wrap up naturally once the meal choice and final confirmation are done",
+    ],
+    completionSignals: [
+      "a main item or drink was ordered",
+      "a flavor or ingredient preference was added",
+      "takeaway, payment, or final confirmation was completed",
+    ],
+    reportFocus: [
+      "whether the learner completed the order flow end to end",
+      "naturalness of service interactions and concise requests",
+      "clarity when adding preferences or final confirmations",
+    ],
   },
   {
     key: "shopping_in_store",
@@ -175,6 +253,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       "retail vocabulary, size/price questions, and polite requests",
       "clear sequence from browsing to decision-making",
     ],
+    roleplayRules: [
+      "stay as a shop assistant helping a purchase decision in real time",
+      "keep the dialogue tied to product, size, price, fitting, stock, or payment",
+      "close naturally once the learner reaches a buying or checking decision",
+    ],
+    completionSignals: [
+      "the item was identified clearly",
+      "size, price, color, or fit was asked about",
+      "a fitting, stock, discount, or payment detail was confirmed",
+    ],
+    reportFocus: [
+      "clarity of product questions",
+      "ability to progress from browsing to decision-making",
+      "natural retail phrasing and follow-up control",
+    ],
   },
   {
     key: "asking_directions",
@@ -201,6 +294,21 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
     coachingFocus: [
       "place names, route questions, and travel clarity",
       "natural follow-up wording for directions",
+    ],
+    roleplayRules: [
+      "stay as a passerby or driver giving practical route help",
+      "keep the exchange grounded in destination, route, time, distance, or taxi choice",
+      "finish naturally once the route is clear enough to act on",
+    ],
+    completionSignals: [
+      "the destination was stated clearly",
+      "route or travel time was asked about and clarified",
+      "one more practical follow-up about the route or taxi was handled",
+    ],
+    reportFocus: [
+      "clarity of destination and route questions",
+      "practical usefulness of the learner's follow-ups",
+      "ability to keep travel talk short, direct, and actionable",
     ],
   },
 ];

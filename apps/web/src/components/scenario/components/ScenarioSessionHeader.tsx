@@ -26,12 +26,12 @@ export default function ScenarioSessionHeader({
   settingsContent,
 }: ScenarioSessionHeaderProps) {
   return (
-    <div className="border-b border-separator glass-card">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-3 py-3 sm:px-4">
+    <div className="border-b border-separator bg-[var(--surface-panel)]">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-3 py-3 sm:px-4">
         <div className="flex items-center gap-2.5">
           <Link
             to={backTo}
-            className="press-scale inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-fill-secondary text-label-secondary transition-colors hover:bg-fill"
+            className="page-chip press-scale inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] text-label-secondary transition-colors hover:bg-fill-secondary"
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
@@ -43,19 +43,17 @@ export default function ScenarioSessionHeader({
                 {title}
               </h2>
             </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[12px] leading-5 text-label-tertiary sm:text-[12.5px]">
-              <span>{languageLabel}</span>
-              <span className="text-label-quaternary">·</span>
-              <span>{turnLabel}</span>
-              <span className="text-label-quaternary">·</span>
-              <span className="truncate">{stageLabel}</span>
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2 text-[12px] leading-5 text-label-tertiary sm:text-[12.5px]">
+              <span className="page-chip inline-flex h-7 items-center rounded-full px-3">{languageLabel}</span>
+              <span className="page-chip inline-flex h-7 items-center rounded-full px-3">{turnLabel}</span>
+              <span className="page-chip inline-flex h-7 max-w-full items-center truncate rounded-full px-3">{stageLabel}</span>
             </div>
           </div>
 
           <button
             type="button"
             onClick={onEnd}
-            className="press-scale inline-flex h-10 min-w-[108px] shrink-0 items-center justify-center rounded-[14px] bg-primary px-4 text-sm font-medium text-white"
+            className="press-scale inline-flex h-10 min-w-[108px] shrink-0 items-center justify-center rounded-[14px] bg-primary px-4 text-sm font-medium text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)]"
           >
             {endLabel}
           </button>

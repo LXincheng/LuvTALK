@@ -12,6 +12,7 @@ interface ChatHistoryDrawerProps {
   onSelectConversation: (id: string) => void;
   onNewChat: () => void;
   isLoading: boolean;
+  isDisabled?: boolean;
 }
 
 function formatRelativeTime(dateStr: string, locale: string, t: (key: LocaleKey) => string): string {
@@ -42,6 +43,7 @@ export default function ChatHistoryDrawer({
   onSelectConversation,
   onNewChat,
   isLoading,
+  isDisabled = false,
 }: ChatHistoryDrawerProps) {
   const { t, locale } = useLocale();
 
@@ -53,7 +55,7 @@ export default function ChatHistoryDrawer({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+            className="fixed inset-0 z-40 bg-black/40"
             onClick={onClose}
           />
           <motion.aside
@@ -77,7 +79,8 @@ export default function ChatHistoryDrawer({
 
             <button
               onClick={onNewChat}
-              className="mx-4 mt-4 flex items-center justify-center gap-2 glass-button text-white rounded-xl px-4 py-3 text-sm font-medium transition-all hover:opacity-90"
+              disabled={isDisabled}
+              className="mx-4 mt-4 flex items-center justify-center gap-2 glass-button text-white rounded-xl px-4 py-3 text-sm font-medium transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Plus className="w-4 h-4" />
               {t('newChat')}
@@ -108,11 +111,12 @@ export default function ChatHistoryDrawer({
                   <button
                     key={conv.id}
                     onClick={() => onSelectConversation(conv.id)}
+                    disabled={isDisabled}
                     className={`w-full text-left glass-card border rounded-xl p-3 transition-all ${
                       isActive
                         ? 'border-primary bg-primary/10'
                         : 'border-separator hover:bg-fill-secondary'
-                    }`}
+                    } disabled:cursor-not-allowed disabled:opacity-55`}
                   >
                     <div className="flex items-center justify-between">
                       <p className="font-medium text-sm text-label truncate flex-1">

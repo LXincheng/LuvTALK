@@ -192,11 +192,11 @@ export default function ProfilePage() {
 
   /* ─── Render ─── */
   return (
-    <div className="h-full overflow-y-auto bg-surface">
-      <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8">
+    <div className="page-shell h-full overflow-y-auto">
+      <div className="mx-auto max-w-3xl px-4 py-5 sm:py-6">
 
         {/* ── Hero ── */}
-        <section className="glass-card mb-5 rounded-2xl p-5 shadow-sm">
+        <section className="page-panel mb-4 rounded-[28px] p-5">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#5856D6] text-lg font-bold text-white">
               {displayName.slice(0, 2).toUpperCase()}
@@ -210,7 +210,7 @@ export default function ProfilePage() {
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               <button
                 onClick={() => navigate('/achievements')}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-warning px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-2xl bg-warning px-3.5 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(245,158,11,0.18)] transition hover:opacity-90"
               >
                 <Trophy className="h-4 w-4" />
                 {t('profileAchievementHall')}
@@ -218,7 +218,7 @@ export default function ProfilePage() {
               {user ? (
                 <button
                   onClick={async () => { await signOut(); }}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-separator bg-surface-elevated px-3.5 py-2 text-sm font-medium text-label-secondary shadow-sm transition hover:bg-[var(--color-primary-soft)]/50"
+                  className="page-chip inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 text-sm font-medium text-label-secondary transition hover:bg-fill-secondary dark:text-slate-200"
                 >
                   <LogOut className="h-4 w-4" />
                   {t('profileLogout')}
@@ -226,7 +226,7 @@ export default function ProfilePage() {
               ) : (
                 <button
                   onClick={() => navigate('/login')}
-                  className="rounded-xl bg-primary px-3.5 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                  className="rounded-2xl bg-primary px-3.5 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)] transition hover:opacity-90"
                 >
                   {t('profileSignIn')}
                 </button>
@@ -240,7 +240,7 @@ export default function ProfilePage() {
           {stats.map((stat) => {
             const Icon = stat.icon;
             return (
-              <div key={stat.labelKey} className="glass-card rounded-xl p-4 shadow-sm">
+              <div key={stat.labelKey} className="page-panel rounded-[24px] p-4">
                 <div className={`mb-2 flex h-9 w-9 items-center justify-center rounded-lg ${STAT_COLOR_CLASSES[stat.color]}`}>
                   <Icon className="h-4.5 w-4.5" />
                 </div>
@@ -255,7 +255,7 @@ export default function ProfilePage() {
         </section>
 
         {/* ── Learning progress ── */}
-        <section className="glass-card mb-5 rounded-2xl p-5 shadow-sm">
+        <section className="page-panel mb-4 rounded-[28px] p-5">
           <h2 className={`${TXT.section} text-label mb-3`}>{t('profileProgress')}</h2>
           <div className="space-y-3">
             {progressBars.map((bar) => (
@@ -273,7 +273,7 @@ export default function ProfilePage() {
         </section>
 
         {/* ── Learning goals ── */}
-        <section className="glass-card mb-5 rounded-2xl p-5 shadow-sm">
+        <section className="page-panel mb-4 rounded-[30px] p-5">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className={`${TXT.section} text-label`}>{t('profileLearningGoalTitle')}</h2>
@@ -285,7 +285,7 @@ export default function ProfilePage() {
 
           {/* Overall donut + progress */}
           {goalData ? (
-            <div className="mb-4 flex items-center gap-4 rounded-xl border border-separator bg-fill p-3.5">
+            <div className="page-panel-soft mb-4 flex items-center gap-4 rounded-[24px] p-4">
               <motion.div
                 animate={{ scale: [1, 1.02, 1] }}
                 transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
@@ -308,7 +308,7 @@ export default function ProfilePage() {
           ) : null}
 
           {/* Goal inputs */}
-          <div className="mb-3 grid grid-cols-3 gap-3">
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <GoalInput label={t('profileGoalDailyMinutes')} min={5} max={180} value={goalDraft.dailyMinutes} onChange={(v) => setGoalDraft((p) => ({ ...p, dailyMinutes: v }))} />
             <GoalInput label={t('profileGoalWeeklyWords')} min={5} max={500} value={goalDraft.weeklyWords} onChange={(v) => setGoalDraft((p) => ({ ...p, weeklyWords: v }))} />
             <GoalInput label={t('profileGoalWeeklySpeaking')} min={1} max={50} value={goalDraft.weeklySpeaking} onChange={(v) => setGoalDraft((p) => ({ ...p, weeklySpeaking: v }))} />
@@ -316,7 +316,7 @@ export default function ProfilePage() {
           <button
             onClick={handleSaveGoal}
             disabled={isSavingGoal}
-            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+            className="rounded-2xl bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)] transition hover:opacity-90 disabled:opacity-50"
           >
             {isSavingGoal ? t('profileGoalSaving') : t('profileGoalSave')}
           </button>
@@ -334,12 +334,12 @@ export default function ProfilePage() {
         />
 
         {/* ── Recent achievements ── */}
-        <section className="glass-card rounded-2xl p-5 shadow-sm">
+        <section className="page-panel rounded-[28px] p-5">
           <h2 className={`${TXT.section} text-label mb-3`}>{t('profileAchievements')}</h2>
           {recentUnlocked.length > 0 ? (
             <div className="space-y-2">
               {recentUnlocked.map((a) => (
-                <div key={a.id} className="flex items-center gap-3 rounded-xl p-3 transition hover:bg-fill-secondary">
+                <div key={a.id} className="flex items-center gap-3 rounded-[18px] p-3 transition hover:bg-fill-secondary">
                   <span className="text-2xl">{a.icon}</span>
                   <div className="min-w-0 flex-1">
                     <p className={`${TXT.body} font-medium text-label`}>{a.title}</p>
@@ -369,14 +369,14 @@ function GoalInput({ label, min, max, value, onChange }: {
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs text-label-secondary">{label}</span>
+      <span className="mb-1.5 block text-xs font-medium text-label-secondary">{label}</span>
       <input
         type="number"
         min={min}
         max={max}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-xl border border-separator bg-surface-elevated px-3 py-2 text-sm text-label shadow-sm outline-none transition focus:border-primary focus:bg-white"
+        className="w-full rounded-[18px] border border-separator bg-[var(--surface-panel-soft)] px-3 py-3 text-sm text-label outline-none transition focus:border-primary focus:bg-[var(--surface-panel)] dark:text-slate-100"
       />
     </label>
   );

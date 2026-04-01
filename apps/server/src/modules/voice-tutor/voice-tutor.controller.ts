@@ -23,6 +23,7 @@ import { MAX_FILE_SIZE_BYTES, VoiceTutorService } from "./voice-tutor.service";
 const ACCEPTED_MIME_TYPES = new Set([
   "audio/webm",
   "video/webm",
+  "audio/ogg",
   "audio/wav",
   "audio/m4a",
   "audio/mp4",
@@ -36,6 +37,11 @@ export class VoiceTutorController {
     private readonly voiceTutor: VoiceTutorService,
     private readonly authService: AuthService,
   ) {}
+
+  @Get("voice-config")
+  getVoiceConfig() {
+    return this.voiceTutor.getVoiceCatalog();
+  }
 
   @Post(":conversationId/voice")
   @UseInterceptors(

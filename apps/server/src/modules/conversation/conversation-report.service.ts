@@ -7,7 +7,10 @@ import {
   supportsJsonObjectResponse,
   supportsThinkingToggle,
 } from "../../common/config/model-provider.config";
-import { resolveScenarioLabel } from "../../common/config/prompts/scenario.config";
+import {
+  resolveScenarioLabel,
+  resolveScenarioPromptDefinition,
+} from "../../common/config/prompts/scenario.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import {
   ConversationMessage,
@@ -58,6 +61,9 @@ type ScenarioFeedbackPromptInput = {
   conversationId: string;
   scenarioId: string;
   scenarioLabel: string;
+  scenarioGoals: string[];
+  completionSignals: string[];
+  reportFocus: string[];
   targetLanguage: LanguageCode;
   nativeLanguage: LanguageCode;
   reportLanguage: "zh" | "en";
@@ -65,6 +71,9 @@ type ScenarioFeedbackPromptInput = {
   aiTurns: number;
   averageScore: number | null;
   latestScore: number | null;
+  targetLanguageUserTurns: number;
+  nativeLanguageUserTurns: number;
+  mixedLanguageUserTurns: number;
   pronunciationMentions: number;
   grammarMentions: number;
   rhythmMentions: number;
@@ -214,7 +223,6 @@ export class ConversationReportService {
         envConfig.modelTimeoutMs.primary,
         {
           label: "report-primary",
-          enableThinking: session.deepThinkingEnabled === true,
         },
       )) ??
       (await this.requestReportWithModel(
@@ -429,7 +437,9 @@ export class ConversationReportService {
   }): ConversationReportPromptInput {
     const { session, summary, sourceMode, voiceStyle, metrics, reportLanguage } =
       params;
+    const scenarioDefinition = resolveScenarioPromptDefinition(session.scenarioId);
     const aiMessages = session.messages.filter((message) => message.sender === "ai");
+    const languageUsage = this.buildUserLanguageUsage(session);
 
     return {
       sourceMode,
@@ -440,11 +450,16 @@ export class ConversationReportService {
         session.scenarioId,
         session.nativeLanguage ?? LanguageCode.Mandarin,
       ),
+      scenarioGoals: scenarioDefinition.taskGoals,
+      completionSignals: scenarioDefinition.completionSignals,
+      reportFocus: scenarioDefinition.reportFocus,
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
       reportLanguage,
+      targetLanguageUserTurns: languageUsage.targetLanguageTurns,
+      nativeLanguageUserTurns: languageUsage.nativeLanguageTurns,
+      mixedLanguageUserTurns: languageUsage.mixedLanguageTurns,
       transcriptLines: session.messages
-        .slice(-18)
         .map((message) => {
           const speaker = message.sender === "user" ? "Learner" : "Tutor";
           const metaNotes = [
@@ -522,6 +537,8 @@ export class ConversationReportService {
     reportLanguage: "zh" | "en";
   }): ScenarioFeedbackPromptInput {
     const { session, summary, metrics, reportLanguage } = params;
+    const scenarioDefinition = resolveScenarioPromptDefinition(session.scenarioId);
+    const languageUsage = this.buildUserLanguageUsage(session);
     return {
       conversationId: session.id,
       scenarioId: session.scenarioId,
@@ -529,6 +546,9 @@ export class ConversationReportService {
         session.scenarioId,
         session.nativeLanguage ?? LanguageCode.Mandarin,
       ),
+      scenarioGoals: scenarioDefinition.taskGoals,
+      completionSignals: scenarioDefinition.completionSignals,
+      reportFocus: scenarioDefinition.reportFocus,
       targetLanguage: session.targetLanguage,
       nativeLanguage: session.nativeLanguage ?? LanguageCode.Mandarin,
       reportLanguage,
@@ -536,13 +556,15 @@ export class ConversationReportService {
       aiTurns: metrics.aiTurns,
       averageScore: metrics.averageScore,
       latestScore: metrics.latestScore,
+      targetLanguageUserTurns: languageUsage.targetLanguageTurns,
+      nativeLanguageUserTurns: languageUsage.nativeLanguageTurns,
+      mixedLanguageUserTurns: languageUsage.mixedLanguageTurns,
       pronunciationMentions: metrics.pronunciationMentions,
       grammarMentions: metrics.grammarMentions,
       rhythmMentions: metrics.rhythmMentions,
       strengths: summary.strengths.slice(0, 3),
       improvements: summary.improvements.slice(0, 3),
       transcriptLines: session.messages
-        .slice(-10)
         .map((message) => {
           const speaker = message.sender === "user" ? "Learner" : "Tutor";
           return `[${speaker}] ${message.text}`;
@@ -903,11 +925,19 @@ export class ConversationReportService {
     const clamp = (value: number, min = 45, max = 96) =>
       Math.max(min, Math.min(max, Math.round(value)));
     const taskCompletion = clamp(
-      baseScore * 0.72 + Math.min(22, input.userTurns * 5) - Math.max(0, 12 - input.aiTurns * 2),
+      baseScore * 0.72 +
+        Math.min(22, input.userTurns * 5) -
+        Math.max(0, 12 - input.aiTurns * 2) +
+        Math.min(10, input.targetLanguageUserTurns * 2) -
+        Math.min(8, input.nativeLanguageUserTurns * 2),
       input.userTurns <= 1 ? 45 : 58,
     );
     const naturalness = clamp(
-      baseScore + 5 - Math.min(18, input.grammarMentions * 3) - Math.min(10, input.rhythmMentions * 2),
+      baseScore +
+        5 -
+        Math.min(18, input.grammarMentions * 3) -
+        Math.min(10, input.rhythmMentions * 2) -
+        Math.min(8, input.mixedLanguageUserTurns * 2),
     );
     const pronunciation = clamp(
       (input.latestScore ?? baseScore) * 0.8 + 10 - Math.min(18, input.pronunciationMentions * 4),
@@ -949,8 +979,8 @@ export class ConversationReportService {
             ? "你已经开始进入场景了，但对话轮次还太少，暂时只能给出保守评分。"
             : "You entered the scenario, but the round was still too short, so the score stays conservative."
           : isZh
-            ? "这份评分基于本轮真实对话轮次、系统打分和纠错线索生成，重点看你是否把场景推进下去了。"
-            : "This score is based on real turns, system scoring, and coaching signals from this round, with emphasis on whether you kept the scenario moving.",
+            ? "这份评分基于整段场景对话、真实轮次、目标语言使用情况和系统纠错线索生成，重点看你是否把场景真正推进并完成。"
+            : "This score is based on the full scenario transcript, real turn flow, target-language usage, and coaching signals, with focus on whether you actually moved the scene forward and completed it.",
       dimensions: [
         { key: "taskCompletion", score: taskCompletion },
         { key: "naturalness", score: naturalness },
@@ -1391,10 +1421,89 @@ export class ConversationReportService {
   }
 
   private isDatabaseConnectionError(error: unknown): boolean {
-    return (
+    if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       (error.code === "P1001" || error.code === "P1002")
+    ) {
+      return true;
+    }
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+    return (
+      message.includes("server has closed the connection") ||
+      message.includes("connection terminated") ||
+      message.includes("connection closed") ||
+      message.includes("can't reach database server")
     );
+  }
+
+  private buildUserLanguageUsage(session: ConversationSession): {
+    targetLanguageTurns: number;
+    nativeLanguageTurns: number;
+    mixedLanguageTurns: number;
+  } {
+    let targetLanguageTurns = 0;
+    let nativeLanguageTurns = 0;
+    let mixedLanguageTurns = 0;
+
+    for (const message of session.messages) {
+      if (message.sender !== "user") {
+        continue;
+      }
+      const usage = this.classifyUserTurnLanguage(
+        message.text,
+        session.targetLanguage,
+        session.nativeLanguage ?? LanguageCode.Mandarin,
+      );
+      if (usage === "target") {
+        targetLanguageTurns += 1;
+      } else if (usage === "native") {
+        nativeLanguageTurns += 1;
+      } else if (usage === "mixed") {
+        mixedLanguageTurns += 1;
+      }
+    }
+
+    return {
+      targetLanguageTurns,
+      nativeLanguageTurns,
+      mixedLanguageTurns,
+    };
+  }
+
+  private classifyUserTurnLanguage(
+    text: string,
+    targetLanguage: LanguageCode,
+    nativeLanguage: LanguageCode,
+  ): "target" | "native" | "mixed" | "other" {
+    const normalized = text.trim();
+    if (!normalized) {
+      return "other";
+    }
+    const hasLatin = /[A-Za-z]/.test(normalized);
+    const hasCjk = /[\u3400-\u9fff]/.test(normalized);
+
+    if (hasLatin && hasCjk) {
+      return "mixed";
+    }
+
+    if (targetLanguage === LanguageCode.English) {
+      if (hasLatin) {
+        return "target";
+      }
+      if (hasCjk) {
+        return nativeLanguage === LanguageCode.English ? "other" : "native";
+      }
+      return "other";
+    }
+
+    if (hasCjk) {
+      return "target";
+    }
+    if (hasLatin) {
+      return nativeLanguage === LanguageCode.English ? "native" : "other";
+    }
+    return "other";
   }
 
   private isConversationReportTableMissingError(error: unknown): boolean {

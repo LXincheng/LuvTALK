@@ -33,7 +33,7 @@ export default function ChatModeSwitcher({
   ];
 
   return (
-    <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto scrollbar-none border border-separator rounded-lg p-0.5 glass-card">
+    <div className="page-panel inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-lg p-0.5 scrollbar-none">
       {modes.map((m) => {
         const Icon = m.icon;
         const isActive = mode === m.id;

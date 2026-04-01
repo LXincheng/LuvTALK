@@ -19,6 +19,7 @@ export interface Message {
   rhythmTip?: string;
   grammarTip?: string;
   audioUrl?: string;
+  imageUrl?: string;
   annotations?: Annotation[];
   isLoading?: boolean;
   isOptimistic?: boolean;

@@ -2,7 +2,6 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { AnimatePresence, motion } from 'motion/react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import MessageBubble from '../../chat/MessageBubble';
-import VoiceStyleSelector from '../../chat/VoiceStyleSelector';
 import VoiceSpeedSelector from '../../chat/VoiceSpeedSelector';
 import VoiceInput from '../../chat/VoiceInput';
 import ChatQuickReplies, { type QuickReplyOption } from '../../chat/ChatQuickReplies';
@@ -10,6 +9,7 @@ import ScenarioScoreModal from '../../report/ScenarioScoreModal';
 import { useLocale } from '../../../providers/LocaleContext';
 import { API_BASE_URL } from '../../../services/apiClient';
 import {
+  fetchVoiceConfig,
   fetchConversationById,
   fetchVoiceOperationStatus,
   generateScenarioFeedback,
@@ -20,11 +20,7 @@ import {
   uploadConversationVoice,
   withConversationAccessQuery,
 } from '../../../services/conversationService';
-import {
-  DEFAULT_TTS_SPEED,
-  DEFAULT_TTS_VOICE,
-  PREFERRED_RECORDING_MIMES,
-} from '../../../constants/ui';
+import { setVoiceCatalog } from '../../../config/voice';
 import { toast } from '../../../utils/toast';
 import ScenarioSessionHeader from '../components/ScenarioSessionHeader';
 import { getScenarioDefinition } from '../data/scenarioDefinitions';
@@ -39,6 +35,14 @@ import type {
 } from '../../../types/api';
 import type { Message, MessageStatusTone } from '../../../types/chat';
 import type { ScenarioFeedback } from '../types';
+import {
+  getStoredTtsSpeed,
+  setStoredTtsSpeed,
+} from '../../../utils/voicePreferences';
+import {
+  getPreferredRecordingMime,
+  isVoiceRecordingSupported,
+} from '../../../utils/media';
 
 const buildTempId = () => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -102,6 +106,7 @@ const mapSessionToMessages = (
     audioUrl:
       resolveAudioUrl(message.meta?.audioUrl, session.id) ??
       ttsAudioMap[message.id],
+    imageUrl: resolveAudioUrl(message.meta?.imageUrl, session.id),
     annotations: message.sender === 'ai'
       ? message.meta?.keyTerms?.map((term) => ({
           word: term.term,
@@ -143,6 +148,11 @@ export default function ScenarioSessionPage() {
   const navigate = useNavigate();
   const { t, locale } = useLocale();
   const [searchParams] = useSearchParams();
+  const scenario = getScenarioDefinition(scenarioKey);
+  const language = (searchParams.get('lang') as LanguageCode | null) ?? 'mandarin';
+  const normalizedLanguage: LanguageCode =
+    language === 'cantonese' || language === 'english' ? language : 'mandarin';
+  const nativeLanguage: LanguageCode = locale === 'zh' ? 'mandarin' : 'english';
   const [session, setSession] = useState<ConversationSession | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -156,15 +166,7 @@ export default function ScenarioSessionPage() {
   const [quickRepliesVisible, setQuickRepliesVisible] = useState(true);
   const [quickReplyOptions, setQuickReplyOptions] = useState<QuickReplyOption[]>([]);
   const [ttsAudioMap, setTtsAudioMap] = useState<Record<string, string>>({});
-  const [ttsVoice, setTtsVoice] = useState<string>(() => {
-    if (typeof window === 'undefined') return DEFAULT_TTS_VOICE;
-    return window.localStorage.getItem('ttsVoice') || DEFAULT_TTS_VOICE;
-  });
-  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(() => {
-    if (typeof window === 'undefined') return DEFAULT_TTS_SPEED;
-    const stored = window.localStorage.getItem('ttsSpeed');
-    return stored === 'slow' || stored === 'fast' ? stored : DEFAULT_TTS_SPEED;
-  });
+  const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(getStoredTtsSpeed);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -174,11 +176,6 @@ export default function ScenarioSessionPage() {
   const translationSyncTimerRef = useRef<number | null>(null);
   const ttsRequestsRef = useRef<Set<string>>(new Set());
   const ttsAudioMapRef = useRef<Record<string, string>>({});
-  const scenario = getScenarioDefinition(scenarioKey);
-  const language = (searchParams.get('lang') as LanguageCode | null) ?? 'mandarin';
-  const normalizedLanguage: LanguageCode =
-    language === 'cantonese' || language === 'english' ? language : 'mandarin';
-  const nativeLanguage: LanguageCode = locale === 'zh' ? 'mandarin' : 'english';
   const languageLabel = t(
     normalizedLanguage === 'mandarin'
       ? 'languageMandarin'
@@ -231,11 +228,18 @@ export default function ScenarioSessionPage() {
   }, [ttsAudioMap]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem('ttsVoice', ttsVoice);
-      window.localStorage.setItem('ttsSpeed', ttsSpeed);
-    }
-  }, [ttsSpeed, ttsVoice]);
+    setStoredTtsSpeed(ttsSpeed);
+  }, [ttsSpeed]);
+
+  useEffect(() => {
+    void fetchVoiceConfig()
+      .then((catalog) => {
+        setVoiceCatalog(catalog);
+      })
+      .catch(() => {
+        // Keep local fallback voices if config fetch fails.
+      });
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -306,7 +310,7 @@ export default function ScenarioSessionPage() {
     synthesizeConversationSpeech(
       activeSession.id,
       latestAiMessage.text,
-      ttsVoice,
+      undefined,
       ttsSpeed,
     )
       .then((payload) => {
@@ -321,7 +325,7 @@ export default function ScenarioSessionPage() {
       .finally(() => {
         ttsRequestsRef.current.delete(latestAiMessage.id);
       });
-  }, [t, ttsSpeed, ttsVoice]);
+  }, [t, ttsSpeed]);
 
   const syncTranslationIfNeeded = useCallback((conversationId: string, attempt = 0) => {
     if (translationSyncTimerRef.current) {
@@ -444,7 +448,7 @@ export default function ScenarioSessionPage() {
   }, [pollVoiceResult, session, t]);
 
   const startRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    if (!isVoiceRecordingSupported()) {
       toast.warning(t('voiceUnsupported'), { id: 'scenario-voice' });
       return;
     }
@@ -454,9 +458,7 @@ export default function ScenarioSessionPage() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const supportedType = PREFERRED_RECORDING_MIMES.find((type) =>
-        MediaRecorder.isTypeSupported(type),
-      );
+      const supportedType = getPreferredRecordingMime();
       const recorder = new MediaRecorder(stream, supportedType ? { mimeType: supportedType } : undefined);
       streamRef.current = stream;
       audioChunksRef.current = [];
@@ -532,7 +534,7 @@ export default function ScenarioSessionPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-surface">
+    <div className="page-shell h-full flex flex-col">
       <ScenarioSessionHeader
         backTo={`/scenarios/${scenario.key}`}
         title={session?.title || t(scenario.titleKey)}
@@ -545,28 +547,53 @@ export default function ScenarioSessionPage() {
         }}
         endLabel={t('scenarioSessionEnd')}
         settingsContent={(
-          <>
-            <VoiceStyleSelector value={ttsVoice} onChange={setTtsVoice} compact />
-            <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
-          </>
+          <VoiceSpeedSelector value={ttsSpeed} onChange={setTtsSpeed} compact />
         )}
       />
 
-      <div className="flex-1 overflow-y-auto px-4 pt-6 pb-28 space-y-4 md:pb-10">
-        <AnimatePresence>
-          {mergedMessages.map((message) => (
-            <motion.div
+      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-36 md:px-5 md:pt-5 md:pb-12">
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+          <section className="page-panel rounded-[26px] px-4 py-4 md:px-5">
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="page-panel-soft inline-flex h-11 w-11 items-center justify-center rounded-[16px] text-[1.25rem]">
+                {scenario.emoji}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-label-tertiary">
+                  <span>{languageLabel}</span>
+                  <span className="text-label-quaternary">·</span>
+                  <span>{turnLabel}</span>
+                </div>
+                <p className="mt-2 text-[0.98rem] font-semibold tracking-[-0.03em] text-label">
+                  {stageLabel}
+                </p>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-label-secondary">
+                  {t(scenario.summaryKey)}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <div className="space-y-4">
+          <AnimatePresence>
+            {mergedMessages.map((message) => (
+              <motion.div
               key={message.id}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18 }}
             >
-              <MessageBubble message={message} />
+              <MessageBubble
+                message={message}
+                showTranslation={normalizedLanguage !== 'english'}
+              />
             </motion.div>
           ))}
-        </AnimatePresence>
-        <div className="h-4" ref={messagesEndRef} />
+          </AnimatePresence>
+          </div>
+          <div className="h-4" ref={messagesEndRef} />
+        </div>
       </div>
 
       <div className="sticky bottom-[var(--bottom-bar-h)] z-30 md:static">
