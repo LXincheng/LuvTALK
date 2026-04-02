@@ -32,11 +32,12 @@ export const envConfig = {
     primaryModel: readTrimmed(process.env.PRIMARY_MODEL),
     secondaryModel: readTrimmed(process.env.SECONDARY_MODEL),
     thirdModel: readTrimmed(process.env.THIRD_MODEL),
-    realtimeModel: readTrimmed(process.env.REALTIME_MODEL),
-    realtimeTranscribeModel: readTrimmed(
-      process.env.REALTIME_TRANSCRIBE_MODEL,
-      process.env.STT_MODEL,
+    immersiveReportModel: readTrimmed(
+      process.env.IMMERSIVE_REPORT_MODEL,
+      process.env.SECONDARY_MODEL,
     ),
+    realtimeModel: readTrimmed(process.env.REALTIME_MODEL),
+    realtimeTranscribeModel: readTrimmed(process.env.REALTIME_TRANSCRIBE_MODEL),
     sttModel: readTrimmed(process.env.STT_MODEL),
     ttsModel: readTrimmed(process.env.TTS_MODEL),
     translationModel: readTrimmed(process.env.TRANSLATION_MODEL),

@@ -10,11 +10,7 @@ export const buildSessionUpdate = (params: {
   turnDetection: typeof REALTIME_DEFAULT_TURN_DETECTION;
   transcribeModel?: string;
 }) => {
-  const realtimeTranscribeModel = params.transcribeModel
-    ?.toLowerCase()
-    .includes("whisper")
-    ? params.transcribeModel
-    : "whisper-1";
+  const realtimeTranscribeModel = params.transcribeModel?.trim();
   return {
     type: "session.update",
     session: {
@@ -25,11 +21,16 @@ export const buildSessionUpdate = (params: {
         create_response: true,
         interrupt_response: true,
       },
-      input_audio_format: "pcm16",
-      output_audio_format: "pcm16",
-      input_audio_transcription: {
-        model: realtimeTranscribeModel,
-      },
+      input_audio_format: "pcm",
+      output_audio_format: "pcm",
+      smooth_output: true,
+      ...(realtimeTranscribeModel
+        ? {
+            input_audio_transcription: {
+              model: realtimeTranscribeModel,
+            },
+          }
+        : {}),
       modalities: ["audio", "text"],
     },
   };

@@ -137,7 +137,7 @@ export default function ScenarioScoreModal({
             <div className="relative flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-label-tertiary">
-                  {t('reportBadge')}
+                  {t('scenarioScoreModalBadge')}
                 </p>
                 <h3 className="mt-2 truncate text-[1rem] font-semibold tracking-[-0.035em] text-label sm:text-[1.08rem]">
                   {title}
@@ -233,7 +233,7 @@ export default function ScenarioScoreModal({
 
                   <div className="rounded-[28px] border border-separator bg-[rgba(255,255,255,0.9)] px-4 py-4 dark:bg-[rgba(255,255,255,0.04)]">
                     <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-label-tertiary">
-                      {t('reportHighlights')}
+                      {t('scenarioScoreModalHighlights')}
                     </p>
                     <div className="mt-3 space-y-2.5">
                     {feedback.dimensions.map((dimension, index) => (

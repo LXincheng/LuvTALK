@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { X, Plus, MessageCircle } from 'lucide-react';
+import { X, Plus, MessageCircle, Trash2 } from 'lucide-react';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
 import type { ConversationHistorySummary } from '../../types/api';
@@ -10,6 +10,7 @@ interface ChatHistoryDrawerProps {
   conversations: ConversationHistorySummary[];
   activeConversationId?: string;
   onSelectConversation: (id: string) => void;
+  onDeleteConversation: (id: string) => void;
   onNewChat: () => void;
   isLoading: boolean;
   isDisabled?: boolean;
@@ -41,6 +42,7 @@ export default function ChatHistoryDrawer({
   conversations,
   activeConversationId,
   onSelectConversation,
+  onDeleteConversation,
   onNewChat,
   isLoading,
   isDisabled = false,
@@ -108,38 +110,54 @@ export default function ChatHistoryDrawer({
               {conversations.map((conv) => {
                 const isActive = conv.id === activeConversationId;
                 return (
-                  <button
+                  <div
                     key={conv.id}
-                    onClick={() => onSelectConversation(conv.id)}
-                    disabled={isDisabled}
                     className={`w-full text-left glass-card border rounded-xl p-3 transition-all ${
                       isActive
                         ? 'border-primary bg-primary/10'
                         : 'border-separator hover:bg-fill-secondary'
-                    } disabled:cursor-not-allowed disabled:opacity-55`}
+                    } ${isDisabled ? 'opacity-55' : ''}`}
                   >
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium text-sm text-label truncate flex-1">
-                        {conv.title || conv.scenarioId}
-                      </p>
-                      {conv.status === 'active' && (
-                        <span className="ml-2 w-2 h-2 bg-green-500 rounded-full flex-shrink-0" />
-                      )}
+                    <div className="flex items-start gap-2">
+                      <button
+                        onClick={() => onSelectConversation(conv.id)}
+                        disabled={isDisabled}
+                        className="min-w-0 flex-1 text-left disabled:cursor-not-allowed"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium text-sm text-label truncate flex-1">
+                            {conv.title || conv.scenarioId}
+                          </p>
+                          {conv.status === 'active' && (
+                            <span className="ml-2 w-2 h-2 bg-green-500 rounded-full flex-shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-xs text-label-secondary truncate mt-1">
+                          {conv.lastMessage}
+                        </p>
+                        <div className="flex items-center justify-between mt-1.5">
+                          <span className="text-xs text-label-tertiary">
+                            {formatRelativeTime(conv.updatedAt, locale, t)}
+                          </span>
+                          {conv.messageCount != null && (
+                            <span className="text-xs text-label-tertiary">
+                              {conv.messageCount} {t('messageCountUnit')}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteConversation(conv.id)}
+                        disabled={isDisabled}
+                        className="shrink-0 rounded-lg p-2 text-label-tertiary transition-colors hover:bg-fill-secondary hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={t('conversationDelete')}
+                        title={t('conversationDelete')}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                    <p className="text-xs text-label-secondary truncate mt-1">
-                      {conv.lastMessage}
-                    </p>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-xs text-label-tertiary">
-                        {formatRelativeTime(conv.updatedAt, locale, t)}
-                      </span>
-                      {conv.messageCount != null && (
-                        <span className="text-xs text-label-tertiary">
-                          {conv.messageCount} {t('messageCountUnit')}
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

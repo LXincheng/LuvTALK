@@ -1,7 +1,6 @@
 import { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { History, LoaderCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import ChatQuickReplies, { type QuickReplyOption } from '../components/chat/ChatQuickReplies';
 import { buildChatQuickReplyOptions } from '../components/chat/chatQuickReplyGuidance';
 import MessageBubble from '../components/chat/MessageBubble';
@@ -14,13 +13,19 @@ import SessionSummaryCard from '../components/chat/SessionSummaryCard';
 import type { ConversationRecoveryState } from '../components/chat/ConversationRecoveryBanner';
 import { API_BASE_URL } from '../services/apiClient';
 import {
+  deleteConversation,
+  getStoredActiveConversationIdByLanguage,
+  getStoredConversationIds,
+  MAX_STORED_CONVERSATIONS,
+  removeConversationPersistence,
+  storeActiveConversationIdByLanguage,
   storeConversationAccessKey,
+  trackConversationId,
   fetchVoiceConfig,
   fetchConversationSummary,
   fetchConversationById,
   fetchConversationHistory,
   fetchVoiceOperationStatus,
-  generateConversationReport,
   resumeConversation,
   sendConversationImageMessage,
   sendConversationMessage,
@@ -34,19 +39,14 @@ import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
-import { REALTIME_VOICE_OPTIONS } from '../constants/ui';
+import { REALTIME_VOICE_STORAGE_KEY } from '../constants/storage';
 import {
-  ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY,
-  CONVERSATION_IDS_STORAGE_KEY,
-  REALTIME_VOICE_STORAGE_KEY,
-} from '../constants/storage';
-import {
+  DEFAULT_IMMERSIVE_VOICE,
   getDefaultTtsVoice,
   getTtsVoiceOptions,
   isTtsVoiceSupported,
   setVoiceCatalog,
 } from '../config/voice';
-import { CONVERSATION_REPORT_TOAST_ID } from '../constants/report';
 import type { Annotation, ChatMode, Message, MessageStatusTone } from '../types/chat';
 import type {
   ConversationHistorySummary,
@@ -102,20 +102,6 @@ const getInitialTargetLanguage = (): LanguageCode => {
   return 'cantonese';
 };
 
-/** Read the list of known conversation IDs from localStorage. */
-const getStoredConversationIds = (): string[] => {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(CONVERSATION_IDS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const GUEST_MAX_HISTORY = 5;
 const MEANINGFUL_HISTORY_MIN_MESSAGES = 2;
 const NEW_CHAT_QUICK_REPLY_DELAY_MS = 1400;
 const EXISTING_CHAT_QUICK_REPLY_DELAY_MS = 5000;
@@ -144,61 +130,6 @@ const withAsyncTimeout = <T,>(
         reject(error);
       });
   });
-
-type ActiveConversationByLanguage = Partial<Record<LanguageCode, string>>;
-
-const isLanguageCode = (value: unknown): value is LanguageCode =>
-  value === 'cantonese' || value === 'mandarin' || value === 'english';
-
-const getStoredActiveConversationByLanguage = (): ActiveConversationByLanguage => {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    const next: ActiveConversationByLanguage = {};
-    for (const [language, conversationId] of Object.entries(parsed)) {
-      if (isLanguageCode(language) && typeof conversationId === 'string' && conversationId.trim()) {
-        next[language] = conversationId;
-      }
-    }
-    return next;
-  } catch {
-    return {};
-  }
-};
-
-const getStoredActiveConversationIdByLanguage = (
-  language: LanguageCode,
-): string | undefined => getStoredActiveConversationByLanguage()[language];
-
-const storeActiveConversationIdByLanguage = (
-  language: LanguageCode,
-  conversationId: string,
-) => {
-  if (typeof window === 'undefined' || !conversationId.trim()) {
-    return;
-  }
-  const next = getStoredActiveConversationByLanguage();
-  next[language] = conversationId;
-  window.localStorage.setItem(
-    ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY,
-    JSON.stringify(next),
-  );
-};
-
-/** Add a conversation ID to the persisted list (deduped, most-recent first). */
-const trackConversationId = (id: string) => {
-  if (typeof window === 'undefined') return;
-  const ids = getStoredConversationIds().filter((v) => v !== id);
-  ids.unshift(id);
-  // Keep at most 5 entries for guest users
-  window.localStorage.setItem(
-    CONVERSATION_IDS_STORAGE_KEY,
-    JSON.stringify(ids.slice(0, GUEST_MAX_HISTORY)),
-  );
-};
 
 const mapAnnotationTypeToFavoriteType = (
   value?: string,
@@ -334,16 +265,18 @@ const normalizeHistoryList = (
   activeConversationId?: string,
 ): ConversationHistorySummary[] => {
   const seen = new Set<string>();
-  return history.filter((item) => {
-    if (seen.has(item.id)) {
-      return false;
-    }
-    seen.add(item.id);
-    if (item.id === activeConversationId) {
-      return true;
-    }
-    return isMeaningfulHistoryItem(item);
-  });
+  return history
+    .filter((item) => {
+      if (seen.has(item.id)) {
+        return false;
+      }
+      seen.add(item.id);
+      if (item.id === activeConversationId) {
+        return true;
+      }
+      return isMeaningfulHistoryItem(item);
+    })
+    .slice(0, MAX_STORED_CONVERSATIONS);
 };
 
 const buildLocalSessionSummary = (
@@ -395,7 +328,6 @@ const buildLocalSessionSummary = (
 
 export default function ConversationPage() {
   const { t, locale } = useLocale();
-  const navigate = useNavigate();
   const [session, setSession] = useState<ConversationSession | null>(null);
   const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -435,8 +367,13 @@ export default function ConversationPage() {
     getStoredTtsVoice(getInitialTargetLanguage()),
   );
   const [realtimeVoice, setRealtimeVoice] = useState<string>(() => {
-    if (typeof window === 'undefined') return REALTIME_VOICE_OPTIONS[0].id;
-    return localStorage.getItem(REALTIME_VOICE_STORAGE_KEY) || REALTIME_VOICE_OPTIONS[0].id;
+    if (typeof window === 'undefined') {
+      return DEFAULT_IMMERSIVE_VOICE;
+    }
+    const stored = localStorage.getItem(REALTIME_VOICE_STORAGE_KEY);
+    return typeof stored === 'string' && stored.trim()
+      ? stored
+      : DEFAULT_IMMERSIVE_VOICE;
   });
   const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(getStoredTtsSpeed);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -466,7 +403,6 @@ export default function ConversationPage() {
   const pendingTutorReplyRef = useRef<PendingTutorReply | null>(null);
   const focusBufferRef = useRef(0);
   const summaryFetchSeqRef = useRef(0);
-  const reportFetchSeqRef = useRef(0);
   const lastSummaryAiCountRef = useRef(0);
   const [sessionSummary, setSessionSummary] = useState<SessionSummaryPayload | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
@@ -928,6 +864,10 @@ export default function ConversationPage() {
   }, [targetLanguage]);
 
   useEffect(() => {
+    setRealtimeVoice((currentVoice) => currentVoice?.trim() || DEFAULT_IMMERSIVE_VOICE);
+  }, [targetLanguage]);
+
+  useEffect(() => {
     ttsAudioMapRef.current = ttsAudioMap;
   }, [ttsAudioMap]);
 
@@ -988,90 +928,6 @@ export default function ConversationPage() {
       }
     }
   }, [locale, session]);
-
-  const refreshConversationReport = useCallback(async (
-    options?: {
-      generate?: boolean;
-      force?: boolean;
-      sourceMode?: 'immersive' | 'voice' | 'text';
-      voiceStyle?: string;
-    },
-  ) => {
-    if (!session?.id) {
-      return;
-    }
-    const seq = ++reportFetchSeqRef.current;
-    if (options?.generate) {
-      toast.loading(t('reportGeneratingToastTitle'), {
-        id: CONVERSATION_REPORT_TOAST_ID,
-        throttleMs: 0,
-      });
-    }
-    try {
-      if (options?.generate) {
-        await generateConversationReport(session.id, {
-            force: options.force ?? true,
-            sourceMode: options.sourceMode,
-            voiceStyle: options.voiceStyle,
-          });
-      }
-      if (seq !== reportFetchSeqRef.current) {
-        return;
-      }
-      if (options?.generate) {
-        toast.success(t('reportReadyToast'), {
-          id: CONVERSATION_REPORT_TOAST_ID,
-          throttleMs: 0,
-          action: {
-            label: t('immersiveReportGoProfile'),
-            onClick: () => navigate('/profile'),
-          },
-        });
-      }
-    } catch {
-      if (seq !== reportFetchSeqRef.current) {
-        return;
-      }
-      if (options?.generate) {
-        toast.error(t('reportGenerateError'), {
-          id: CONVERSATION_REPORT_TOAST_ID,
-          throttleMs: 0,
-          action: {
-            label: t('commonRetry'),
-            onClick: () => {
-              void refreshConversationReport(options);
-            },
-          },
-        });
-      }
-    }
-  }, [navigate, session?.id, t]);
-
-  const promptConversationReport = useCallback(
-    (conversationId: string, voiceStyle: string) => {
-      toast.info(t('immersiveReportPromptTitle'), {
-        id: CONVERSATION_REPORT_TOAST_ID,
-        className: 'app-toast--report-preview',
-        duration: 6000,
-        throttleMs: 0,
-        action: {
-          label: t('immersiveReportGenerateNow'),
-          onClick: () => {
-            if (currentSessionIdRef.current !== conversationId) {
-              return;
-            }
-            void refreshConversationReport({
-              generate: true,
-              force: true,
-              sourceMode: 'immersive',
-              voiceStyle,
-            });
-          },
-        },
-      });
-    },
-    [refreshConversationReport, t],
-  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1585,15 +1441,61 @@ export default function ConversationPage() {
     }
   };
 
+  const handleDeleteConversation = async (conversationId: string) => {
+    if (isSending || isSessionSwitching || !beginSessionTransition()) {
+      return;
+    }
+
+    const historyItem = conversationHistory.find((item) => item.id === conversationId);
+    const deletingActiveConversation = session?.id === conversationId;
+    const nextLanguage =
+      historyItem?.targetLanguage ??
+      session?.targetLanguage ??
+      targetLanguageRef.current;
+
+    try {
+      await deleteConversation(conversationId);
+      removeConversationPersistence(conversationId, historyItem?.targetLanguage);
+      setConversationHistory((prev) =>
+        normalizeHistoryList(
+          prev.filter((item) => item.id !== conversationId),
+          deletingActiveConversation ? undefined : session?.id,
+        ),
+      );
+
+      if (deletingActiveConversation) {
+        const freshSession = await withAsyncTimeout(
+          startConversation({
+            targetLanguage: nextLanguage,
+            nativeLanguage: nativeLanguageRef.current,
+          }),
+          SESSION_BOOTSTRAP_TIMEOUT_MS,
+          'SESSION_RESUME_TIMEOUT',
+        );
+        syncActiveSession(freshSession);
+      }
+
+      toast.success(t('conversationDeleteSuccess'), { id: 'conversation-delete' });
+      void loadHistory();
+    } catch {
+      if (deletingActiveConversation) {
+        try {
+          await loadOrResumeSession();
+        } catch {
+          setSession(null);
+        }
+      }
+      toast.error(t('conversationDeleteError'), { id: 'conversation-delete' });
+    } finally {
+      finishSessionTransition();
+    }
+  };
+
   const handleNewChat = async () => {
     if (isSending || isSessionSwitching || !beginSessionTransition()) {
       return;
     }
     setHistoryDrawerOpen(false);
-    if (isFreshSession(session)) {
-      finishSessionTransition();
-      return;
-    }
     try {
       const newSession = await startConversation({
         targetLanguage,
@@ -1620,51 +1522,14 @@ export default function ConversationPage() {
       return;
     }
     try {
-      const cachedMatch = conversationHistory.find(
-        (item) => item.targetLanguage === language,
+      const nextSession = await withAsyncTimeout(
+        startConversation({
+          targetLanguage: language,
+          nativeLanguage: nativeLanguageRef.current,
+        }),
+        SESSION_BOOTSTRAP_TIMEOUT_MS,
+        'SESSION_RESUME_TIMEOUT',
       );
-      const ids = getStoredConversationIds();
-      const history =
-        cachedMatch
-          ? conversationHistory
-          : await fetchConversationHistory(ids).catch(
-              () => [] as ConversationHistorySummary[],
-            );
-      const normalizedHistory = normalizeHistoryList(history, session.id);
-      setConversationHistory(normalizedHistory);
-      const matchedHistory =
-        normalizedHistory.find((item) => item.targetLanguage === language) ??
-        history.find((item) => item.targetLanguage === language);
-      let nextSession: ConversationSession;
-      if (matchedHistory) {
-        try {
-          nextSession = await withAsyncTimeout(
-            fetchConversationById(matchedHistory.id),
-            SESSION_SWITCH_TIMEOUT_MS,
-            'SESSION_FETCH_TIMEOUT',
-          );
-        } catch {
-          nextSession = await withAsyncTimeout(
-            resumeConversation({
-              targetLanguage: language,
-              nativeLanguage: nativeLanguageRef.current,
-              conversationId: matchedHistory.id,
-            }),
-            SESSION_BOOTSTRAP_TIMEOUT_MS,
-            'SESSION_RESUME_TIMEOUT',
-          );
-        }
-      } else {
-        nextSession = await withAsyncTimeout(
-          resumeConversation({
-            targetLanguage: language,
-            nativeLanguage: nativeLanguageRef.current,
-            conversationId: getStoredActiveConversationIdByLanguage(language),
-          }),
-          SESSION_BOOTSTRAP_TIMEOUT_MS,
-          'SESSION_RESUME_TIMEOUT',
-        );
-      }
       syncActiveSession(nextSession);
       void loadHistory();
     } catch {
@@ -2041,17 +1906,9 @@ export default function ConversationPage() {
           voice={realtimeVoice}
           onVoiceChange={setRealtimeVoice}
           onExit={() => {
-            const nextConversationId = session.id;
-            const nextVoiceStyle = realtimeVoice;
             // Skip existing messages but allow new incoming AI messages after exit.
             ttsBaselineRef.current = session.messages.length;
             setChatMode('voice');
-            window.setTimeout(() => {
-              if (currentSessionIdRef.current !== nextConversationId) {
-                return;
-              }
-              promptConversationReport(nextConversationId, nextVoiceStyle);
-            }, 220);
           }}
           onFallbackToText={() => {
             ttsBaselineRef.current = session.messages.length;
@@ -2087,6 +1944,7 @@ export default function ConversationPage() {
             conversations={conversationHistory}
             activeConversationId={session?.id}
             onSelectConversation={handleSelectConversation}
+            onDeleteConversation={handleDeleteConversation}
             onNewChat={handleNewChat}
             isLoading={isLoadingHistory}
             isDisabled={disableSessionButtons}

@@ -3,9 +3,12 @@ import type { MutableRefObject } from 'react';
 import {
   REALTIME_AI_SPEAKING_TIMEOUT_MS,
   REALTIME_AUDIO_BUFFER_SIZE,
+  REALTIME_AUDIO_PLAYBACK_SUPPRESSION_MS,
   REALTIME_AUDIO_SAMPLE_RATE,
   REALTIME_CONNECT_TIMEOUT_MS,
+  REALTIME_INPUT_NOISE_GATE_RMS,
   REALTIME_LOCK_PREFIX,
+  REALTIME_MEDIA_CONSTRAINTS,
   REALTIME_RECONNECT_DELAY_MS,
   REALTIME_RECONNECT_MAX_ATTEMPTS,
   REALTIME_TRANSCRIPT_THROTTLE_MS,
@@ -550,7 +553,7 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
 
   const startAudioCapture = useCallback(
     async (socket: WebSocket) => {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia(REALTIME_MEDIA_CONSTRAINTS);
       streamRef.current = stream;
       const audioContext = new AudioContext({
         sampleRate: REALTIME_AUDIO_SAMPLE_RATE,
@@ -582,7 +585,9 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         }
         const outCtx = outputContextRef.current;
         const outEnd = outputTimeRef.current;
-        const aiAudioPlaying = outCtx != null && outEnd > outCtx.currentTime + 0.25;
+        const aiAudioPlaying =
+          outCtx != null &&
+          outEnd > outCtx.currentTime + REALTIME_AUDIO_PLAYBACK_SUPPRESSION_MS;
         if (isMutedRef.current || aiAudioPlaying) {
           setAudioLevel(0);
           return;
@@ -590,6 +595,9 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         const input = event.inputBuffer.getChannelData(0);
         const rms = calculateRms(input);
         setAudioLevel(Math.min(1, Math.max(0, rms * 3.2)));
+        if (rms < REALTIME_INPUT_NOISE_GATE_RMS) {
+          return;
+        }
 
         const resampled = resampleAudio(
           input,

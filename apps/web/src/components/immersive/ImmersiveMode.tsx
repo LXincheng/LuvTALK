@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { MessageSquareText, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
@@ -69,6 +69,7 @@ export default function ImmersiveMode({
   } = useRealtimeSession({ conversationId, voice });
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [captionsEnabled, setCaptionsEnabled] = useState(true);
 
   const connectRef = useRef(connect);
   const disconnectRef = useRef(disconnect);
@@ -129,35 +130,30 @@ export default function ImmersiveMode({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35 }}
-      className="fixed inset-0 z-50 flex flex-col overflow-hidden select-none"
-      style={{
-        background:
-          'radial-gradient(1200px 520px at 15% -10%, rgba(45,65,125,0.42), transparent 62%), radial-gradient(900px 420px at 88% 8%, rgba(24,122,126,0.28), transparent 58%), linear-gradient(180deg, #070912 0%, #04050b 52%, #03040a 100%)',
-      }}
+      className="fixed inset-0 z-50 flex select-none flex-col overflow-hidden bg-[radial-gradient(900px_420px_at_18%_-8%,rgba(203,213,225,0.32),transparent_56%),radial-gradient(720px_320px_at_84%_12%,rgba(191,219,254,0.22),transparent_58%),linear-gradient(180deg,#f7fbff_0%,#eef4fb_48%,#e9eff6_100%)] text-slate-900 dark:bg-[radial-gradient(960px_440px_at_18%_-10%,rgba(51,65,85,0.22),transparent_58%),radial-gradient(760px_320px_at_82%_12%,rgba(37,99,235,0.14),transparent_60%),linear-gradient(180deg,#050914_0%,#070b14_42%,#0b1020_100%)] dark:text-white"
     >
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute left-[9%] top-[18%] w-56 h-56 rounded-full bg-cyan-400/8 blur-3xl" />
-        <div className="absolute right-[6%] bottom-[20%] w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[10%] top-[16%] h-52 w-52 rounded-full bg-slate-300/24 blur-3xl dark:bg-slate-500/8" />
+        <div className="absolute bottom-[18%] right-[12%] h-64 w-64 rounded-full bg-blue-300/12 blur-3xl dark:bg-blue-500/8" />
       </div>
 
-      {/* Top area */}
       <div className="relative z-10 flex items-center justify-between px-5 pt-5 safe-area-inset-top">
         <motion.button
           onClick={handleExit}
           whileTap={{ scale: 0.9 }}
-          className="h-9 px-3 inline-flex items-center justify-center rounded-full bg-white/[0.08] border border-white/[0.14] text-white/75 hover:bg-white/[0.12] hover:text-white transition-colors backdrop-blur-xl"
+          className="inline-flex h-10 items-center justify-center rounded-full border border-black/5 bg-white/72 px-3 text-slate-700 shadow-[0_8px_28px_rgba(15,23,42,0.06)] transition-colors hover:bg-white/84 hover:text-slate-950 backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/72 dark:hover:bg-white/[0.10] dark:hover:text-white"
           aria-label={t('exitImmersive')}
         >
           <X className="w-4 h-4" />
         </motion.button>
 
-        <span className="text-[11px] px-3 py-1 rounded-full text-white/65 bg-white/[0.05] border border-white/[0.08] backdrop-blur-xl">
-          {t('immersiveMode')}
-        </span>
+        <div className="inline-flex items-center gap-2 rounded-full border border-black/5 bg-white/70 px-3 py-1.5 text-[11px] shadow-[0_8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.06]">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span className="font-medium text-slate-700 dark:text-white/82">{t('immersiveMode')}</span>
+        </div>
       </div>
 
-      {/* Center — orb + status label */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center min-h-0">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-5">
         <AudioOrb level={audioLevel} status={status} isAiSpeaking={isAiSpeaking} />
 
         <div className="mt-6 flex flex-col items-center gap-1">
@@ -166,7 +162,7 @@ export default function ImmersiveMode({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.25 }}
-            className="text-[13px] text-white/70 font-medium tracking-wide"
+            className="text-[13px] font-medium tracking-wide text-slate-600 dark:text-white/74"
           >
             {statusLabel}
           </motion.p>
@@ -187,7 +183,7 @@ export default function ImmersiveMode({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               whileTap={{ scale: 0.96 }}
-              className="mt-3 px-5 py-1.5 rounded-full text-[12px] text-white bg-white/[0.12] border border-white/[0.22] hover:bg-white/[0.16] transition-all backdrop-blur-xl"
+              className="mt-3 rounded-full border border-black/6 bg-white/72 px-5 py-1.5 text-[12px] text-slate-700 transition-all backdrop-blur-xl hover:bg-white/84 dark:border-white/[0.10] dark:bg-white/[0.08] dark:text-white/86 dark:hover:bg-white/[0.12]"
             >
               {t('immersiveReconnect')}
             </motion.button>
@@ -199,7 +195,7 @@ export default function ImmersiveMode({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               whileTap={{ scale: 0.96 }}
-              className="mt-2 px-5 py-1.5 rounded-full text-[12px] text-white/85 bg-slate-900/35 border border-white/[0.14] hover:bg-slate-900/45 transition-all backdrop-blur-xl"
+              className="mt-2 rounded-full border border-black/6 bg-white/68 px-5 py-1.5 text-[12px] text-slate-700 transition-all backdrop-blur-xl hover:bg-white/82 dark:border-white/[0.10] dark:bg-white/[0.06] dark:text-white/76 dark:hover:bg-white/[0.10]"
             >
               {t('immersiveBackToText')}
             </motion.button>
@@ -207,16 +203,30 @@ export default function ImmersiveMode({
         </div>
       </div>
 
-      {/* Bottom — transcript + controls */}
-      <div className="relative z-10 flex flex-col gap-4 px-5 pb-10 safe-area-inset-bottom max-w-2xl w-full mx-auto">
-        <div className="rounded-3xl border border-white/[0.14] bg-white/[0.06] backdrop-blur-2xl px-4 py-3 shadow-[0_22px_70px_rgba(1,8,20,0.46)]">
-          <TranscriptSubtitles
-            entries={fullTranscript}
-            activeUserText={userTranscript}
-            activeAiText={aiTranscript}
-            maxItems={REALTIME_SUBTITLE_LIMIT}
-          />
-        </div>
+      <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 pb-8 safe-area-inset-bottom">
+        <AnimatePresence initial={false}>
+          {captionsEnabled ? (
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="rounded-[30px] border border-black/5 bg-white/72 px-4 py-4 shadow-[0_18px_56px_rgba(15,23,42,0.06)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[linear-gradient(180deg,rgba(17,24,39,0.74),rgba(2,6,23,0.62))] dark:shadow-[0_20px_64px_rgba(2,8,20,0.36)]"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-white/44">
+                  <MessageSquareText className="h-3.5 w-3.5" />
+                  <span>{t('immersiveCaptions')}</span>
+                </div>
+              </div>
+              <TranscriptSubtitles
+                entries={fullTranscript}
+                activeUserText={userTranscript}
+                activeAiText={aiTranscript}
+                maxItems={REALTIME_SUBTITLE_LIMIT}
+              />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         <AnimatePresence>
           {settingsOpen && (
@@ -224,9 +234,12 @@ export default function ImmersiveMode({
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex items-center justify-center overflow-hidden"
+              className="overflow-hidden"
             >
-              <div className="px-4 py-2 rounded-2xl bg-white/[0.08] border border-white/[0.16] backdrop-blur-2xl">
+              <div className="rounded-[28px] border border-black/5 bg-white/72 px-4 py-4 shadow-[0_16px_48px_rgba(15,23,42,0.05)] backdrop-blur-2xl dark:border-white/[0.08] dark:bg-[linear-gradient(180deg,rgba(17,24,39,0.74),rgba(2,6,23,0.62))] dark:shadow-[0_18px_56px_rgba(2,8,20,0.34)]">
+                <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-white/44">
+                  {t('immersiveSettingsHint')}
+                </p>
                 <VoiceStyleSelector
                   value={voice}
                   onChange={onVoiceChange}
@@ -239,7 +252,9 @@ export default function ImmersiveMode({
 
         <ImmersiveControls
           isMuted={isMuted}
+          captionsEnabled={captionsEnabled}
           onToggleMute={toggleMute}
+          onToggleCaptions={() => setCaptionsEnabled((prev) => !prev)}
           onEnd={handleExit}
           onSettings={() => setSettingsOpen((prev) => !prev)}
           disabled={controlsDisabled}

@@ -1,12 +1,11 @@
 import { apiClient } from './apiClient';
 import {
+  ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY,
   CONVERSATION_ACCESS_KEYS_STORAGE_KEY,
-  CONVERSATION_REPORT_CACHE_KEY,
+  CONVERSATION_IDS_STORAGE_KEY,
 } from '../constants/storage';
 import type {
   ConversationHistorySummary,
-  ConversationReportHistoryItem,
-  ConversationReportPayload,
   ConversationSession,
   LanguageCode,
   ScenarioFeedbackPayload,
@@ -27,6 +26,8 @@ export interface StartConversationPayload {
 export interface ResumeConversationPayload extends StartConversationPayload {
   conversationId?: string;
 }
+
+export const MAX_STORED_CONVERSATIONS = 10;
 
 const readStoredConversationAccessKeys = (): Record<string, string> => {
   if (typeof window === 'undefined') {
@@ -56,75 +57,75 @@ const writeStoredConversationAccessKeys = (value: Record<string, string>) => {
   );
 };
 
-const readCachedReports = (): ConversationReportPayload[] => {
+const readStoredConversationIds = (): string[] => {
   if (typeof window === 'undefined') {
     return [];
   }
   try {
-    const raw = window.localStorage.getItem(CONVERSATION_REPORT_CACHE_KEY);
+    const raw = window.localStorage.getItem(CONVERSATION_IDS_STORAGE_KEY);
     if (!raw) {
       return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed as ConversationReportPayload[] : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
   } catch {
     return [];
   }
 };
 
-const writeCachedReports = (reports: ConversationReportPayload[]) => {
+const writeStoredConversationIds = (ids: string[]) => {
   if (typeof window === 'undefined') {
     return;
   }
   window.localStorage.setItem(
-    CONVERSATION_REPORT_CACHE_KEY,
-    JSON.stringify(reports),
+    CONVERSATION_IDS_STORAGE_KEY,
+    JSON.stringify(ids.slice(0, MAX_STORED_CONVERSATIONS)),
   );
 };
 
-const toReportHistoryItem = (
-  report: ConversationReportPayload,
-): ConversationReportHistoryItem => ({
-  id: report.id,
-  conversationId: report.conversationId,
-  createdAt: report.createdAt,
-  updatedAt: report.updatedAt,
-  targetLanguage: report.targetLanguage,
-  nativeLanguage: report.nativeLanguage,
-  sourceMode: report.sourceMode,
-  voiceStyle: report.voiceStyle,
-  reportLanguage: report.reportLanguage,
-  headline: report.report.headline,
-  overallSummary: report.report.overallSummary,
-  averageScore: report.metrics.averageScore,
-  durationMinutes: report.metrics.durationMinutes,
-});
+type ActiveConversationByLanguage = Partial<Record<LanguageCode, string>>;
 
-export const cacheConversationReport = (report: ConversationReportPayload) => {
-  const existing = readCachedReports().filter(
-    (item) =>
-      item.id !== report.id && item.conversationId !== report.conversationId,
-  );
-  existing.unshift(report);
-  existing.sort(
-    (a, b) =>
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
-  writeCachedReports(existing.slice(0, 10));
+const isLanguageCode = (value: unknown): value is LanguageCode =>
+  value === 'cantonese' || value === 'mandarin' || value === 'english';
+
+const readStoredActiveConversationByLanguage = (): ActiveConversationByLanguage => {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return {};
+    }
+    const next: ActiveConversationByLanguage = {};
+    for (const [language, conversationId] of Object.entries(parsed)) {
+      if (isLanguageCode(language) && typeof conversationId === 'string' && conversationId.trim()) {
+        next[language] = conversationId;
+      }
+    }
+    return next;
+  } catch {
+    return {};
+  }
 };
 
-const getCachedConversationReport = (
-  conversationId: string,
-): ConversationReportPayload | null =>
-  readCachedReports().find((item) => item.conversationId === conversationId) ?? null;
-
-const getCachedConversationReportById = (
-  reportId: string,
-): ConversationReportPayload | null =>
-  readCachedReports().find((item) => item.id === reportId) ?? null;
-
-const getCachedConversationReportHistory = (): ConversationReportHistoryItem[] =>
-  readCachedReports().map(toReportHistoryItem);
+const writeStoredActiveConversationByLanguage = (
+  value: ActiveConversationByLanguage,
+) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(
+    ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY,
+    JSON.stringify(value),
+  );
+};
 
 export const getStoredConversationAccessKey = (
   conversationId: string,
@@ -143,6 +144,67 @@ export const storeConversationAccessKey = (
   const next = readStoredConversationAccessKeys();
   next[conversationId] = accessKey.trim();
   writeStoredConversationAccessKeys(next);
+};
+
+export const getStoredConversationIds = (): string[] => readStoredConversationIds();
+
+export const trackConversationId = (conversationId: string) => {
+  if (!conversationId.trim()) {
+    return;
+  }
+  const next = readStoredConversationIds().filter((item) => item !== conversationId);
+  next.unshift(conversationId);
+  writeStoredConversationIds(next);
+};
+
+export const getStoredActiveConversationIdByLanguage = (
+  language: LanguageCode,
+): string | undefined => readStoredActiveConversationByLanguage()[language];
+
+export const storeActiveConversationIdByLanguage = (
+  language: LanguageCode,
+  conversationId: string,
+) => {
+  if (!conversationId.trim()) {
+    return;
+  }
+  const next = readStoredActiveConversationByLanguage();
+  next[language] = conversationId;
+  writeStoredActiveConversationByLanguage(next);
+};
+
+export const removeConversationPersistence = (
+  conversationId: string,
+  targetLanguage?: LanguageCode,
+) => {
+  if (typeof window === 'undefined' || !conversationId.trim()) {
+    return;
+  }
+
+  const accessKeys = readStoredConversationAccessKeys();
+  if (accessKeys[conversationId]) {
+    delete accessKeys[conversationId];
+    writeStoredConversationAccessKeys(accessKeys);
+  }
+
+  writeStoredConversationIds(
+    readStoredConversationIds().filter((item) => item !== conversationId),
+  );
+
+  if (window.localStorage.getItem('activeConversationId') === conversationId) {
+    window.localStorage.removeItem('activeConversationId');
+  }
+
+  const activeByLanguage = readStoredActiveConversationByLanguage();
+  for (const [language, activeId] of Object.entries(activeByLanguage)) {
+    if (activeId !== conversationId) {
+      continue;
+    }
+    if (!targetLanguage || language === targetLanguage) {
+      delete activeByLanguage[language as LanguageCode];
+    }
+  }
+  writeStoredActiveConversationByLanguage(activeByLanguage);
 };
 
 export const buildConversationAccessHeaders = (
@@ -190,6 +252,13 @@ export function fetchConversationHistory(ids?: string[]) {
   );
 }
 
+export function deleteConversation(conversationId: string) {
+  return apiClient.delete<{ status: string }>(
+    `/conversation/${conversationId}`,
+    { headers: buildConversationAccessHeaders(conversationId) },
+  );
+}
+
 export function fetchConversationById(conversationId: string) {
   return apiClient.get<ConversationSession>(
     `/conversation/${conversationId}`,
@@ -203,76 +272,6 @@ export function fetchConversationSummary(conversationId: string, locale?: string
     `/conversation/${conversationId}/summary${params}`,
     { headers: buildConversationAccessHeaders(conversationId) },
   );
-}
-
-export function fetchConversationReport(conversationId: string) {
-  return apiClient.get<ConversationReportPayload | null>(
-    `/conversation/${conversationId}/report`,
-    { headers: buildConversationAccessHeaders(conversationId) },
-  )
-    .then((payload) => {
-      if (payload) {
-        cacheConversationReport(payload);
-      }
-      return payload;
-    })
-    .catch(() => getCachedConversationReport(conversationId));
-}
-
-export function generateConversationReport(
-  conversationId: string,
-  payload: {
-    sourceMode?: 'immersive' | 'voice' | 'text';
-    voiceStyle?: string;
-    force?: boolean;
-  } = {},
-) {
-  return apiClient.postWithOptions<
-    ConversationReportPayload,
-    {
-      sourceMode?: 'immersive' | 'voice' | 'text';
-      voiceStyle?: string;
-      force?: boolean;
-    }
-  >(
-    `/conversation/${conversationId}/report`,
-    payload,
-    { headers: buildConversationAccessHeaders(conversationId) },
-  ).then((report) => {
-    cacheConversationReport(report);
-    return report;
-  });
-}
-
-export function fetchConversationReportHistory() {
-  return apiClient.get<ConversationReportHistoryItem[]>(
-    '/conversation/reports/history',
-  )
-    .then((payload) => {
-      const cached = getCachedConversationReportHistory();
-      if (!payload.length && cached.length) {
-        return cached;
-      }
-      return payload;
-    })
-    .catch(() => getCachedConversationReportHistory());
-}
-
-export function fetchConversationReportById(reportId: string) {
-  return apiClient.get<ConversationReportPayload>(
-    `/conversation/reports/${reportId}`,
-  )
-    .then((payload) => {
-      cacheConversationReport(payload);
-      return payload;
-    })
-    .catch(() => {
-      const cached = getCachedConversationReportById(reportId);
-      if (!cached) {
-        throw new Error('report_not_found');
-      }
-      return cached;
-    });
 }
 
 export function archiveConversation(conversationId: string) {

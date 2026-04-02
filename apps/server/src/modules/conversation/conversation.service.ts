@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { access, mkdir, readFile, writeFile } from "fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "fs/promises";
 import { basename, extname, join } from "path";
 import { Observable, Subject } from "rxjs";
 import { envConfig } from "../../common/config/env.config";
@@ -373,6 +373,53 @@ export class ConversationService {
     });
     session.status = "archived";
     await this.persistSession(session);
+  }
+
+  async deleteConversation(
+    conversationId: string,
+    userId?: string,
+    conversationKey?: string,
+  ): Promise<void> {
+    await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      bindUserIfAuthenticated: true,
+    });
+
+    if (this.prisma.canUseDatabase()) {
+      try {
+        await this.prisma.conversation.deleteMany({
+          where: { id: conversationId },
+        });
+      } catch (error) {
+        if (this.isDatabaseConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Database connection lost (P1001/P1002).",
+          );
+          if (!this.prisma.allowsInMemoryFallback()) {
+            this.prisma.ensurePersistentStorageAvailable();
+          }
+        } else if (this.isMissingUserColumnError(error)) {
+          this.logMissingUserColumnWarning();
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    await this.sessionCache.deleteSession(conversationId);
+    this.sessions.delete(conversationId);
+
+    const stream = this.sessionStreams.get(conversationId);
+    if (stream) {
+      stream.complete();
+      this.sessionStreams.delete(conversationId);
+    }
+
+    await Promise.all([
+      this.removeConversationStorage(join(CONVERSATION_IMAGE_STORAGE_ROOT, conversationId)),
+      this.removeConversationStorage(join(CONVERSATION_VOICE_STORAGE_ROOT, conversationId)),
+    ]);
   }
 
   /** Public wrapper for persisting session (used by VoiceTutorService for TTS URL writeback) */
@@ -1657,6 +1704,18 @@ export class ConversationService {
     return `/api/conversation/${conversationId}/image/${fileName}`;
   }
 
+  private async removeConversationStorage(directory: string): Promise<void> {
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to clean conversation storage ${directory}: ${
+          (error as Error).message
+        }`,
+      );
+    }
+  }
+
   private resolveImageExtension(mimeType?: string, originalName?: string): string {
     const normalizedMime = mimeType?.trim().toLowerCase();
     if (normalizedMime === "image/png") {
@@ -1884,7 +1943,7 @@ export class ConversationService {
     }
   }
 
-  async listByIds(ids: string[], limit = 20) {
+  async listByIds(ids: string[], limit = 10) {
     if (!ids.length) {
       return [];
     }
@@ -1968,7 +2027,7 @@ export class ConversationService {
     }));
   }
 
-  async listUserHistory(userId: string, limit = 20) {
+  async listUserHistory(userId: string, limit = 10) {
     if (
       !this.prisma.canUseDatabase() &&
       !this.prisma.allowsInMemoryFallback()
@@ -2266,5 +2325,10 @@ const CONVERSATION_IMAGE_STORAGE_ROOT = join(
   process.cwd(),
   "tmp",
   "conversation-images",
+);
+const CONVERSATION_VOICE_STORAGE_ROOT = join(
+  process.cwd(),
+  "tmp",
+  "voice-uploads",
 );
 const MAX_IMAGE_FILE_SIZE_BYTES = 6 * 1024 * 1024;

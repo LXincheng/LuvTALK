@@ -34,6 +34,19 @@ export class SessionCacheService {
     return Promise.resolve();
   }
 
+  deleteSession(conversationId: string): Promise<void> {
+    try {
+      this.cache.delete(this.buildKey(conversationId));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete session cache for ${conversationId}: ${
+          (error as Error).message
+        }`,
+      );
+    }
+    return Promise.resolve();
+  }
+
   private buildKey(conversationId: string): string {
     return `session:${conversationId}`;
   }

@@ -8,20 +8,10 @@ import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
 import StreakFlame from '../components/micro/StreakFlame';
-import ProfileReportHistory from '../components/report/ProfileReportHistory';
 import { STAT_COLOR_CLASSES, PROGRESS_COLORS } from '../constants/ui';
 import type { StatColor } from '../constants/ui';
-import { PROFILE_REPORT_HISTORY_LIMIT } from '../constants/report';
 import { fetchAchievementSummaryCached, fetchAchievementsCached } from '../services/achievementService';
 import type { AchievementSummary, AchievementWithProgress } from '../services/achievementService';
-import {
-  fetchConversationReportById,
-  fetchConversationReportHistory,
-} from '../services/conversationService';
-import type {
-  ConversationReportHistoryItem,
-  ConversationReportPayload,
-} from '../types/api';
 import {
   fetchLearningGoalCached,
   saveLearningGoal,
@@ -57,10 +47,6 @@ export default function ProfilePage() {
   const [summary, setSummary] = useState<AchievementSummary | null>(null);
   const [recentUnlocked, setRecentUnlocked] = useState<AchievementWithProgress[]>([]);
   const [goalData, setGoalData] = useState<LearningGoalPayload | null>(null);
-  const [reportHistory, setReportHistory] = useState<ConversationReportHistoryItem[]>([]);
-  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
-  const [selectedReport, setSelectedReport] = useState<ConversationReportPayload | null>(null);
-  const [isReportsLoading, setIsReportsLoading] = useState(false);
   const [isSavingGoal, setIsSavingGoal] = useState(false);
   const [goalDraft, setGoalDraft] = useState({ dailyMinutes: 10, weeklyWords: 20, weeklySpeaking: 3 });
   const [, setIsGoalRefreshing] = useState(false);
@@ -74,47 +60,6 @@ export default function ProfilePage() {
     freshS.then(setSummary).catch(() => {});
     freshA.then((all) => setRecentUnlocked(all.filter((a) => a.unlocked).slice(0, 3))).catch(() => {});
   }, []);
-
-  const refreshReportHistory = useCallback(async () => {
-    if (!user || isGuest) {
-      setReportHistory([]);
-      setSelectedReportId(null);
-      setSelectedReport(null);
-      return;
-    }
-    setIsReportsLoading(true);
-    try {
-      const history = await fetchConversationReportHistory();
-      setReportHistory(history);
-      setSelectedReportId((prev) =>
-        prev && history.some((item) => item.id === prev) ? prev : history[0]?.id ?? null,
-      );
-      if (!history.length) setSelectedReport(null);
-    } catch {
-      toast.error(t('profileReportsLoadError'), { id: 'profile-reports' });
-    } finally {
-      setIsReportsLoading(false);
-    }
-  }, [isGuest, t, user]);
-
-  useEffect(() => { void refreshReportHistory(); }, [refreshReportHistory]);
-
-  const refreshSelectedReport = useCallback(async () => {
-    if (!selectedReportId || !user || isGuest) {
-      if (!selectedReportId) setSelectedReport(null);
-      return;
-    }
-    setIsReportsLoading(true);
-    try {
-      setSelectedReport(await fetchConversationReportById(selectedReportId));
-    } catch {
-      toast.error(t('profileReportsLoadError'), { id: 'profile-reports' });
-    } finally {
-      setIsReportsLoading(false);
-    }
-  }, [isGuest, selectedReportId, t, user]);
-
-  useEffect(() => { void refreshSelectedReport(); }, [refreshSelectedReport]);
 
   const refreshLearningGoal = useCallback(async (showError = true) => {
     setIsGoalRefreshing(true);
@@ -321,17 +266,6 @@ export default function ProfilePage() {
             {isSavingGoal ? t('profileGoalSaving') : t('profileGoalSave')}
           </button>
         </section>
-
-        {/* ── Immersive reports ── */}
-        <ProfileReportHistory
-          history={reportHistory.slice(0, PROFILE_REPORT_HISTORY_LIMIT)}
-          selectedReportId={selectedReportId}
-          selectedReport={selectedReport}
-          isLoading={isReportsLoading}
-          isGuest={isGuest}
-          onSelectReport={setSelectedReportId}
-          onRefreshSelected={selectedReportId ? () => { void refreshSelectedReport(); } : undefined}
-        />
 
         {/* ── Recent achievements ── */}
         <section className="page-panel rounded-[28px] p-5">

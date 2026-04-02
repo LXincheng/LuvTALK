@@ -215,52 +215,49 @@ export class ConversationReportService {
       metrics,
       reportLanguage,
     });
+    const reportModelOrder = this.resolveReportModelOrder(sourceMode);
 
     const generatedReport =
       (await this.requestReportWithModel(
         promptInput,
-        envConfig.modelRouting.primaryModel,
-        envConfig.modelTimeoutMs.primary,
+        reportModelOrder[0]?.model ?? "",
+        reportModelOrder[0]?.timeoutMs ?? envConfig.modelTimeoutMs.secondary,
         {
-          label: "report-primary",
+          label: reportModelOrder[0]?.label ?? "report-primary",
         },
       )) ??
       (await this.requestReportWithModel(
         promptInput,
-        envConfig.modelRouting.secondaryModel,
-        envConfig.modelTimeoutMs.secondary,
+        reportModelOrder[1]?.model ?? "",
+        reportModelOrder[1]?.timeoutMs ?? envConfig.modelTimeoutMs.primary,
         {
-          label: "report-secondary",
+          label: reportModelOrder[1]?.label ?? "report-secondary",
         },
       )) ??
       (await this.requestReportWithModel(
         promptInput,
-        envConfig.modelRouting.thirdModel,
-        envConfig.modelTimeoutMs.third,
+        reportModelOrder[2]?.model ?? "",
+        reportModelOrder[2]?.timeoutMs ?? envConfig.modelTimeoutMs.third,
         {
-          label: "report-third",
+          label: reportModelOrder[2]?.label ?? "report-third",
         },
       )) ??
       this.buildFallbackReport(promptInput);
 
     if (!this.prisma.canUseDatabase()) {
-      return {
-        id: `report-${conversationId}`,
+      return this.buildTransientReportPayload({
         conversationId,
-        userId: session.userId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        targetLanguage: session.targetLanguage,
-        nativeLanguage: (session.nativeLanguage ?? null) as LanguageCode | null,
+        session,
         sourceMode,
         voiceStyle: dto.voiceStyle?.trim() || undefined,
         reportLanguage,
         metrics,
         report: generatedReport,
-      };
+      });
     }
 
     try {
+      await this.conversationService.persistSessionPublic(session);
       const record = await this.prisma.conversationReport.upsert({
         where: { conversationId },
         update: {
@@ -292,39 +289,43 @@ export class ConversationReportService {
         this.logger.warn(
           "Conversation report table missing while saving report. Returning transient payload.",
         );
-        return {
-          id: `report-${conversationId}`,
+        return this.buildTransientReportPayload({
           conversationId,
-          userId: session.userId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          targetLanguage: session.targetLanguage,
-          nativeLanguage: (session.nativeLanguage ?? null) as LanguageCode | null,
+          session,
           sourceMode,
           voiceStyle: dto.voiceStyle?.trim() || undefined,
           reportLanguage,
           metrics,
           report: generatedReport,
-        };
+        });
       }
       if (this.isDatabaseConnectionError(error)) {
         this.prisma.markDatabaseUnavailable(
           "Database connection lost while saving conversation report.",
         );
-        return {
-          id: `report-${conversationId}`,
+        return this.buildTransientReportPayload({
           conversationId,
-          userId: session.userId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          targetLanguage: session.targetLanguage,
-          nativeLanguage: (session.nativeLanguage ?? null) as LanguageCode | null,
+          session,
           sourceMode,
           voiceStyle: dto.voiceStyle?.trim() || undefined,
           reportLanguage,
           metrics,
           report: generatedReport,
-        };
+        });
+      }
+      if (this.isConversationReportForeignKeyError(error)) {
+        this.logger.warn(
+          `Conversation report save skipped because conversation ${conversationId} is not yet persisted. Returning transient payload.`,
+        );
+        return this.buildTransientReportPayload({
+          conversationId,
+          session,
+          sourceMode,
+          voiceStyle: dto.voiceStyle?.trim() || undefined,
+          reportLanguage,
+          metrics,
+          report: generatedReport,
+        });
       }
       throw error;
     }
@@ -587,6 +588,46 @@ export class ConversationReportService {
     return hasVoiceSignals ? "voice" : "text";
   }
 
+  private resolveReportModelOrder(sourceMode: ConversationReportSourceMode) {
+    if (sourceMode === "immersive") {
+      return [
+        {
+          model: envConfig.modelRouting.immersiveReportModel,
+          timeoutMs: 12_000,
+          label: "report-immersive-flash",
+        },
+        {
+          model: envConfig.modelRouting.primaryModel,
+          timeoutMs: Math.max(envConfig.modelTimeoutMs.primary, 16_000),
+          label: "report-primary",
+        },
+        {
+          model: envConfig.modelRouting.thirdModel,
+          timeoutMs: Math.max(envConfig.modelTimeoutMs.third, 6_000),
+          label: "report-third",
+        },
+      ] as const;
+    }
+
+    return [
+      {
+        model: envConfig.modelRouting.primaryModel,
+        timeoutMs: envConfig.modelTimeoutMs.primary,
+        label: "report-primary",
+      },
+      {
+        model: envConfig.modelRouting.secondaryModel,
+        timeoutMs: envConfig.modelTimeoutMs.secondary,
+        label: "report-secondary",
+      },
+      {
+        model: envConfig.modelRouting.thirdModel,
+        timeoutMs: envConfig.modelTimeoutMs.third,
+        label: "report-third",
+      },
+    ] as const;
+  }
+
   private resolveReportLanguage(
     nativeLanguage: LanguageCode,
   ): "zh" | "en" {
@@ -645,7 +686,7 @@ export class ConversationReportService {
       if (!content) {
         return null;
       }
-      return this.parseReportContent(content);
+      return this.parseReportContent(content, input);
     } catch (error) {
       this.logger.warn(
         `Conversation report request ${options.label} aborted: ${(error as Error).message}`,
@@ -711,7 +752,10 @@ export class ConversationReportService {
     }
   }
 
-  private parseReportContent(content: string): ConversationReportBody | null {
+  private parseReportContent(
+    content: string,
+    input: ConversationReportPromptInput,
+  ): ConversationReportBody | null {
     const start = content.indexOf("{");
     const end = content.lastIndexOf("}");
     if (start === -1 || end === -1 || end <= start) {
@@ -723,9 +767,29 @@ export class ConversationReportService {
         string,
         unknown
       >;
-      return ConversationReportBodySchema.parse(
-        this.normalizeReportPayload(parsed),
+      const normalized = this.normalizeReportPayload(parsed, input);
+      const directResult = ConversationReportBodySchema.safeParse(normalized);
+      if (directResult.success) {
+        return directResult.data;
+      }
+
+      this.logger.warn(
+        `Conversation report JSON missing required fields after normalization, applying fallback merge: ${directResult.error.message}`,
       );
+
+      const merged = this.mergeReportWithFallback(
+        this.buildFallbackReport(input),
+        normalized,
+      );
+      const mergedResult = ConversationReportBodySchema.safeParse(merged);
+      if (mergedResult.success) {
+        return mergedResult.data;
+      }
+
+      this.logger.warn(
+        `Conversation report JSON still invalid after fallback merge: ${mergedResult.error.message}`,
+      );
+      return this.buildFallbackReport(input);
     } catch (error) {
       this.logger.warn(
         `Failed to parse conversation report JSON: ${(error as Error).message}`,
@@ -878,6 +942,42 @@ export class ConversationReportService {
               : "This shows one of the most valuable points to refine next.",
       })),
     });
+  }
+
+  private mergeReportWithFallback(
+    fallback: ConversationReportBody,
+    partial: ConversationReportBody,
+  ): ConversationReportBody {
+    const pickArray = (primary: string[], secondary: string[]) =>
+      primary.length > 0 ? primary : secondary;
+    const mergeSection = (
+      base: ConversationReportBody["pronunciation"],
+      next: ConversationReportBody["pronunciation"],
+    ) => ({
+      summary: next.summary.trim() || base.summary,
+      highlights: pickArray(next.highlights, base.highlights),
+      actionPlan: pickArray(next.actionPlan, base.actionPlan),
+    });
+
+    return {
+      headline: partial.headline.trim() || fallback.headline,
+      overallSummary: partial.overallSummary.trim() || fallback.overallSummary,
+      learnerSnapshot: partial.learnerSnapshot.trim() || fallback.learnerSnapshot,
+      strengths: pickArray(partial.strengths, fallback.strengths),
+      opportunities: pickArray(partial.opportunities, fallback.opportunities),
+      pronunciation: mergeSection(fallback.pronunciation, partial.pronunciation),
+      vocabulary: mergeSection(fallback.vocabulary, partial.vocabulary),
+      grammar: mergeSection(fallback.grammar, partial.grammar),
+      rhythm: mergeSection(fallback.rhythm, partial.rhythm),
+      nextSessionPlan: {
+        focus: partial.nextSessionPlan.focus.trim() || fallback.nextSessionPlan.focus,
+        drills: pickArray(partial.nextSessionPlan.drills, fallback.nextSessionPlan.drills),
+        checkpoint:
+          partial.nextSessionPlan.checkpoint.trim() ||
+          fallback.nextSessionPlan.checkpoint,
+      },
+      keyMoments: partial.keyMoments.length > 0 ? partial.keyMoments : fallback.keyMoments,
+    };
   }
 
   private buildMinimalScenarioFeedback(
@@ -1252,7 +1352,9 @@ export class ConversationReportService {
 
   private normalizeReportPayload(
     value: Record<string, unknown>,
+    input?: ConversationReportPromptInput,
   ): ConversationReportBody {
+    const defaults = input ? this.buildReportDefaults(input) : null;
     const normalizeStringArray = (input: unknown, limit: number): string[] => {
       if (!Array.isArray(input)) {
         return [];
@@ -1272,7 +1374,7 @@ export class ConversationReportService {
         summary:
           typeof record.summary === "string" && record.summary.trim()
             ? record.summary.trim()
-            : "",
+            : defaults?.sectionSummary ?? "",
         highlights: normalizeStringArray(record.highlights, 3),
         actionPlan: normalizeStringArray(record.actionPlan, 3),
       };
@@ -1287,15 +1389,17 @@ export class ConversationReportService {
 
     return {
       headline:
-        typeof payload.headline === "string" ? payload.headline.trim() : "",
+        typeof payload.headline === "string" && payload.headline.trim()
+          ? payload.headline.trim()
+          : defaults?.headline ?? "",
       overallSummary:
         typeof payload.overallSummary === "string"
-          ? payload.overallSummary.trim()
-          : "",
+          ? payload.overallSummary.trim() || defaults?.overallSummary || ""
+          : defaults?.overallSummary ?? "",
       learnerSnapshot:
         typeof payload.learnerSnapshot === "string"
-          ? payload.learnerSnapshot.trim()
-          : "",
+          ? payload.learnerSnapshot.trim() || defaults?.learnerSnapshot || ""
+          : defaults?.learnerSnapshot ?? "",
       strengths: normalizeStringArray(payload.strengths, 3),
       opportunities: normalizeStringArray(payload.opportunities, 3),
       pronunciation: normalizeSection(payload.pronunciation),
@@ -1305,13 +1409,13 @@ export class ConversationReportService {
       nextSessionPlan: {
         focus:
           typeof nextSessionPlan.focus === "string"
-            ? nextSessionPlan.focus.trim()
-            : "",
+            ? nextSessionPlan.focus.trim() || defaults?.nextSessionFocus || ""
+            : defaults?.nextSessionFocus ?? "",
         drills: normalizeStringArray(nextSessionPlan.drills, 3),
         checkpoint:
           typeof nextSessionPlan.checkpoint === "string"
-            ? nextSessionPlan.checkpoint.trim()
-            : "",
+            ? nextSessionPlan.checkpoint.trim() || defaults?.nextSessionCheckpoint || ""
+            : defaults?.nextSessionCheckpoint ?? "",
       },
       keyMoments: Array.isArray(payload.keyMoments)
         ? payload.keyMoments
@@ -1341,6 +1445,39 @@ export class ConversationReportService {
             )
             .slice(0, 3)
         : [],
+    };
+  }
+
+  private buildReportDefaults(input: ConversationReportPromptInput): {
+    headline: string;
+    overallSummary: string;
+    learnerSnapshot: string;
+    sectionSummary: string;
+    nextSessionFocus: string;
+    nextSessionCheckpoint: string;
+  } {
+    const isZh = input.reportLanguage === "zh";
+    return {
+      headline: isZh
+        ? `${this.resolveLanguageLabel(input.targetLanguage)} 1 对 1 复盘报告`
+        : `${this.resolveLanguageLabel(input.targetLanguage)} 1:1 Review Report`,
+      overallSummary: isZh
+        ? `这是一轮${input.sourceMode === "immersive" ? "沉浸式" : "1 对 1"}练习。整体表现显示你已经能维持基本沟通，但仍有明显的精修空间。`
+        : `This was a ${input.sourceMode === "immersive" ? "realtime immersive" : "1:1"} practice session. You already sustain the conversation, but there is still clear room for refinement.`,
+      learnerSnapshot: isZh
+        ? `本轮共 ${input.summary.userTurns} 次学员输出，系统平均分 ${input.summary.averageScore ?? "--"}。`
+        : `You produced ${input.summary.userTurns} learner turns in this session, with an average system score of ${input.summary.averageScore ?? "--"}.`,
+      sectionSummary: isZh
+        ? "本节基于本轮对话与系统提示做简要归纳，建议下一轮继续带着这一点练下去。"
+        : "This section is summarized from the session transcript and coaching signals, and should carry into the next round.",
+      nextSessionFocus:
+        input.summary.recommendedNextActions[0] ??
+        (isZh
+          ? "下一轮继续复用本轮高频表达。"
+          : "Reuse the high-frequency expressions from this session next time."),
+      nextSessionCheckpoint: isZh
+        ? "如果下轮能稳定输出更短、更准的句子，说明这次复盘已经起效。"
+        : "If you can produce shorter and more accurate sentences next round, this review has already worked.",
     };
   }
 
@@ -1512,5 +1649,38 @@ export class ConversationReportService {
       error.code === "P2021" &&
       error.meta?.modelName === "ConversationReport"
     );
+  }
+
+  private isConversationReportForeignKeyError(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003" &&
+      error.meta?.modelName === "ConversationReport"
+    );
+  }
+
+  private buildTransientReportPayload(params: {
+    conversationId: string;
+    session: ConversationSession;
+    sourceMode: ConversationReportSourceMode;
+    voiceStyle?: string;
+    reportLanguage: "zh" | "en";
+    metrics: ConversationReportMetrics;
+    report: ConversationReportBody;
+  }): ConversationReportPayload {
+    return {
+      id: `report-${params.conversationId}`,
+      conversationId: params.conversationId,
+      userId: params.session.userId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      targetLanguage: params.session.targetLanguage,
+      nativeLanguage: (params.session.nativeLanguage ?? null) as LanguageCode | null,
+      sourceMode: params.sourceMode,
+      voiceStyle: params.voiceStyle,
+      reportLanguage: params.reportLanguage,
+      metrics: params.metrics,
+      report: params.report,
+    };
   }
 }

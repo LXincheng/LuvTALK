@@ -11,7 +11,7 @@ describe("realtime.ws.helpers", () => {
     it("enables create_response by default", () => {
       const payload = buildSessionUpdate({
         instructions: "test",
-        voice: "shimmer",
+        voice: "Serena",
         turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
       });
       expect(payload.session.turn_detection.create_response).toBe(true);
@@ -20,30 +20,31 @@ describe("realtime.ws.helpers", () => {
     it("enables interrupt_response by default", () => {
       const payload = buildSessionUpdate({
         instructions: "test",
-        voice: "shimmer",
+        voice: "Serena",
         turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
       });
       expect(payload.session.turn_detection.interrupt_response).toBe(true);
     });
 
-    it("uses provided whisper model when it contains whisper", () => {
+    it("uses the provided realtime transcribe model without forcing whisper fallback", () => {
       const payload = buildSessionUpdate({
         instructions: "test",
-        voice: "alloy",
+        voice: "Jennifer",
         turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
-        transcribeModel: "whisper-1",
+        transcribeModel: "qwen3-asr-flash-realtime",
       });
-      expect(payload.session.input_audio_transcription.model).toBe("whisper-1");
+      expect(payload.session.input_audio_transcription?.model).toBe(
+        "qwen3-asr-flash-realtime",
+      );
     });
 
-    it("falls back to whisper-1 for non-whisper model", () => {
+    it("omits input_audio_transcription when no model is configured", () => {
       const payload = buildSessionUpdate({
         instructions: "test",
-        voice: "alloy",
+        voice: "Jennifer",
         turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
-        transcribeModel: "custom-transcribe-v1",
       });
-      expect(payload.session.input_audio_transcription.model).toBe("whisper-1");
+      expect(payload.session.input_audio_transcription).toBeUndefined();
     });
   });
 

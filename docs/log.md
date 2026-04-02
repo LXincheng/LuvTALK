@@ -713,3 +713,53 @@
 | 控件适配     | `ReviewFlipCard` 的朗读按钮重做暗黑样式；`AudioPlayer` 去掉多余的小阴影高光，避免在暗色背景上出现脏点和发灰边缘。                                                                                 |
 | 设计结果     | 整体视觉从“浅玻璃叠层”收口为“轻面板 + 统一底色 + 少量渐变”的苹果式简约方向，暗黑与白天模式都更干净、稳定、可读。                                                                                  |
 | 验证结果     | `pnpm --filter web typecheck`、`pnpm --filter web build` 通过。                                                                                                                                   |
+
+### 2026-04-02（Immersive Realtime / Report 一体化收口）
+
+| 维度          | 记录                                                                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点        | immersive 首版接入后出现三类问题：百炼 realtime upstream 连接 404；结束后报告 toast 使用了居中特例样式；报告生成成功后无法直接打开本次报告预览。                                                     |
+| Realtime 修复 | Realtime WS 上游地址改为百炼官方 `api-ws` 路径，并在代理层兼容将旧 `compatible-mode` 地址自动归一到 `api-ws`；同时移除旧 `OpenAI-Beta` 头与已废弃的 `offer + SDP` 兼容链路，统一收敛到现有 WS 代理。 |
+| 转写策略收口  | immersive realtime 暂不再强绑额外 `REALTIME_TRANSCRIBE_MODEL`，优先走 `qwen3-omni-flash-realtime` 自身多语种理解，减少英语被偏置识别成普通话的风险；双通道 ASR 字幕仍保留为后续阶段。                |
+| 音色策略收口  | immersive 默认音色改为 `Jennifer`，并将普通话 / 粤语 catalog 也统一把 `Jennifer / Aiden` 放在前排，优先保证跨语种自然度，避免落到 `Cherry` 一类口音不稳定的英语音色。                                |
+| 报告链路修复  | immersive 报告模型顺序保持 `qwen3.5-flash -> primary -> deepseek-chat`，但单独提高报告超时：flash 9s、primary 至少 16s、third 至少 6s，避免复用聊天短超时导致连续 aborted。                          |
+| 交互收口      | immersive report prompt toast 移除居中特例，回归全局统一左对齐；报告生成成功后直接拿返回的 `report.id` 跳到 `/profile?reportId=...`，可立即预览本轮报告，而不再只跳个人中心首页。                    |
+| UI 收口       | immersive 页面删除“更像一场...”这类无信息量文案；中心气泡从 3D 小球改为蓝色主题的火焰流动感彩色气泡，保留简洁、高级、偏 Apple 风格的沉浸视觉。                                                       |
+| Env 收口      | `.env` 与 `.env.example` 的 `PRIMARY_REALTIME_API_URL` 改为官方 `https://dashscope.aliyuncs.com/api-ws/v1/realtime`；`REALTIME_TRANSCRIBE_MODEL` 默认留空。                                          |
+| 验证结果      | `pnpm --filter server test`、`pnpm --filter server build`、`pnpm --filter web typecheck`、`pnpm --filter web build` 通过。                                                                           |
+
+### 2026-04-02（Chat 会话生命周期与历史收口）
+
+| 维度           | 记录                                                                                                                                                                                               |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点         | Chat 切换学习语言时会优先复用旧会话，不符合“切语言即新开一轮”的练习预期；历史抽屉也缺少删除能力，游客与登录态都无法完整清理本地/远端残留。                                                         |
+| 会话策略调整   | `ConversationPage` 的语言切换改为始终 `startConversation` 新建会话，不再按语言去复用旧 session；`new chat` 也统一走显式新建，避免当前语言状态与真实会话错位。                                      |
+| 删除链路补齐   | 新增 `DELETE /conversation/:conversationId`；服务端删除会话后同步清理数据库记录、内存 session、session cache、`tmp/voice-uploads/<conversationId>` 与 `tmp/conversation-images/<conversationId>`。 |
+| 前端持久化收口 | `conversationService` 新增统一的本地会话持久化管理：会话 id、访问 key、按语言激活会话映射、报告缓存都在删除时一起清理；若删除的是当前会话，前端会自动拉起一条同语言新会话兜底。                    |
+| 历史上限统一   | 前端本地 `conversationIds` 与历史列表统一限制为最近 10 条；后端 `listByIds/listUserHistory` 默认上限也同步改为 10，避免游客本地和登录态数据库返回数量不一致。                                      |
+| Supabase 校验  | 执行 `prisma:validate`、`prisma:migrate:status`、`prisma:migrate:deploy` 后确认远端 Supabase 已与本地 8 个 migration 保持一致，本轮无需新增迁移。                                                  |
+| 验证结果       | `pnpm --filter server test`、`pnpm --filter server build`、`pnpm --filter web typecheck`、`pnpm --filter web build` 通过。                                                                         |
+
+### 2026-04-02（Immersive Live Orb 与实时字幕链路二次收口）
+
+| 维度         | 记录                                                                                                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点       | immersive 中央气泡视觉仍偏粗糙，缺少 GPT / Gemini live 那种“一个球体撑住全场”的稳定感；同时代码里 realtime 转写模型仍会隐式回退到 `STT_MODEL`，和文档里“默认走 omni 自带转写”不一致。 |
+| 视觉重构     | `AudioOrb` 重做为石墨质感球体：中心保留圆球内核，外层以冷蓝色火焰扰动包裹，跟随 `listening / ai speaking` 和音量能量做呼吸、旋转、拉伸，不再做廉价 3D 球或边框感气泡。                |
+| 背景收口     | `ImmersiveMode` 背景与字幕面板改为更克制的银灰 / 石墨 / 冷蓝 live room 语言，减少亮蓝堆叠和悬浮玻璃感，整体更安静、更高级。                                                           |
+| 字幕链路结论 | 当前 immersive 字幕默认仍来自 `qwen3-omni-flash-realtime` realtime 事件；只有显式设置 `REALTIME_TRANSCRIBE_MODEL` 时，才会向上游附带独立 `input_audio_transcription.model`。          |
+| 配置修复     | `env.config.ts` 去掉 `realtimeTranscribeModel -> STT_MODEL` 的隐式回退，保证“默认走主 realtime 链路、需要独立转写时再显式开启”的行为与文档一致。                                      |
+| 识别偏置修复 | realtime prompt 新增“按音频自动识别语种、原语种保留、不翻译不改写用户语音”的硬约束，避免系统层把英文口语错误拉回普通话表达。                                                          |
+| 性能收口     | 前端字幕节流从 `120ms` 降到 `80ms`，音频采集 buffer 从 `4096` 降到 `2048`；浏览器采集补上 `echoCancellation / noiseSuppression / autoGainControl / mono`，减少噪音回灌与字幕延迟。    |
+| 抗打断收口   | realtime `server_vad` 阈值上调、静音提交窗口缩短，同时前端在 AI 播放窗口内继续抑制麦克风回灌，并增加极低幅度 noise gate，优先减少环境声误触发与导师被打断。                           |
+| UI 二次收口  | 中央 orb 再次减重，去掉上一版偏厚重、偏脏的火焰堆叠，改回更简洁的石墨呼吸球 + 轻火焰环；控制区与字幕面板也同步向全站统一配色和轻面板语言靠拢。                                        |
+| 文档收口     | 重写 `docs/immersive-mode.md`，删除旧的阶段性规划和过时叙述，只保留当前有效的模型选择、字幕来源、识别策略、性能瓶颈与后续优先事项。                                                   |
+
+### 2026-04-02（Immersive Report 需求下线 + Orb 蓝色流体重做）
+
+| 维度     | 记录                                                                                                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 需求调整 | immersive report 需求整体下线，不再在沉浸模式退出后弹生成提示，也不再在 Profile 中保留 immersive 报告历史入口。                                                                       |
+| 前端删除 | 删除 `ConversationPage` 里的 immersive report prompt / generate / preview toast 链路，同时移除 Profile 报告区、报告缓存、相关 service API、类型、常量、多语言文案和前端报告组件文件。 |
+| 接口收口 | 服务端 `conversation.controller` 下线 `/conversation/:id/report` 与 `/conversation/reports/*` 暴露入口，避免产品层继续访问已废弃链路。                                                |
+| 气泡重做 | `AudioOrb` 从石墨核方向切回蓝色主题流体球体：更干净的渐变、更轻的呼吸、更柔和的液态旋流，白天和暗黑模式都不再依赖深灰内核。                                                           |

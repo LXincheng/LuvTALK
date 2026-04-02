@@ -158,7 +158,6 @@ export class RealtimeWsProxy {
       const upstream = new WebSocket(upstreamUrl, {
         headers: {
           Authorization: `Bearer ${realtimeApiKey}`,
-          "OpenAI-Beta": "realtime=v1",
         },
       });
       let upstreamTerminalHandled = false;
@@ -426,19 +425,24 @@ export class RealtimeWsProxy {
 
 const resolveRealtimeWsUrl = (base: string, model: string): string => {
   const normalized = base.replace(/\/$/, "");
-  const httpUrl = normalized.endsWith("/realtime")
-    ? normalized
-    : `${normalized}/realtime`;
+  const realtimePath =
+    normalized.includes("/api-ws/")
+      ? normalized
+      : normalized.includes("/compatible-mode/")
+        ? normalized.replace("/compatible-mode/", "/api-ws/")
+        : normalized.endsWith("/realtime")
+          ? normalized
+          : `${normalized}/realtime`;
   // Map http(s) to ws(s), or keep ws(s) as-is
   let wsUrl: string;
-  if (httpUrl.startsWith("wss://") || httpUrl.startsWith("ws://")) {
-    wsUrl = httpUrl;
-  } else if (httpUrl.startsWith("https://")) {
-    wsUrl = `wss://${httpUrl.slice("https://".length)}`;
-  } else if (httpUrl.startsWith("http://")) {
-    wsUrl = `ws://${httpUrl.slice("http://".length)}`;
+  if (realtimePath.startsWith("wss://") || realtimePath.startsWith("ws://")) {
+    wsUrl = realtimePath;
+  } else if (realtimePath.startsWith("https://")) {
+    wsUrl = `wss://${realtimePath.slice("https://".length)}`;
+  } else if (realtimePath.startsWith("http://")) {
+    wsUrl = `ws://${realtimePath.slice("http://".length)}`;
   } else {
-    wsUrl = httpUrl;
+    wsUrl = realtimePath;
   }
   const joiner = wsUrl.includes("?") ? "&" : "?";
   return `${wsUrl}${joiner}model=${encodeURIComponent(model)}`;

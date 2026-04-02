@@ -16,12 +16,12 @@ export interface VoiceCatalogItem {
 
 const DEFAULT_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> = {
   mandarin: {
-    defaultVoice: 'Serena',
-    options: ['Serena', 'Ethan'],
+    defaultVoice: 'Jennifer',
+    options: ['Jennifer', 'Aiden', 'Serena', 'Ethan'],
   },
   cantonese: {
-    defaultVoice: 'Kiki',
-    options: ['Kiki', 'Rocky'],
+    defaultVoice: 'Jennifer',
+    options: ['Jennifer', 'Aiden', 'Kiki', 'Rocky'],
   },
   english: {
     defaultVoice: 'Jennifer',
@@ -98,6 +98,8 @@ export const getTtsVoiceOptions = (
 
 export const getDefaultTtsVoice = (language: LanguageCode): string =>
   activeVoiceCatalog[language].defaultVoice;
+
+export const DEFAULT_IMMERSIVE_VOICE = 'Jennifer';
 
 export const isTtsVoiceSupported = (
   language: LanguageCode,

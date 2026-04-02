@@ -70,9 +70,11 @@ export const TTS_SPEED_OPTIONS = [
 
 export const DEFAULT_TTS_SPEED = 'normal';
 
-// Keep realtime untouched for now.
 export const REALTIME_VOICE_OPTIONS = [
-  { id: 'shimmer', labelKey: 'voiceShimmer' },
-  { id: 'alloy', labelKey: 'voiceAlloy' },
-  { id: 'nova', labelKey: 'voiceNova' },
+  { id: 'Jennifer', labelKey: 'voiceJenniferLabel' },
+  { id: 'Aiden', labelKey: 'voiceAidenLabel' },
+  { id: 'Serena', labelKey: 'voiceSerenaLabel' },
+  { id: 'Ethan', labelKey: 'voiceEthanLabel' },
+  { id: 'Kiki', labelKey: 'voiceKikiLabel' },
+  { id: 'Rocky', labelKey: 'voiceRockyLabel' },
 ] as const;

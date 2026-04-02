@@ -11,14 +11,14 @@ export const OFFICIAL_TTS_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> 
   [LanguageCode.Mandarin]: {
     languageCode: "zh",
     ttsLanguageType: "Chinese",
-    defaultVoice: "Serena",
-    options: ["Serena", "Ethan"],
+    defaultVoice: "Jennifer",
+    options: ["Jennifer", "Aiden", "Serena", "Ethan"],
   },
   [LanguageCode.Cantonese]: {
     languageCode: "yue",
     ttsLanguageType: "Chinese",
-    defaultVoice: "Kiki",
-    options: ["Kiki", "Rocky"],
+    defaultVoice: "Jennifer",
+    options: ["Jennifer", "Aiden", "Kiki", "Rocky"],
   },
   [LanguageCode.English]: {
     languageCode: "en",

@@ -1,5 +1,4 @@
 export const CONVERSATION_ACCESS_KEYS_STORAGE_KEY = 'conversationAccessKeys';
-export const CONVERSATION_REPORT_CACHE_KEY = 'conversationReportsCache';
 export const CONVERSATION_IDS_STORAGE_KEY = 'conversationIds';
 export const ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY =
   'activeConversationIdByLanguage';

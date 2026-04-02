@@ -48,10 +48,10 @@ export default function ImmersiveConnectionStatus({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 6 }}
-      className="mt-3 inline-flex items-center gap-2.5 rounded-full border border-white/[0.18] bg-white/[0.08] px-3 py-1.5 backdrop-blur-xl"
+      className="mt-3 inline-flex items-center gap-2.5 rounded-full border border-black/5 bg-white/72 px-3 py-1.5 text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.05)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/80"
     >
-      <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-200/90" />
-      <span className="text-[11px] text-white/75">
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-500 dark:text-cyan-200/90" />
+      <span className="text-[11px]">
         {status === 'connecting'
           ? t('immersiveConnectingHint')
           : `${t('immersiveReconnecting')} #${Math.max(1, reconnectAttempt)}/${reconnectMaxAttempts} · ${remainingSeconds}s`}
