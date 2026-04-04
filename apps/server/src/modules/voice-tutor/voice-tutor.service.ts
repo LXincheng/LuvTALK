@@ -790,10 +790,10 @@ export class VoiceTutorService {
     }
     const speedInstruction =
       speed === "slow"
-        ? "Speak a bit slower with clear pauses between clauses."
+        ? "Keep the delivery relaxed, but do not drag. Stay clear and flowing."
         : speed === "fast"
-          ? "Speak slightly faster while staying natural and clear."
-          : "Keep a natural conversational pace.";
+          ? "Speak briskly and smoothly, while staying natural and easy to follow."
+          : "Keep a lively conversational pace with clean phrasing.";
     const languageInstruction =
       targetLanguage === LanguageCode.Cantonese
         ? "Use a natural Cantonese speaking style with smooth everyday rhythm."
@@ -802,7 +802,7 @@ export class VoiceTutorService {
           : "Use natural English with a friendly tutor tone.";
     parameters.instructions = `${languageInstruction} ${speedInstruction}`;
     parameters.output_audio = {
-      speech_rate: speed === "slow" ? 0.9 : speed === "fast" ? 1.08 : 1,
+      speech_rate: speed === "slow" ? 1 : speed === "fast" ? 1.16 : 1.08,
     };
     if (voice) {
       parameters.voice = voice;

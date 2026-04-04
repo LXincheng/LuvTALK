@@ -91,10 +91,7 @@ const createTextCase = (
   variantIndex: number,
 ): PromptRegressionCase => {
   const caseId = `text_${scenario.id}_${nativeLanguage}_${String(variantIndex + 1).padStart(3, "0")}`;
-  const reply =
-    nativeLanguage === LanguageCode.English
-      ? `${scenario.targetSentence}\n\nStudy Steps:\n1. Start with the main intent, then add one specific detail.\n2. Then use one follow-up question to keep the conversation moving.`
-      : `${scenario.targetSentence}\n\n学习建议:\n1. 先说核心意图，再补充一个具体细节。\n2. 再加一句追问，让对话自然推进。`;
+  const reply = scenario.targetSentence;
   const correction =
     nativeLanguage === LanguageCode.English
       ? "Try one complete sentence first, then add one concrete detail."
@@ -203,7 +200,7 @@ const negativeCases: PromptRegressionCase[] = [
     expectedMinScore: 0,
     requiredFailures: [
       "reply_too_short",
-      "text_missing_study_steps",
+      "missing_teaching_tip",
       "not_actionable",
     ],
   },
@@ -238,8 +235,7 @@ const negativeCases: PromptRegressionCase[] = [
     scenarioId: "directions",
     latestUserMessage: "How do I get there?",
     payload: buildPayload({
-      reply:
-        "Let's practice a clearer sentence.\n\nStudy Steps:\n1. Start with one clear sentence.\n2. Then ask one follow-up question.",
+      reply: "Let's make the sentence clearer before we continue.",
       correction: "Try one complete sentence first, then add one detail.",
       cultureNote: "Keep your tone polite and clear.",
       associativePhrases: ["Tell me more.", "Could you repeat that?"],

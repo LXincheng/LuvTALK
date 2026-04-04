@@ -14,12 +14,14 @@ export interface Message {
   type: MessageType;
   content: string;
   translation?: string;
+  overallScore?: number;
   pronunciationScore?: number;
   pronunciationTip?: string;
   rhythmTip?: string;
   grammarTip?: string;
   audioUrl?: string;
   imageUrl?: string;
+  inputMode?: 'text' | 'voice' | 'image' | 'realtime';
   annotations?: Annotation[];
   isLoading?: boolean;
   isOptimistic?: boolean;

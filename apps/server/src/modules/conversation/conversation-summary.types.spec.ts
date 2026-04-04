@@ -45,11 +45,13 @@ describe("buildSessionSummary", () => {
       ],
     });
 
-    expect(summary.durationMinutes).toBe(12);
+    expect(summary.durationMinutes).toBe(1);
     expect(summary.userTurns).toBe(1);
     expect(summary.aiTurns).toBe(1);
     expect(summary.averageScore).toBe(72);
     expect(summary.latestScore).toBe(72);
+    expect(summary.headline.length).toBeGreaterThan(0);
+    expect(summary.advice.length).toBeGreaterThan(0);
     expect(summary.improvements.length).toBeGreaterThan(0);
     expect(summary.recommendedNextActions.length).toBeGreaterThan(0);
     expect(summary.keyTerms.length).toBe(1);
@@ -64,7 +66,7 @@ describe("buildSessionSummary", () => {
     });
 
     expect(summary.durationMinutes).toBe(1);
-    expect(summary.strengths[0]).toContain("持续练习");
+    expect(summary.headline).toContain("目标语言语境");
     expect(summary.recommendedNextActions.length).toBe(1);
   });
 });

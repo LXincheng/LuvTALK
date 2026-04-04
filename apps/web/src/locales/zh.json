@@ -53,7 +53,6 @@
   "commonRetry": "重试",
   "commonClose": "关闭",
   "sessionSummaryTitle": "会话总结",
-  "sessionSummarySubtitle": "自动提炼本轮优势、待改进点和下一步建议",
   "sessionSummaryLoading": "正在生成会话总结...",
   "sessionSummaryStrengths": "做得好的地方",
   "sessionSummaryImprovements": "优先改进",
@@ -363,16 +362,12 @@
   "loginGoogleSoon": "Google 登录稍后上线",
   "loginSupabaseNotConfigured": "Supabase 未配置",
   "loginCodePlaceholder": "输入 6 位验证码",
-  "sessionSummaryDefaultStrength": "保持了连续对话，输出节奏稳定。",
-  "sessionSummaryDefaultImprovement": "可继续优化语法与发音细节。",
-  "sessionSummaryDefaultNextAction": "继续下一轮对话并复用本轮关键词。",
+  "sessionSummaryDefaultStrength": "保持了连续输出，节奏比较稳定。",
+  "sessionSummaryDefaultImprovement": "下一步可以优先收紧语法和用词细节。",
+  "sessionSummaryDefaultNextAction": "继续对话，并复用刚练过的关键词。",
   "timeJustNow": "刚刚",
   "timeMinutesAgo": "{n} 分钟前",
   "timeHoursAgo": "{n} 小时前",
   "timeDaysAgo": "{n} 天前",
-  "messageCountUnit": "条",
-  "quickRepliesStarterTitle": "试试这些开场",
-  "quickRepliesStarterSubtitle": "新对话时给你几个自然、实用的起手句",
-  "quickRepliesReplyTitle": "你可以这样接",
-  "quickRepliesReplySubtitle": "停留片刻后给你更贴合当前语境的回复建议"
+  "messageCountUnit": "条"
 }

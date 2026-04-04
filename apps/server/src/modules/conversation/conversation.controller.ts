@@ -192,6 +192,21 @@ export class ConversationController {
     );
   }
 
+  @Get(":conversationId/quick-replies")
+  async getQuickReplies(
+    @Param("conversationId") conversationId: string,
+    @Query("locale") locale: string | undefined,
+    @Req() req: Request,
+  ) {
+    const profile = await this.authService.resolveUserFromRequest(req);
+    return this.conversationService.getConversationQuickReplies(
+      conversationId,
+      profile?.id,
+      resolveConversationKey(req),
+      locale,
+    );
+  }
+
   @Post(":conversationId/scenario-feedback")
   async generateScenarioFeedback(
     @Param("conversationId") conversationId: string,

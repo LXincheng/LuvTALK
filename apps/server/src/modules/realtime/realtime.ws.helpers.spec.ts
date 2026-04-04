@@ -8,7 +8,7 @@ import {
 
 describe("realtime.ws.helpers", () => {
   describe("buildSessionUpdate", () => {
-    it("enables create_response by default", () => {
+    it("enables create_response in server_vad mode", () => {
       const payload = buildSessionUpdate({
         instructions: "test",
         voice: "Serena",
@@ -26,25 +26,13 @@ describe("realtime.ws.helpers", () => {
       expect(payload.session.turn_detection.interrupt_response).toBe(true);
     });
 
-    it("uses the provided realtime transcribe model without forcing whisper fallback", () => {
-      const payload = buildSessionUpdate({
-        instructions: "test",
-        voice: "Jennifer",
-        turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
-        transcribeModel: "qwen3-asr-flash-realtime",
-      });
-      expect(payload.session.input_audio_transcription?.model).toBe(
-        "qwen3-asr-flash-realtime",
-      );
-    });
-
-    it("omits input_audio_transcription when no model is configured", () => {
+    it("omits input_audio_transcription to stay on the realtime main path", () => {
       const payload = buildSessionUpdate({
         instructions: "test",
         voice: "Jennifer",
         turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
       });
-      expect(payload.session.input_audio_transcription).toBeUndefined();
+      expect("input_audio_transcription" in payload.session).toBe(false);
     });
   });
 

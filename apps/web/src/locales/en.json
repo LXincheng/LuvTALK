@@ -53,7 +53,6 @@
   "commonRetry": "Retry",
   "commonClose": "Close",
   "sessionSummaryTitle": "Session Summary",
-  "sessionSummarySubtitle": "Auto-highlight strengths, improvement points, and next practice steps",
   "sessionSummaryLoading": "Building session summary...",
   "sessionSummaryStrengths": "What Went Well",
   "sessionSummaryImprovements": "Priority Improvements",
@@ -363,16 +362,12 @@
   "loginGoogleSoon": "Google login coming soon",
   "loginSupabaseNotConfigured": "Supabase not configured",
   "loginCodePlaceholder": "Enter 6-digit code",
-  "sessionSummaryDefaultStrength": "Maintained continuous conversation with stable output pace.",
-  "sessionSummaryDefaultImprovement": "Continue refining grammar and pronunciation details.",
-  "sessionSummaryDefaultNextAction": "Continue the next round and reuse key terms from this session.",
+  "sessionSummaryDefaultStrength": "You kept the conversation going with a steady pace.",
+  "sessionSummaryDefaultImprovement": "Next, tighten up the grammar and word choice.",
+  "sessionSummaryDefaultNextAction": "Keep chatting and reuse the key terms you just practiced.",
   "timeJustNow": "Just now",
   "timeMinutesAgo": "{n}m ago",
   "timeHoursAgo": "{n}h ago",
   "timeDaysAgo": "{n}d ago",
-  "messageCountUnit": "msgs",
-  "quickRepliesStarterTitle": "Try one of these",
-  "quickRepliesStarterSubtitle": "Simple openers for a fresh conversation",
-  "quickRepliesReplyTitle": "You could reply with",
-  "quickRepliesReplySubtitle": "Context-aware reply ideas appear after a short pause"
+  "messageCountUnit": "msgs"
 }

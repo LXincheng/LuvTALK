@@ -68,13 +68,4 @@ export const TTS_SPEED_OPTIONS = [
   { id: 'fast', labelKey: 'voiceSpeedFast' },
 ] as const;
 
-export const DEFAULT_TTS_SPEED = 'normal';
-
-export const REALTIME_VOICE_OPTIONS = [
-  { id: 'Jennifer', labelKey: 'voiceJenniferLabel' },
-  { id: 'Aiden', labelKey: 'voiceAidenLabel' },
-  { id: 'Serena', labelKey: 'voiceSerenaLabel' },
-  { id: 'Ethan', labelKey: 'voiceEthanLabel' },
-  { id: 'Kiki', labelKey: 'voiceKikiLabel' },
-  { id: 'Rocky', labelKey: 'voiceRockyLabel' },
-] as const;
+export const DEFAULT_TTS_SPEED = 'fast';

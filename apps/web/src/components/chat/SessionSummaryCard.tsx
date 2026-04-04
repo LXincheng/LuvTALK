@@ -16,6 +16,9 @@ export default function SessionSummaryCard({
 }: SessionSummaryCardProps) {
   const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
+  const showSummaryCopy =
+    Boolean(summary?.headline?.trim() || summary?.advice?.trim()) &&
+    !/^(本轮|This round)\b/i.test(summary?.headline?.trim() ?? '');
 
   if (!isLoading && !summary) {
     return null;
@@ -67,11 +70,16 @@ export default function SessionSummaryCard({
         </div>
       </div>
 
-      {/* Expandable detail */}
       {expanded && summary ? (
         <div className="border-t border-separator/50 px-3.5 py-2.5 sm:px-4">
+          {showSummaryCopy ? (
+            <>
+              <p className="text-[13px] leading-relaxed text-label">{summary.headline}</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-label-secondary">{summary.advice}</p>
+            </>
+          ) : null}
           {summary.strengths[0] ? (
-            <p className="text-[13px] leading-relaxed text-label">
+            <p className={`text-[13px] leading-relaxed text-label ${showSummaryCopy ? 'mt-2' : ''}`}>
               <span className="mr-1 font-medium text-emerald-600 dark:text-emerald-400">+</span>
               {summary.strengths[0]}
             </p>

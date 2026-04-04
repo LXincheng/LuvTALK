@@ -11,14 +11,14 @@ export const OFFICIAL_TTS_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> 
   [LanguageCode.Mandarin]: {
     languageCode: "zh",
     ttsLanguageType: "Chinese",
-    defaultVoice: "Jennifer",
-    options: ["Jennifer", "Aiden", "Serena", "Ethan"],
+    defaultVoice: "Serena",
+    options: ["Serena", "Ethan"],
   },
   [LanguageCode.Cantonese]: {
     languageCode: "yue",
     ttsLanguageType: "Chinese",
-    defaultVoice: "Jennifer",
-    options: ["Jennifer", "Aiden", "Kiki", "Rocky"],
+    defaultVoice: "Kiki",
+    options: ["Kiki", "Rocky"],
   },
   [LanguageCode.English]: {
     languageCode: "en",
@@ -45,4 +45,16 @@ export const resolveLanguageVoiceSettings = (
     return OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Mandarin];
   }
   return OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.English];
+};
+
+export const resolvePreferredVoiceForLanguage = (
+  language: LanguageCode | string | undefined,
+  requestedVoice?: string,
+): string => {
+  const settings = resolveLanguageVoiceSettings(language);
+  const normalized = requestedVoice?.trim();
+  if (normalized && settings.options.includes(normalized)) {
+    return normalized;
+  }
+  return settings.defaultVoice;
 };

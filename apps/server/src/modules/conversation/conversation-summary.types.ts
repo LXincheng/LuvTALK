@@ -7,6 +7,8 @@ export interface SessionSummaryPayload {
   aiTurns: number;
   averageScore: number | null;
   latestScore: number | null;
+  headline: string;
+  advice: string;
   strengths: string[];
   improvements: string[];
   recommendedNextActions: string[];
@@ -40,6 +42,8 @@ const LABELS = {
     pronunciationDrill: "开启语音模式跟读 3 轮，重点校准发音与停顿。",
     grammarRewrite: "把本轮错误句改写 2 次，再用于下一轮对话。",
     reuseExpressions: "进入下一轮场景对话，优先复用本轮高频表达。",
+    headlineEmpty: "这一轮还很短，但你已经开始进入目标语言语境了。",
+    adviceEmpty: "下一轮先说一句完整短句，再补一个细节。",
   },
   en: {
     stableExpression: "Overall expression is stable with good fluency.",
@@ -50,6 +54,8 @@ const LABELS = {
     pronunciationDrill: "Use voice mode for 3 rounds of shadowing to refine pronunciation.",
     grammarRewrite: "Rewrite this round's errors twice and reuse them next round.",
     reuseExpressions: "Move to the next scenario and prioritize reusing key phrases.",
+    headlineEmpty: "This round was brief, but you already stepped into the target language context.",
+    adviceEmpty: "Next round, say one complete short sentence first, then add one detail.",
   },
 } as const;
 
@@ -149,12 +155,31 @@ export function buildSessionSummary(params: {
     })
     .slice(0, 6);
 
-  const start = new Date(params.createdAt).getTime();
-  const end = new Date(params.updatedAt).getTime();
+  const meaningfulMessages = params.messages.filter((message) => {
+    const text = message.text?.trim();
+    return Boolean(text && text !== "（等待输入）");
+  });
+  const firstMessageAt = meaningfulMessages[0]?.createdAt ?? params.createdAt;
+  const lastMessageAt =
+    meaningfulMessages[meaningfulMessages.length - 1]?.createdAt ??
+    params.updatedAt;
+  const start = new Date(firstMessageAt).getTime();
+  const end = new Date(lastMessageAt).getTime();
   const durationMinutes =
     Number.isFinite(start) && Number.isFinite(end) && end > start
-      ? Math.max(1, Math.round((end - start) / 60000))
+      ? Math.max(1, Math.ceil((end - start) / 60000))
       : 1;
+
+  const headline =
+    userMessages.length === 0
+      ? l.headlineEmpty
+      : params.locale === "en"
+        ? `You produced ${userMessages.length} learner turn${userMessages.length > 1 ? "s" : ""} in ${durationMinutes} minute${durationMinutes > 1 ? "s" : ""}, with an average score of ${averageScore ?? "--"}.`
+        : `本轮你完成了 ${userMessages.length} 次学员输出，用时约 ${durationMinutes} 分钟，平均分 ${averageScore ?? "--"}。`;
+  const advice =
+    recommendedNextActions[0] ??
+    improvements[0] ??
+    l.adviceEmpty;
 
   return {
     conversationId: params.conversationId,
@@ -163,6 +188,8 @@ export function buildSessionSummary(params: {
     aiTurns: aiMessages.length,
     averageScore,
     latestScore,
+    headline,
+    advice,
     strengths,
     improvements: improvements.slice(0, 4),
     recommendedNextActions: dedupe(recommendedNextActions).slice(0, 3),

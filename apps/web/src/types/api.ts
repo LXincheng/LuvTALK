@@ -161,6 +161,8 @@ export interface SessionSummaryPayload {
   aiTurns: number;
   averageScore: number | null;
   latestScore: number | null;
+  headline: string;
+  advice: string;
   strengths: string[];
   improvements: string[];
   recommendedNextActions: string[];
@@ -168,5 +170,10 @@ export interface SessionSummaryPayload {
     term: string;
     definition: string;
   }>;
+}
+
+export interface ConversationQuickRepliesPayload {
+  conversationId: string;
+  options: string[];
 }
 

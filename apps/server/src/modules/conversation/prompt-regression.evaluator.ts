@@ -91,10 +91,10 @@ export const evaluatePromptRegressionCase = (
 
   if (testCase.interactionMode === "text") {
     if (hasStructuredStudySteps(reply)) {
-      checks.push("text_has_study_steps");
+      score -= 25;
+      failures.push("text_reply_overstructured");
     } else {
-      score -= 30;
-      failures.push("text_missing_study_steps");
+      checks.push("text_reply_natural");
     }
   }
 

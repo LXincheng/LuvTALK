@@ -7,6 +7,7 @@ import {
 import type {
   ConversationHistorySummary,
   ConversationSession,
+  ConversationQuickRepliesPayload,
   LanguageCode,
   ScenarioFeedbackPayload,
   ScenarioHintPayload,
@@ -270,6 +271,17 @@ export function fetchConversationSummary(conversationId: string, locale?: string
   const params = locale ? `?locale=${locale}` : '';
   return apiClient.get<SessionSummaryPayload>(
     `/conversation/${conversationId}/summary${params}`,
+    { headers: buildConversationAccessHeaders(conversationId) },
+  );
+}
+
+export function fetchConversationQuickReplies(
+  conversationId: string,
+  locale?: string,
+) {
+  const params = locale ? `?locale=${locale}` : '';
+  return apiClient.get<ConversationQuickRepliesPayload>(
+    `/conversation/${conversationId}/quick-replies${params}`,
     { headers: buildConversationAccessHeaders(conversationId) },
   );
 }

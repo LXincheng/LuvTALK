@@ -24,9 +24,21 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   return (
     <aside className="w-64 lg:w-72 h-full glass-sidebar border-r border-separator flex flex-col">
       <div className="p-6 border-b border-separator">
-        <h1 className="text-[1.1rem] font-semibold tracking-[-0.03em] text-label leading-none">
-          LuvTALK
-        </h1>
+        <div className="flex items-center gap-3">
+          <img
+            src="/luvtalk-icon.svg"
+            alt="LuvTALK"
+            className="h-11 w-11 rounded-[14px]"
+          />
+          <div className="min-w-0">
+            <h1 className="text-[1.06rem] font-semibold tracking-[-0.04em] text-label leading-none">
+              LuvTALK
+            </h1>
+            <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.12em] text-label-tertiary">
+              Live Language Studio
+            </p>
+          </div>
+        </div>
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-none">

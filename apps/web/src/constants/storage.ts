@@ -3,5 +3,6 @@ export const CONVERSATION_IDS_STORAGE_KEY = 'conversationIds';
 export const ACTIVE_CONVERSATION_BY_LANGUAGE_STORAGE_KEY =
   'activeConversationIdByLanguage';
 export const TTS_VOICE_BY_LANGUAGE_STORAGE_KEY = 'ttsVoiceByLanguage';
+export const REALTIME_VOICE_BY_LANGUAGE_STORAGE_KEY = 'realtimeVoiceByLanguage';
 export const REALTIME_VOICE_STORAGE_KEY = 'realtimeVoice';
 export const TTS_SPEED_STORAGE_KEY = 'ttsSpeed';

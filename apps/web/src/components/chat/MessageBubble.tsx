@@ -46,23 +46,30 @@ export default function MessageBubble({
     </div>
   ) : null;
 
-  const hasTips = message.pronunciationTip || message.rhythmTip || message.grammarTip;
+  const isVoiceLike = message.inputMode === 'voice' || message.inputMode === 'realtime';
+  const hasTips = Boolean(
+    message.grammarTip ||
+      (isVoiceLike && (message.pronunciationTip || message.rhythmTip)),
+  );
 
+  const scoreValue = message.overallScore ?? message.pronunciationScore;
   const scoreColorClass =
-    message.pronunciationScore !== undefined && message.pronunciationScore >= 80
+    scoreValue !== undefined && scoreValue >= 80
       ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-      : message.pronunciationScore !== undefined && message.pronunciationScore >= 60
+      : scoreValue !== undefined && scoreValue >= 60
         ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
         : 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300';
 
   const tips = [
-    message.pronunciationTip && { label: t('pronunciation'), text: message.pronunciationTip, border: 'border-l-blue-400' },
-    message.rhythmTip && { label: t('rhythm'), text: message.rhythmTip, border: 'border-l-violet-400' },
+    isVoiceLike &&
+      message.pronunciationTip && { label: t('pronunciation'), text: message.pronunciationTip, border: 'border-l-blue-400' },
+    isVoiceLike &&
+      message.rhythmTip && { label: t('rhythm'), text: message.rhythmTip, border: 'border-l-violet-400' },
     message.grammarTip && { label: t('grammar'), text: message.grammarTip, border: 'border-l-amber-400' },
   ].filter(Boolean) as { label: string; text: string; border: string }[];
 
   const scoreBlock =
-    message.pronunciationScore !== undefined && message.audioUrl ? (
+    scoreValue !== undefined ? (
       <div className="mx-1 overflow-hidden rounded-xl border border-separator glass-card">
         <button
           type="button"
@@ -71,7 +78,7 @@ export default function MessageBubble({
         >
           <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${scoreColorClass}`}>
             <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
-            {t('pronunciation')} {message.pronunciationScore}
+            Overall {scoreValue}
           </div>
           {hasTips && (
             <span className="flex items-center gap-1 text-[11px] text-label-tertiary">

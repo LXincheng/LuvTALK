@@ -151,6 +151,11 @@ interface RealtimeTranscriptEntry {
   timestamp?: string;
 }
 
+export interface ConversationQuickRepliesPayload {
+  conversationId: string;
+  options: string[];
+}
+
 interface SessionAccessOptions {
   userId?: string;
   conversationKey?: string;
@@ -1308,8 +1313,8 @@ export class ConversationService {
           ]
         : input.interactionMode === "text"
           ? [
-              "- text mode: reply must include target-language conversational response, plus 1-2 numbered native-language study steps.",
-              "- text mode: study steps must be specific and immediately actionable.",
+              "- text mode: reply must be a natural target-language response only, with no section titles or numbered study steps.",
+              "- text mode: put learning guidance in correction / scoreReason / pronunciationTip / rhythmTip / grammarTip, not inside reply.",
             ]
           : input.interactionMode === "review"
             ? [
@@ -1457,14 +1462,21 @@ export class ConversationService {
     if (interactionMode !== "text") {
       return payload;
     }
+    const fallbackTips = buildDefaultTeachingTips({
+      targetLanguage,
+      nativeLanguage,
+      interactionMode: "text",
+      scenarioId,
+    });
     return {
       ...payload,
-      reply: this.ensureStructuredTextTeachingReply(
-        payload,
-        targetLanguage,
-        nativeLanguage,
-        scenarioId,
-      ),
+      reply: this.stripTextTeachingScaffold(payload.reply),
+      correction: payload.correction?.trim() || fallbackTips.correction,
+      cultureNote: payload.cultureNote?.trim() || fallbackTips.cultureNote,
+      pronunciationTip:
+        payload.pronunciationTip?.trim() || fallbackTips.pronunciationTip,
+      rhythmTip: payload.rhythmTip?.trim() || fallbackTips.rhythmTip,
+      grammarTip: payload.grammarTip?.trim() || fallbackTips.grammarTip,
     };
   }
 
@@ -1488,51 +1500,27 @@ export class ConversationService {
     return `${basePrompt}\n\n${memoryPack}`;
   }
 
-  private ensureStructuredTextTeachingReply(
-    payload: AiResponse,
-    targetLanguage: LanguageCode,
-    nativeLanguage: LanguageCode,
-    scenarioId: string,
-  ): string {
-    const rawReply = payload.reply.trim();
-    const alreadyStructured =
-      /(\n|^)\s*(学习建议|Study Steps)[:：]/i.test(rawReply) ||
-      /(\n|^)\s*1[).]/.test(rawReply);
-    if (alreadyStructured) {
-      return rawReply;
+  private stripTextTeachingScaffold(reply: string): string {
+    const normalized = reply.trim();
+    if (!normalized) {
+      return normalized;
     }
-
-    const fallbackTips = buildDefaultTeachingTips({
-      targetLanguage,
-      nativeLanguage,
-      interactionMode: "text",
-      scenarioId,
-    });
-    const stepCandidates = [
-      payload.correction,
-      payload.grammarTip,
-      payload.pronunciationTip,
-      payload.rhythmTip,
-      payload.cultureNote,
-      payload.scoreReason,
-      fallbackTips.correction,
-      fallbackTips.grammarTip,
-    ]
-      .map((item) => item?.trim())
-      .filter((item): item is string => Boolean(item))
-      .filter((item, index, list) => list.indexOf(item) === index);
-
-    const step1 = stepCandidates[0] ?? fallbackTips.correction;
-    const step2 = stepCandidates[1] ?? fallbackTips.cultureNote;
-    const sectionTitle =
-      nativeLanguage === LanguageCode.English ? "Study Steps" : "学习建议";
-    return [
-      rawReply,
-      "",
-      `${sectionTitle}:`,
-      `1. ${step1}`,
-      `2. ${step2}`,
-    ].join("\n");
+    const structuredIndex = normalized.search(/(\n|^)\s*(学习建议|Study Steps)[:：]/i);
+    const numberedIndex = normalized.search(/(\n|^)\s*1[).]\s+/);
+    const cutIndex =
+      structuredIndex >= 0 && numberedIndex >= 0
+        ? Math.min(structuredIndex, numberedIndex)
+        : Math.max(structuredIndex, numberedIndex);
+    const cleaned =
+      cutIndex >= 0 ? normalized.slice(0, cutIndex).trim() : normalized;
+    const compact = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+    if (compact) {
+      return compact;
+    }
+    return normalized
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .find((line) => line && !/^(学习建议|Study Steps)[:：]?$/i.test(line) && !/^\d+[).]/.test(line)) ?? normalized;
   }
 
   private async translateForNativeLanguage(
@@ -2133,13 +2121,36 @@ export class ConversationService {
       conversationKey,
       allowBootstrapMissingAccessKey: true,
     });
-    return buildSessionSummary({
+    const baseSummary = buildSessionSummary({
       conversationId: session.id,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messages: session.messages,
       locale,
     });
+    const aiCopy = await this.generateAiSessionSummaryCopy(session, baseSummary, locale);
+    return {
+      ...baseSummary,
+      ...aiCopy,
+    };
+  }
+
+  async getConversationQuickReplies(
+    conversationId: string,
+    userId?: string,
+    conversationKey?: string,
+    locale?: string,
+  ): Promise<ConversationQuickRepliesPayload> {
+    const session = await this.getAccessibleSession(conversationId, {
+      userId,
+      conversationKey,
+      allowBootstrapMissingAccessKey: true,
+    });
+    const options = await this.generateAiQuickReplies(session, locale);
+    return {
+      conversationId: session.id,
+      options,
+    };
   }
 
   private getOrCreateStream(
@@ -2219,6 +2230,239 @@ export class ConversationService {
     this.logger.warn(
       "Database schema is missing Conversation.userId/Favorite.userId columns. Run `pnpm --filter server prisma:migrate` to apply the latest Prisma migration.",
     );
+  }
+
+  private async generateAiSessionSummaryCopy(
+    session: ConversationSession,
+    summary: SessionSummaryPayload,
+    locale?: string,
+  ): Promise<Pick<SessionSummaryPayload, "headline" | "advice">> {
+    const isEn = locale === "en";
+    const fallback = {
+      headline: summary.headline,
+      advice: summary.advice,
+    };
+    const transcript = session.messages
+      .filter((message) => message.sender === "user" || message.sender === "ai")
+      .slice(-10)
+      .map((message) => `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`)
+      .join("\n");
+    if (!transcript.trim()) {
+      return fallback;
+    }
+
+    const content = await this.requestCompactJsonObject({
+      label: "summary-copy",
+      modelCandidates: [
+        envConfig.modelRouting.secondaryModel,
+        envConfig.modelRouting.primaryModel,
+        envConfig.modelRouting.thirdModel,
+      ],
+      timeoutMs: 2200,
+      systemPrompt: isEn
+        ? "You write premium, concise session summaries for a language learning app. Return JSON only."
+        : "你为语言学习应用撰写高级、简洁的会话总结。只返回 JSON。",
+      userPrompt: [
+        isEn
+          ? "Summarize this session in 2 fields: headline and advice."
+          : "请用 2 个字段总结这轮会话：headline 和 advice。",
+        isEn
+          ? "headline: one natural sentence summarizing the learner's real session progress."
+          : "headline：1 句自然的话，总结学习者这一轮的真实进展。",
+        isEn
+          ? "advice: one short sentence with a concrete next step in the user's system language."
+          : "advice：1 句简短建议，用用户当前系统语言给出下一步练习方向。",
+        isEn
+          ? "No templates, no score recap boilerplate, no generic praise."
+          : "不要套模板，不要机械复述分数，不要空泛鼓励。",
+        `JSON schema: {"headline":"string","advice":"string"}`,
+        `Session metrics: ${JSON.stringify({
+          durationMinutes: summary.durationMinutes,
+          userTurns: summary.userTurns,
+          aiTurns: summary.aiTurns,
+          averageScore: summary.averageScore,
+          latestScore: summary.latestScore,
+          keyTerms: summary.keyTerms.slice(0, 3),
+          improvements: summary.improvements.slice(0, 3),
+        })}`,
+        "Recent transcript:",
+        transcript,
+      ].join("\n"),
+    });
+
+    const parsed = this.parseCompactJsonObject<{
+      headline?: unknown;
+      advice?: unknown;
+    }>(content);
+    const headline =
+      typeof parsed?.headline === "string" && parsed.headline.trim()
+        ? parsed.headline.trim()
+        : fallback.headline;
+    const advice =
+      typeof parsed?.advice === "string" && parsed.advice.trim()
+        ? parsed.advice.trim()
+        : fallback.advice;
+    return { headline, advice };
+  }
+
+  private async generateAiQuickReplies(
+    session: ConversationSession,
+    locale?: string,
+  ): Promise<string[]> {
+    const fallback = this.buildFallbackQuickReplies(session);
+    const recentMessages = session.messages
+      .filter((message) => message.sender === "user" || message.sender === "ai")
+      .slice(-8);
+    if (!recentMessages.length) {
+      return fallback;
+    }
+    const transcript = recentMessages
+      .map((message) => `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`)
+      .join("\n");
+    const lastAiScore = [...session.messages]
+      .reverse()
+      .find((message) => message.sender === "ai" && typeof message.meta?.score === "number")
+      ?.meta?.score;
+
+    const content = await this.requestCompactJsonObject({
+      label: "quick-replies",
+      modelCandidates: [
+        envConfig.modelRouting.secondaryModel,
+        envConfig.modelRouting.primaryModel,
+      ],
+      timeoutMs: 1400,
+      systemPrompt:
+        "You generate smart quick-reply chips for a language tutor app. Return JSON only.",
+      userPrompt: [
+        "Generate 3 short quick replies for the learner's NEXT turn.",
+        `Target language: ${this.describeLanguage(
+          session.targetLanguage,
+          session.nativeLanguage ?? LanguageCode.Mandarin,
+        )}.`,
+        `System language: ${locale === "en" ? "English" : "Chinese"}.`,
+        `Latest score hint: ${lastAiScore ?? "n/a"}.`,
+        "Rules:",
+        "- All replies must be in the target language.",
+        "- Keep each reply natural, contextual, and under 16 words.",
+        "- Do not explain. Do not output labels. Do not output translations.",
+        "- Offer variety: one direct reply, one detail-expanding reply, one follow-up style reply.",
+        '- JSON schema: {"options":["string","string","string"]}',
+        "Recent transcript:",
+        transcript,
+      ].join("\n"),
+    });
+
+    const parsed = this.parseCompactJsonObject<{ options?: unknown }>(content);
+    const options = Array.isArray(parsed?.options)
+      ? parsed.options
+          .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+          .map((item) => item.trim())
+          .slice(0, 3)
+      : [];
+    return options.length ? options : fallback;
+  }
+
+  private buildFallbackQuickReplies(session: ConversationSession): string[] {
+    const targetLanguage = session.targetLanguage;
+    const lastAiText = [...session.messages]
+      .reverse()
+      .find((message) => message.sender === "ai")
+      ?.text
+      ?.trim();
+    const aiAskedQuestion = Boolean(lastAiText && /[?？]$/.test(lastAiText));
+    if (targetLanguage === LanguageCode.English) {
+      if (aiAskedQuestion) {
+        return [
+          "Let me answer that directly.",
+          "I can add one more detail.",
+          "What would sound more natural here?",
+        ];
+      }
+      return [
+        "Could we keep going on this topic?",
+        "Here is one more detail.",
+        "Can I try one more turn?",
+      ];
+    }
+    if (targetLanguage === LanguageCode.Cantonese) {
+      if (aiAskedQuestion) {
+        return ["我先直接答你。", "我再補一個細節。", "母語者通常會點講？"];
+      }
+      return ["我想再講多一句。", "我可以再補充少少。", "可唔可以俾我再試一次？"];
+    }
+    if (aiAskedQuestion) {
+      return ["我先直接回答。", "我再补一个细节。", "母语者通常会怎么说？"];
+    }
+    return ["我想继续这个话题。", "我可以再补充一点。", "你可以让我再试一轮吗？"];
+  }
+
+  private async requestCompactJsonObject(params: {
+    label: string;
+    modelCandidates: string[];
+    timeoutMs: number;
+    systemPrompt: string;
+    userPrompt: string;
+  }): Promise<string | null> {
+    for (const model of params.modelCandidates) {
+      const route = resolveChatModelRoute(model);
+      if (!route) {
+        continue;
+      }
+      const payload: Record<string, unknown> = {
+        model: route.model,
+        temperature: 0.35,
+        stream: false,
+        messages: [
+          { role: "system", content: params.systemPrompt },
+          { role: "user", content: params.userPrompt },
+        ],
+      };
+      if (supportsJsonObjectResponse(route.model)) {
+        payload.response_format = { type: "json_object" };
+      }
+      try {
+        const content = await this.fetchChatCompletionContentWithTimeout(
+          route.endpoint,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${route.apiKey}`,
+            },
+            body: JSON.stringify(payload),
+          },
+          params.timeoutMs,
+        );
+        if (content?.trim()) {
+          return content;
+        }
+      } catch (error) {
+        if (!this.isAbortError(error)) {
+          this.logger.warn(
+            `${params.label} compact JSON request failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    }
+    return null;
+  }
+
+  private parseCompactJsonObject<T>(content: string | null): T | null {
+    if (!content?.trim()) {
+      return null;
+    }
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      return null;
+    }
+    try {
+      return JSON.parse(content.slice(start, end + 1)) as T;
+    } catch {
+      return null;
+    }
   }
 
   private async fetchChatCompletionContentWithTimeout(

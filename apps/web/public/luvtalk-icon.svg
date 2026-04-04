@@ -1,22 +1,30 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tile" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EEF7FF" />
+      <stop offset="0.52" stop-color="#B7D8FF" />
+      <stop offset="1" stop-color="#0A84FF" />
+    </linearGradient>
+    <linearGradient id="mark" x1="20" y1="16" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#06111F" />
+      <stop offset="1" stop-color="#163A66" />
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="52" height="52" rx="18" fill="url(#tile)" />
   <path
-    d="M20 18.5C20 15.4624 22.4624 13 25.5 13H39.5C42.5376 13 45 15.4624 45 18.5V31.5C45 34.5376 42.5376 37 39.5 37H31L22 45V18.5Z"
-    stroke="#0A84FF"
-    stroke-width="4.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
+    d="M22 18C22 15.7909 23.7909 14 26 14H34.2C41.2692 14 47 19.7308 47 26.8V27.6C47 34.6692 41.2692 40.4 34.2 40.4H30.8L23.4 46.3C22.7467 46.8213 21.78 46.356 21.78 45.5201V39.1198C19.4236 37.4767 18 34.7856 18 31.8V26C18 21.5817 21.5817 18 26 18H22Z"
+    fill="url(#mark)"
   />
   <path
-    d="M28 23V31H35"
-    stroke="#0A84FF"
-    stroke-width="4.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
+    d="M29.2 23.5C29.2 22.6716 29.8716 22 30.7 22H36.8C37.6284 22 38.3 22.6716 38.3 23.5C38.3 24.3284 37.6284 25 36.8 25H32.2V29.4C32.2 30.2284 31.5284 30.9 30.7 30.9C29.8716 30.9 29.2 30.2284 29.2 29.4V23.5Z"
+    fill="#F7FBFF"
   />
+  <circle cx="23" cy="24" r="2" fill="#F7FBFF" fill-opacity="0.96" />
   <path
-    d="M34 23H40"
-    stroke="#0A84FF"
-    stroke-width="4.5"
+    d="M21.2 14.6C24.6 12.7 28.4 12.2 32.1 13.1"
+    stroke="white"
+    stroke-opacity="0.52"
+    stroke-width="2"
     stroke-linecap="round"
   />
 </svg>

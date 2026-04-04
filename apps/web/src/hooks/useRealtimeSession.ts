@@ -265,6 +265,21 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
     setIsAiSpeaking(false);
   }, [clearAiSpeakingTimer, clearManualResponseTimer]);
 
+  const interruptAssistantForUserSpeech = useCallback(() => {
+    flushOutputAudio();
+    aiTranscriptRef.current = '';
+    setAiTranscript('');
+    const ws = socketRef.current;
+    if (
+      ws &&
+      ws.readyState === WebSocket.OPEN &&
+      (responseInFlightRef.current || isAiSpeakingRef.current)
+    ) {
+      ws.send(JSON.stringify({ type: 'response.cancel' }));
+    }
+    responseInFlightRef.current = false;
+  }, [flushOutputAudio]);
+
   const schedulePlaybackEndCheck = useCallback(() => {
     const checkPlaybackEnd = () => {
       const outCtx = outputContextRef.current;
@@ -345,55 +360,12 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         return;
       }
 
-      // User started speaking — interrupt AI, cancel response, flush audio
       if (type === 'input_audio_buffer.speech_started') {
-        flushOutputAudio();
-        aiTranscriptRef.current = '';
-        setAiTranscript('');
-        const ws = socketRef.current;
-        if (
-          ws &&
-          ws.readyState === WebSocket.OPEN &&
-          (responseInFlightRef.current || isAiSpeakingRef.current)
-        ) {
-          ws.send(JSON.stringify({ type: 'response.cancel' }));
-        }
-        responseInFlightRef.current = false;
+        interruptAssistantForUserSpeech();
         return;
       }
 
       if (type === 'input_audio_buffer.speech_stopped') {
-        clearManualResponseTimer();
-        const expectedTranscript = aiTranscriptRef.current;
-        const expectedUserDraft = userTranscriptRef.current;
-        manualResponseTimerRef.current = window.setTimeout(() => {
-          const ws = socketRef.current;
-          const hasNoAiOutput =
-            aiTranscriptRef.current === expectedTranscript && !isAiSpeakingRef.current;
-          const hasStableUserDraft =
-            userTranscriptRef.current === expectedUserDraft &&
-            expectedUserDraft.trim().length > 0;
-          if (hasStableUserDraft) {
-            commitTranscript('user', expectedUserDraft);
-          }
-          if (!hasNoAiOutput) {
-            return;
-          }
-          if (
-            ws &&
-            ws.readyState === WebSocket.OPEN &&
-            sessionReadyRef.current &&
-            !responseInFlightRef.current
-          ) {
-            responseInFlightRef.current = true;
-            ws.send(
-              JSON.stringify({
-                type: 'response.create',
-                response: { modalities: ['audio', 'text'] },
-              }),
-            );
-          }
-        }, 550);
         return;
       }
 
@@ -449,6 +421,15 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
         const delta = extractTranscriptDelta(payload);
         if (delta) {
           userTranscriptRef.current += delta;
+          scheduleTranscriptUi();
+        }
+        return;
+      }
+
+      if (type === 'conversation.item.input_audio_transcription.text') {
+        const text = extractTranscriptText(payload) ?? extractTranscriptDelta(payload);
+        if (text) {
+          userTranscriptRef.current = text;
           scheduleTranscriptUi();
         }
         return;
@@ -545,7 +526,7 @@ export function useRealtimeSession({ conversationId, voice }: UseRealtimeSession
       clearManualResponseTimer,
       commitTranscript,
       disconnect,
-      flushOutputAudio,
+      interruptAssistantForUserSpeech,
       schedulePlaybackEndCheck,
       scheduleTranscriptUi,
     ],

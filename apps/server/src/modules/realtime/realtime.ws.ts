@@ -4,12 +4,12 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { RawData } from "ws";
 import { envConfig } from "../../common/config/env.config";
 import { buildRealtimeSystemPrompt } from "../../common/config/prompt.config";
+import { resolvePreferredVoiceForLanguage } from "../../common/config/voice.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { AuthService, AuthUserProfile } from "../auth/auth.service";
 import { ConversationService } from "../conversation/conversation.service";
 import {
   REALTIME_DEFAULT_TURN_DETECTION,
-  REALTIME_DEFAULT_VOICE,
   REALTIME_SESSION_LIMITS,
   REALTIME_WS_COOLDOWN_MS,
 } from "./realtime.constants";
@@ -134,7 +134,6 @@ export class RealtimeWsProxy {
 
       const { realtimeApiKey, realtimeApiUrl } = envConfig.openai;
       const realtimeModel = envConfig.modelRouting.realtimeModel;
-      const transcribeModel = envConfig.modelRouting.realtimeTranscribeModel;
       if (!realtimeApiKey || !realtimeApiUrl || !realtimeModel) {
         this.closeWithMetric({
           client,
@@ -162,9 +161,10 @@ export class RealtimeWsProxy {
       });
       let upstreamTerminalHandled = false;
 
-      let currentVoice =
-        (requestedVoice?.trim() || REALTIME_DEFAULT_VOICE) ??
-        REALTIME_DEFAULT_VOICE;
+      let currentVoice = resolvePreferredVoiceForLanguage(
+        session.targetLanguage,
+        requestedVoice,
+      );
 
       const maxSessionSeconds = profile
         ? REALTIME_SESSION_LIMITS.authSeconds
@@ -179,7 +179,6 @@ export class RealtimeWsProxy {
           instructions: prompt,
           voice: currentVoice,
           turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
-          transcribeModel,
         });
         upstream.send(JSON.stringify(update));
         client.send(
@@ -323,15 +322,14 @@ export class RealtimeWsProxy {
           return;
         }
         if (type === "session.update") {
-          const voice = resolveVoice(payload.session);
-          if (voice) {
-            currentVoice = voice;
-          }
+          currentVoice = resolvePreferredVoiceForLanguage(
+            session.targetLanguage,
+            resolveVoice(payload.session) ?? currentVoice,
+          );
           const update = buildSessionUpdate({
             instructions: prompt,
             voice: currentVoice,
             turnDetection: REALTIME_DEFAULT_TURN_DETECTION,
-            transcribeModel,
           });
           upstream.send(JSON.stringify(update));
           return;

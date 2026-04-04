@@ -8,23 +8,22 @@ interface AudioOrbProps {
 }
 
 export default function AudioOrb({ level, status, isAiSpeaking }: AudioOrbProps) {
-  const clamped = Math.min(1, Math.max(0, level));
+  const energy = Math.min(1, Math.max(0, level));
   const isConnected = status === 'connected';
-  const auraScale = isAiSpeaking ? 1.015 + clamped * 0.055 : 1 + clamped * 0.022;
-  const auraOpacity = isConnected ? 0.18 + clamped * 0.08 : 0.1;
-  const vaporOpacity = isConnected ? 0.18 + clamped * 0.12 : 0.11;
+  const phaseScale = isAiSpeaking ? 1.05 + energy * 0.08 : 1.01 + energy * 0.03;
+  const auraOpacity = isConnected ? 0.2 + energy * 0.18 : 0.1;
 
   return (
-    <div className="relative flex h-[17rem] w-[17rem] items-center justify-center md:h-[20rem] md:w-[20rem]">
+    <div className="relative flex h-[18rem] w-[18rem] items-center justify-center md:h-[22rem] md:w-[22rem]">
       <motion.div
         aria-hidden="true"
-        className="absolute inset-[6%] rounded-full immersive-orb-aura"
+        className="absolute inset-[8%] rounded-full immersive-orb-shadow"
         animate={{
-          scale: [1, auraScale, 1],
-          opacity: [auraOpacity * 0.82, auraOpacity, auraOpacity * 0.82],
+          scale: [1, 1.03 + energy * 0.04, 1],
+          opacity: [0.54, 0.76, 0.54],
         }}
         transition={{
-          duration: isAiSpeaking ? 1.8 : 4,
+          duration: isAiSpeaking ? 2.2 : 4.4,
           ease: 'easeInOut',
           repeat: Infinity,
         }}
@@ -32,78 +31,90 @@ export default function AudioOrb({ level, status, isAiSpeaking }: AudioOrbProps)
 
       <motion.div
         aria-hidden="true"
-        className="absolute inset-[11%] rounded-full immersive-orb-vapor"
+        className="absolute inset-[2%] rounded-full immersive-orb-atmosphere"
         animate={{
-          rotate: isAiSpeaking ? 360 : 240,
-          scale: [1, 1.008 + clamped * 0.02, 1],
-          opacity: [vaporOpacity * 0.78, vaporOpacity, vaporOpacity * 0.78],
+          scale: [1, phaseScale, 1],
+          opacity: [auraOpacity * 0.7, auraOpacity, auraOpacity * 0.7],
         }}
         transition={{
-          rotate: { duration: isAiSpeaking ? 12 : 18, ease: 'linear', repeat: Infinity },
-          scale: { duration: isAiSpeaking ? 1.8 : 3.6, ease: 'easeInOut', repeat: Infinity },
-          opacity: { duration: isAiSpeaking ? 1.7 : 3.4, ease: 'easeInOut', repeat: Infinity },
+          duration: isAiSpeaking ? 2.1 : 4.6,
+          ease: 'easeInOut',
+          repeat: Infinity,
         }}
       />
 
       <motion.div
-        className="relative h-[9rem] w-[9rem] rounded-full md:h-[10.5rem] md:w-[10.5rem]"
+        aria-hidden="true"
+        className="absolute inset-[12%] rounded-full immersive-orb-halo"
         animate={{
-          scale: [1, 1.008 + clamped * (isAiSpeaking ? 0.024 : 0.012), 1],
-          y: isAiSpeaking ? [0, -1.2, 0] : [0, -0.6, 0],
+          rotate: isAiSpeaking ? 360 : 240,
+          scale: [1, 1.02 + energy * 0.03, 1],
         }}
         transition={{
-          duration: isAiSpeaking ? 1.6 : 3.3,
+          rotate: { duration: isAiSpeaking ? 14 : 24, ease: 'linear', repeat: Infinity },
+          scale: { duration: isAiSpeaking ? 2 : 4.8, ease: 'easeInOut', repeat: Infinity },
+        }}
+      />
+
+      <motion.div
+        className="relative h-[10.5rem] w-[10.5rem] rounded-full md:h-[13rem] md:w-[13rem]"
+        animate={{
+          scale: [1, 1.012 + energy * (isAiSpeaking ? 0.045 : 0.02), 1],
+          y: isAiSpeaking ? [0, -2, 0] : [0, -0.8, 0],
+        }}
+        transition={{
+          duration: isAiSpeaking ? 1.9 : 4.2,
           ease: 'easeInOut',
           repeat: Infinity,
         }}
       >
-        <div className="absolute inset-0 rounded-full immersive-orb-core-shell" />
+        <div className="absolute inset-0 rounded-full immersive-orb-shell" />
         <motion.div
           aria-hidden="true"
-          className="absolute inset-[7%] rounded-full immersive-orb-core-inner"
+          className="absolute inset-[4%] rounded-full immersive-orb-clouds"
           animate={{
-            rotate: isAiSpeaking ? 360 : -240,
-            scale: [1, 1.015 + clamped * 0.012, 1],
+            rotate: isAiSpeaking ? 360 : 180,
+            scale: [1, 1.018 + energy * 0.024, 1],
           }}
           transition={{
-            rotate: { duration: isAiSpeaking ? 9 : 14, ease: 'linear', repeat: Infinity },
-            scale: { duration: isAiSpeaking ? 1.8 : 3.4, ease: 'easeInOut', repeat: Infinity },
+            rotate: { duration: isAiSpeaking ? 18 : 30, ease: 'linear', repeat: Infinity },
+            scale: { duration: isAiSpeaking ? 2.1 : 5, ease: 'easeInOut', repeat: Infinity },
           }}
         />
         <motion.div
           aria-hidden="true"
-          className="absolute inset-[4%] rounded-full immersive-orb-current"
+          className="absolute inset-[10%] rounded-full immersive-orb-depth"
           animate={{
-            rotate: isAiSpeaking ? 360 : 220,
-            opacity: isAiSpeaking ? [0.2, 0.34, 0.2] : [0.12, 0.18, 0.12],
+            rotate: isAiSpeaking ? -360 : -220,
+            opacity: isAiSpeaking ? [0.48, 0.7, 0.48] : [0.34, 0.5, 0.34],
           }}
           transition={{
-            rotate: { duration: isAiSpeaking ? 10 : 16, ease: 'linear', repeat: Infinity },
-            opacity: { duration: isAiSpeaking ? 1.7 : 3.5, ease: 'easeInOut', repeat: Infinity },
+            rotate: { duration: isAiSpeaking ? 16 : 28, ease: 'linear', repeat: Infinity },
+            opacity: { duration: isAiSpeaking ? 1.8 : 4.2, ease: 'easeInOut', repeat: Infinity },
           }}
         />
         <motion.div
           aria-hidden="true"
-          className="absolute inset-[18%] rounded-full immersive-orb-core-pulse"
+          className="absolute inset-[20%] rounded-full immersive-orb-core"
           animate={{
-            scale: [1, 1.03 + clamped * 0.03, 1],
-            opacity: isAiSpeaking ? [0.26, 0.42, 0.26] : [0.18, 0.28, 0.18],
+            scale: [1, 1.04 + energy * 0.04, 1],
+            opacity: isAiSpeaking ? [0.5, 0.74, 0.5] : [0.38, 0.56, 0.38],
           }}
           transition={{
-            duration: isAiSpeaking ? 1.25 : 2.9,
+            duration: isAiSpeaking ? 1.5 : 3.6,
             ease: 'easeInOut',
             repeat: Infinity,
           }}
         />
         <motion.div
           aria-hidden="true"
-          className="absolute left-[24%] top-[16%] h-[22%] w-[20%] rounded-full immersive-orb-highlight"
+          className="absolute left-[18%] top-[14%] h-[30%] w-[28%] rounded-full immersive-orb-specular"
           animate={{
-            x: isAiSpeaking ? [0, 1.2, 0] : [0, 0.6, 0],
-            y: isAiSpeaking ? [0, -1.2, 0] : [0, -0.6, 0],
+            x: isAiSpeaking ? [0, 2.2, 0] : [0, 0.8, 0],
+            y: isAiSpeaking ? [0, -2.8, 0] : [0, -0.8, 0],
           }}
           transition={{
-            duration: isAiSpeaking ? 1.9 : 4.2,
+            duration: isAiSpeaking ? 2 : 4.8,
             ease: 'easeInOut',
             repeat: Infinity,
           }}

@@ -763,3 +763,43 @@
 | 前端删除 | 删除 `ConversationPage` 里的 immersive report prompt / generate / preview toast 链路，同时移除 Profile 报告区、报告缓存、相关 service API、类型、常量、多语言文案和前端报告组件文件。 |
 | 接口收口 | 服务端 `conversation.controller` 下线 `/conversation/:id/report` 与 `/conversation/reports/*` 暴露入口，避免产品层继续访问已废弃链路。                                                |
 | 气泡重做 | `AudioOrb` 从石墨核方向切回蓝色主题流体球体：更干净的渐变、更轻的呼吸、更柔和的液态旋流，白天和暗黑模式都不再依赖深灰内核。                                                           |
+
+### 2026-04-03（Immersive 时序收口 + 文本回复去 Study Steps）
+
+| 维度         | 记录                                                                                                                                                              |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点       | immersive 虽然显示 connected，但首句经常很久才被捕捉；后续说话导师偶发不再响应。与此同时，text / image 回复主气泡里仍会硬插 `Study Steps/学习建议`，显得机械。 |
+| Realtime 修复 | realtime 会话改为“前端主导提交与拉起回复，服务端 `server_vad` 只做 turn detection 辅助”；关闭 session 里的 `create_response`，避免前后端双重抢答引发时序冲突。   |
+| 灵敏度收口   | 下调 `server_vad` 阈值，缩短静音提交窗口；前端音频 buffer 再降到 `1024`，本地 noise gate 进一步放宽，并补上本地短语音起止判定与更早 `input_audio_buffer.commit`。 |
+| 抗打断修复   | 用户重新开口时前端立即 cancel 当前 AI response 并清空播放队列，减少“导师还在说，用户新一句却迟迟不进链路”的卡顿感。                                            |
+| 文本链路收口 | `ConversationService` 去掉把 `Study Steps/学习建议` 直接拼进 reply 的逻辑，text / image 模式改为“自然主回复 + correction / grammar / pronunciation tips 分离”。   |
+| Prompt 回归  | prompt regression 基线同步从“强依赖 Study Steps”改为“优先自然回复、仍保留可执行教学字段”，避免未来再次把主回复拉回教程体。                                     |
+| Summary 收口 | 会话总结新增 `headline / advice` 字段，前端 summary card 改成两句式摘要展示，不再只依赖机械条目堆叠。                                                           |
+| 视觉收口     | immersive orb 改为更轻的流体核与呼吸层，减少厚重环线和脏火焰堆叠；字幕卡片与控制区同步减重。                                                                      |
+| 验证结果     | `pnpm --filter server test -- --runInBand realtime.ws.helpers.spec.ts conversation-summary.types.spec.ts`、`pnpm --filter server test:prompt-regression`、`pnpm --filter server build`、`pnpm --filter web typecheck`、`pnpm --filter web build` 通过。 |
+
+### 2026-04-04（Omni 主链路回归 + 文案/配置减负）
+
+| 维度            | 记录                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 背景调整        | 上一轮尝试过把 immersive 字幕拆到独立 ASR 模型，但实际带来了卡顿、重复状态管理和反复重连风险，因此本轮重新收口到单一 omni realtime 主链路。                         |
+| Realtime 收口   | 服务端恢复 `server_vad + create_response` 官方主路径；前端移除本地 `commit / response.create` 编排，不再额外构造一套 turn 状态机。                                  |
+| 字幕链路结论    | immersive 默认继续消费 `conversation.item.input_audio_transcription.*` 与 `response.*transcript.*` 事件，不再默认挂载额外字幕模型。                                  |
+| Tips 一致性     | chat 中文字、图片、语音消息统一进入同一评分卡交互；所有模式都显示 `overall` 与有效 grammar tips，只有真实语音输入才显示 pronunciation / rhythm 建议。                |
+| Summary 收口    | session summary 改为默认可完全收起；展开后才显示摘要正文，并过滤掉 `本轮... / This round...` 这类低价值 headline；本地 fallback 文案也同步改短、去模板味。           |
+| 快捷胶囊收口    | 快捷建议优先走异步接口生成，失败再回退本地规则；同时删除不再参与渲染的 quick reply 标题/副标题文案，减少遗留配置噪音。                                             |
+| 冗余清理        | 删除前端已不再使用的本地 realtime VAD 常量；清理未被引用的 locale 键；`docs/immersive-mode.md` 也同步改写为“单 omni 主链路”现状，避免继续误导后续开发。              |
+| 视觉收口        | immersive 页面继续减重，弱化厚阴影、重模糊和装饰线框，只保留单核 orb、轻字幕层和必要控制区。                                                                           |
+| 验证建议        | 本轮主要为配置、文案和文档收口；完成后至少执行 `pnpm --filter web typecheck` 校验前端类型，避免清理 locale / 常量时引入编译回归。                                     |
+
+### 2026-04-04（音色校准 + 语速上调 + 品牌图标重做）
+
+| 维度         | 记录                                                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 问题点       | 粤语对话中导师语音偶发落到普通话或非粤语音色；immersive 音色偏好还是全局单值，切语言后容易沿用旧音色；整体导师语速也偏慢。                         |
+| 官方校准     | 对照阿里云百炼官方音色能力后，按语言重排默认音色：普通话默认 `Serena`，粤语默认 `Kiki`，英语默认 `Jennifer`；并把语言白名单收紧到各自官方推荐音色。 |
+| Realtime 修复 | realtime WS 代理不再使用全局 `Jennifer` 默认值，而是根据会话目标语言解析合法音色；客户端发来的越界音色也会被服务端收敛回当前语言默认值。             |
+| 前端持久化   | immersive 音色偏好改为按语言分别存储，不再用单个全局 `realtimeVoice` 污染所有语言；旧缓存存在时也只会在当前语言合法时才复用。                       |
+| 语速收口     | TTS 默认速度提升一档；`slow / normal / fast` 三档的实际 `speech_rate` 整体前移，同时 realtime prompt 只增加一条“略快但自然”的轻量节奏引导。         |
+| 设计更新     | 重做 `luvtalk-icon.svg`，改为无描边、偏苹果风的填充式品牌图标；Sidebar 头部同步接入新 icon 和更简洁的品牌层级。                                      |
+| 验证结果     | `pnpm --filter web typecheck`、`pnpm --filter server build`、`pnpm --filter server test -- --runInBand realtime.ws.helpers.spec.ts` 通过。           |

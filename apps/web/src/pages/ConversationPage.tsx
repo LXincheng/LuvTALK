@@ -25,6 +25,7 @@ import {
   fetchConversationSummary,
   fetchConversationById,
   fetchConversationHistory,
+  fetchConversationQuickReplies,
   fetchVoiceOperationStatus,
   resumeConversation,
   sendConversationImageMessage,
@@ -39,10 +40,9 @@ import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
 import type { LocaleKey } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
-import { REALTIME_VOICE_STORAGE_KEY } from '../constants/storage';
 import {
-  DEFAULT_IMMERSIVE_VOICE,
   getDefaultTtsVoice,
+  getDefaultImmersiveVoice,
   getTtsVoiceOptions,
   isTtsVoiceSupported,
   setVoiceCatalog,
@@ -57,8 +57,10 @@ import type {
   LanguageCode,
 } from '../types/api';
 import {
+  getStoredRealtimeVoice,
   getStoredTtsSpeed,
   getStoredTtsVoice,
+  setStoredRealtimeVoice,
   setStoredTtsSpeed,
   setStoredTtsVoice,
 } from '../utils/voicePreferences';
@@ -178,6 +180,16 @@ const mapSessionToMessages = (
       resolveAudioUrl(message.meta?.audioUrl, session.id) ??
       ttsAudioMap[message.id],
     imageUrl: resolveAudioUrl(message.meta?.imageUrl, session.id),
+    inputMode:
+      message.sender === 'user'
+        ? message.meta?.audioUrl
+          ? message.meta?.source === 'realtime'
+            ? 'realtime'
+            : 'voice'
+          : message.meta?.imageUrl
+            ? 'image'
+            : 'text'
+        : undefined,
     annotations:
       message.sender === 'ai' && index > 0
         ? message.meta?.keyTerms?.map((term) => ({
@@ -201,9 +213,12 @@ const mapSessionToMessages = (
       if (session.messages[cursor]?.sender === 'user') {
         mapped[cursor] = {
           ...mapped[cursor],
+          overallScore: score,
           pronunciationScore: score,
-          pronunciationTip: message.meta?.pronunciationTip,
-          rhythmTip: message.meta?.rhythmTip,
+          pronunciationTip:
+            session.messages[cursor]?.meta?.audioUrl ? message.meta?.pronunciationTip : undefined,
+          rhythmTip:
+            session.messages[cursor]?.meta?.audioUrl ? message.meta?.rhythmTip : undefined,
           grammarTip: message.meta?.grammarTip,
         };
         break;
@@ -304,14 +319,18 @@ const buildLocalSessionSummary = (
     .map((term) => ({ term: term.term, definition: term.definition }))
     .filter((item) => item.term && item.definition)
     .slice(0, 6);
+  const meaningfulMessages = currentSession.messages.filter((message) => message.text?.trim());
+  const firstTimestamp = meaningfulMessages[0]?.createdAt ?? currentSession.createdAt;
+  const lastTimestamp =
+    meaningfulMessages[meaningfulMessages.length - 1]?.createdAt ?? currentSession.updatedAt;
 
   return {
     conversationId: currentSession.id,
     durationMinutes: Math.max(
       1,
-      Math.round(
-        (new Date(currentSession.updatedAt).getTime() -
-          new Date(currentSession.createdAt).getTime()) /
+      Math.ceil(
+        (new Date(lastTimestamp).getTime() -
+          new Date(firstTimestamp).getTime()) /
           60000,
       ),
     ),
@@ -319,6 +338,8 @@ const buildLocalSessionSummary = (
     aiTurns: aiMessages.length,
     averageScore,
     latestScore,
+    headline: t('sessionSummaryDefaultStrength'),
+    advice: t('sessionSummaryDefaultNextAction'),
     strengths: [t('sessionSummaryDefaultStrength')],
     improvements: [t('sessionSummaryDefaultImprovement')],
     recommendedNextActions: [t('sessionSummaryDefaultNextAction')],
@@ -366,15 +387,9 @@ export default function ConversationPage() {
   const [ttsVoice, setTtsVoice] = useState<string>(() =>
     getStoredTtsVoice(getInitialTargetLanguage()),
   );
-  const [realtimeVoice, setRealtimeVoice] = useState<string>(() => {
-    if (typeof window === 'undefined') {
-      return DEFAULT_IMMERSIVE_VOICE;
-    }
-    const stored = localStorage.getItem(REALTIME_VOICE_STORAGE_KEY);
-    return typeof stored === 'string' && stored.trim()
-      ? stored
-      : DEFAULT_IMMERSIVE_VOICE;
-  });
+  const [realtimeVoice, setRealtimeVoice] = useState<string>(() =>
+    getStoredRealtimeVoice(getInitialTargetLanguage()),
+  );
   const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(getStoredTtsSpeed);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -409,6 +424,7 @@ export default function ConversationPage() {
   const [quickReplyOptions, setQuickReplyOptions] = useState<QuickReplyOption[]>([]);
   const [quickRepliesVisible, setQuickRepliesVisible] = useState(false);
   const [dismissedQuickReplyKey, setDismissedQuickReplyKey] = useState<string | null>(null);
+  const quickReplyFetchSeqRef = useRef(0);
   const targetLanguageRef = useRef<LanguageCode>(targetLanguage);
   const nativeLanguageRef = useRef<LanguageCode>(nativeLanguage);
   const quickReplyTimerRef = useRef<number | null>(null);
@@ -850,10 +866,8 @@ export default function ConversationPage() {
   }, [targetLanguage, ttsVoice]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(REALTIME_VOICE_STORAGE_KEY, realtimeVoice);
-    }
-  }, [realtimeVoice]);
+    setStoredRealtimeVoice(targetLanguage, realtimeVoice);
+  }, [realtimeVoice, targetLanguage]);
 
   useEffect(() => {
     setStoredTtsSpeed(ttsSpeed);
@@ -864,7 +878,11 @@ export default function ConversationPage() {
   }, [targetLanguage]);
 
   useEffect(() => {
-    setRealtimeVoice((currentVoice) => currentVoice?.trim() || DEFAULT_IMMERSIVE_VOICE);
+    setRealtimeVoice((currentVoice) =>
+      isTtsVoiceSupported(targetLanguage, currentVoice)
+        ? currentVoice
+        : getStoredRealtimeVoice(targetLanguage) || getDefaultImmersiveVoice(targetLanguage),
+    );
   }, [targetLanguage]);
 
   useEffect(() => {
@@ -898,7 +916,7 @@ export default function ConversationPage() {
     }
     return `${session.id}:${session.messages.length}:${isNewChatSession ? 'starter' : 'reply'}`;
   }, [isNewChatSession, session?.id, session?.messages.length]);
-  const quickReplyContent = useMemo(() => {
+  const quickReplyFallbackContent = useMemo(() => {
     if (!session) {
       return [];
     }
@@ -951,7 +969,7 @@ export default function ConversationPage() {
       chatMode === 'immersive' ||
       recoveryState === 'recovering' ||
       recoveryState === 'error' ||
-      quickReplyContent.length === 0 ||
+      quickReplyFallbackContent.length === 0 ||
       dismissedQuickReplyKey === quickReplySuggestionKey;
 
     if (shouldHideImmediately) {
@@ -977,10 +995,43 @@ export default function ConversationPage() {
       if (document.visibilityState !== 'visible') {
         return;
       }
-      startTransition(() => {
-        setQuickReplyOptions(quickReplyContent);
-        setQuickRepliesVisible(true);
-      });
+      const activeSessionId = session.id;
+      const activeSuggestionKey = quickReplySuggestionKey;
+      const seq = ++quickReplyFetchSeqRef.current;
+      void fetchConversationQuickReplies(activeSessionId, locale)
+        .then((payload) => {
+          if (
+            seq !== quickReplyFetchSeqRef.current ||
+            activeSessionId !== session?.id ||
+            activeSuggestionKey !== quickReplySuggestionKey
+          ) {
+            return;
+          }
+          const source = payload.options.length
+            ? payload.options
+            : quickReplyFallbackContent.map((option) => option.text);
+          const options = source.map((text, index) => ({
+            id: `chat-${activeSessionId}-${activeSuggestionKey}-${index}`,
+            text,
+          }));
+          startTransition(() => {
+            setQuickReplyOptions(options);
+            setQuickRepliesVisible(options.length > 0);
+          });
+        })
+        .catch(() => {
+          if (
+            seq !== quickReplyFetchSeqRef.current ||
+            activeSessionId !== session?.id ||
+            activeSuggestionKey !== quickReplySuggestionKey
+          ) {
+            return;
+          }
+          startTransition(() => {
+            setQuickReplyOptions(quickReplyFallbackContent);
+            setQuickRepliesVisible(quickReplyFallbackContent.length > 0);
+          });
+        });
     }, isNewChatSession ? NEW_CHAT_QUICK_REPLY_DELAY_MS : EXISTING_CHAT_QUICK_REPLY_DELAY_MS);
 
     return () => {
@@ -995,7 +1046,8 @@ export default function ConversationPage() {
     isNewChatSession,
     isRecording,
     isSending,
-    quickReplyContent,
+    locale,
+    quickReplyFallbackContent,
     quickReplySuggestionKey,
     quickRepliesVisible,
     recoveryState,
@@ -1903,6 +1955,7 @@ export default function ConversationPage() {
       >
         <LazyImmersiveMode
           conversationId={session.id}
+          targetLanguage={targetLanguage}
           voice={realtimeVoice}
           onVoiceChange={setRealtimeVoice}
           onExit={() => {
