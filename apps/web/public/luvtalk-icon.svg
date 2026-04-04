@@ -1,30 +1,29 @@
 <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="tile" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#EEF7FF" />
-      <stop offset="0.52" stop-color="#B7D8FF" />
+      <stop stop-color="#F6FBFF" />
+      <stop offset="0.42" stop-color="#DCEFFF" />
       <stop offset="1" stop-color="#0A84FF" />
     </linearGradient>
-    <linearGradient id="mark" x1="20" y1="16" x2="44" y2="44" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#06111F" />
-      <stop offset="1" stop-color="#163A66" />
+    <linearGradient id="orb" x1="23" y1="18" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111E" />
+      <stop offset="1" stop-color="#103E73" />
     </linearGradient>
   </defs>
   <rect x="6" y="6" width="52" height="52" rx="18" fill="url(#tile)" />
   <path
-    d="M22 18C22 15.7909 23.7909 14 26 14H34.2C41.2692 14 47 19.7308 47 26.8V27.6C47 34.6692 41.2692 40.4 34.2 40.4H30.8L23.4 46.3C22.7467 46.8213 21.78 46.356 21.78 45.5201V39.1198C19.4236 37.4767 18 34.7856 18 31.8V26C18 21.5817 21.5817 18 26 18H22Z"
-    fill="url(#mark)"
+    d="M32.376 17C40.81 17 46.908 23.27 46.908 31.221C46.908 39.567 40.358 46.256 31.519 45.42C28.862 45.169 26.311 44.231 24.198 42.738L18.917 44.807C18.2 45.088 17.533 44.396 17.82 43.695L19.968 38.446C18.499 36.361 17.61 33.848 17.61 31.221C17.61 23.27 23.942 17 32.376 17Z"
+    fill="url(#orb)"
   />
   <path
-    d="M29.2 23.5C29.2 22.6716 29.8716 22 30.7 22H36.8C37.6284 22 38.3 22.6716 38.3 23.5C38.3 24.3284 37.6284 25 36.8 25H32.2V29.4C32.2 30.2284 31.5284 30.9 30.7 30.9C29.8716 30.9 29.2 30.2284 29.2 29.4V23.5Z"
-    fill="#F7FBFF"
+    d="M28.195 24.172C28.195 23.41 28.813 22.793 29.575 22.793H36.2C36.962 22.793 37.579 23.41 37.579 24.172C37.579 24.934 36.962 25.552 36.2 25.552H30.954V30.797C30.954 31.559 30.337 32.176 29.575 32.176C28.813 32.176 28.195 31.559 28.195 30.797V24.172Z"
+    fill="#F8FBFF"
   />
-  <circle cx="23" cy="24" r="2" fill="#F7FBFF" fill-opacity="0.96" />
   <path
-    d="M21.2 14.6C24.6 12.7 28.4 12.2 32.1 13.1"
+    d="M40.041 21.954C41.412 23.35 42.307 25.254 42.519 27.378"
     stroke="white"
-    stroke-opacity="0.52"
-    stroke-width="2"
+    stroke-opacity="0.42"
+    stroke-width="2.2"
     stroke-linecap="round"
   />
 </svg>

@@ -23,8 +23,8 @@ export const OFFICIAL_TTS_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> 
   [LanguageCode.English]: {
     languageCode: "en",
     ttsLanguageType: "English",
-    defaultVoice: "Jennifer",
-    options: ["Jennifer", "Aiden"],
+    defaultVoice: "Aiden",
+    options: ["Aiden", "Jennifer"],
   },
 };
 
@@ -34,6 +34,10 @@ export const FLASH_ONLY_TTS_VOICES = new Set([
   "Jennifer",
   "Aiden",
 ]);
+
+export const OFFICIAL_TTS_VOICES = new Set(
+  Object.values(OFFICIAL_TTS_VOICE_CATALOG).flatMap((item) => item.options),
+);
 
 export const resolveLanguageVoiceSettings = (
   language: LanguageCode | string | undefined,
@@ -50,10 +54,17 @@ export const resolveLanguageVoiceSettings = (
 export const resolvePreferredVoiceForLanguage = (
   language: LanguageCode | string | undefined,
   requestedVoice?: string,
+  options?: {
+    allowCrossLanguage?: boolean;
+  },
 ): string => {
   const settings = resolveLanguageVoiceSettings(language);
   const normalized = requestedVoice?.trim();
-  if (normalized && settings.options.includes(normalized)) {
+  if (
+    normalized &&
+    (settings.options.includes(normalized) ||
+      (options?.allowCrossLanguage && OFFICIAL_TTS_VOICES.has(normalized)))
+  ) {
     return normalized;
   }
   return settings.defaultVoice;

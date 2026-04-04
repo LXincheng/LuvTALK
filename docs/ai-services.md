@@ -1,6 +1,6 @@
 # LuvTALK 模型服务方案
 
-> 更新时间：2026-04-01
+> 更新时间：2026-04-05
 
 ## 1. 结论
 
@@ -16,7 +16,7 @@
 | 原则 | 说明 |
 | --- | --- |
 | 单一事实源 | 模型路由只看根目录 `.env`；不要再维护重复 env 变量 |
-| 严格串行回退 | 对话链路固定 `qwen3.5-plus -> qwen3.5-flash -> deepseek-chat`，逐级超时，不竞争返回 |
+| 严格串行回退 | 对话链路固定 `qwen3.6-plus -> qwen3.5-flash -> deepseek-chat`，逐级超时，不竞争返回 |
 | 音色服务端收口 | 音色目录由服务端 `voice-config` 提供，前端不再维护独立 `TTS_VOICE_*` 配置 |
 | 混合语言识别 | STT 不强制指定单一识别语言，兼容英语、普通话、粤语混说 |
 | Scenario 角色约束 | 场景 prompt 统一由服务端 scenario 配置生成，强调角色扮演、任务推进与收尾条件 |
@@ -49,14 +49,14 @@
 
 | 模块 | 当前模型 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| 普通聊天 / 场景对话 | `qwen3.5-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认开启 session 上下文；严格串行超时回退，不再竞争返回 |
+| 普通聊天 / 场景对话 | `qwen3.6-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认开启 session 上下文；严格串行超时回退，不再竞争返回 |
 | 场景反馈 | `qwen3.5-flash` → `qwen3.5-plus` → `deepseek-chat` | 已接入、已实测 | 轻量快反馈 |
-| 报告 | `qwen3.5-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认关闭深度思考，保持结果稳定 |
+| 报告 | `qwen3.6-plus` → `qwen3.5-flash` → `deepseek-chat` | 已接入、已实测 | 默认关闭深度思考，保持结果稳定 |
 | 翻译 | `qwen-mt-flash` | 已接入、已实测 | 已按官方兼容格式修正请求体 |
 | 文化卡片 | `qwen3.5-flash` | 已接入、已实测 | 保留本地兜底 |
 | STT | `qwen3-asr-flash` | 已接入、已实测 | 混合语言语音默认不再强绑单一语言，避免英文/普通话/粤语夹杂时误识别 |
 | TTS | `qwen3-tts-instruct-flash`，`Jennifer / Aiden / Kiki / Rocky` 自动走 `qwen3-tts-flash` | 已接入、已实测 | 英文/普通话/粤语均已跑通；音色由服务端 `voice-config` 单点下发 |
-| Chat 图像理解 | `qwen3.5-plus`（主） → `qwen3.5-flash`（补位） | 已接入、已实测 | 支持图片上传、预览、识别与语言教学解释 |
+| Chat 图像理解 | `qwen3.6-plus`（主） → `qwen3.5-flash`（补位） | 已接入、已实测 | 支持图片上传、预览、识别与语言教学解释 |
 | Realtime | 现有方案保留 | **本轮不改** | 不迁到 Omni Realtime |
 
 ## 3.3 Scenario 当前规则
@@ -74,7 +74,7 @@
 
 | 变量 | 推荐值 | 用途 |
 | --- | --- | --- |
-| `PRIMARY_MODEL` | `qwen3.5-plus` | 主聊天 / 主报告模型 |
+| `PRIMARY_MODEL` | `qwen3.6-plus` | 主聊天 / 主报告模型 |
 | `SECONDARY_MODEL` | `qwen3.5-flash` | 快速补位与轻量回退 |
 | `THIRD_MODEL` | `deepseek-chat` | 最后一级兜底 |
 | `STT_MODEL` | `qwen3-asr-flash` | 语音识别 |
@@ -117,7 +117,7 @@
 | STT 按官方 `qwen3-asr-flash` 兼容格式改写 | 语音识别恢复可用 |
 | Translation 按官方 `qwen-mt-flash` 兼容格式改写 | 翻译恢复可用 |
 | 删除游客报告 mock 数据 | 报告页不再混入假样本 |
-| 聊天图片问答改走 `qwen3.5-plus` 视觉理解 | 图片识别、命名、读法、用法可直接教学 |
+| 聊天图片问答改走 `qwen3.6-plus` 视觉理解 | 图片识别、命名、读法、用法可直接教学 |
 | 音色映射固定到服务端 | 避免英语出现普通话音色、普通话出现英语音色 |
 
 ## 6. 当前代码结论
@@ -133,6 +133,7 @@
 
 - Qwen Omni 官方文档：<https://help.aliyun.com/zh/model-studio/qwen-omni>
 - Realtime 官方文档：<https://help.aliyun.com/zh/model-studio/realtime>
+- 百炼模型大全（含 `qwen3.6-plus`）：<https://help.aliyun.com/document_detail/2840914.html>
 - Qwen ASR 官方文档：<https://help.aliyun.com/zh/model-studio/qwen-asr-api-reference>
 - Qwen TTS 官方文档：<https://help.aliyun.com/zh/model-studio/qwen-tts>
 - 机器翻译官方文档：<https://help.aliyun.com/zh/model-studio/user-guide/machine-translation>

@@ -4,13 +4,11 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
 import { useRealtimeSession } from '../../hooks/useRealtimeSession';
-import { getTtsVoiceOptions } from '../../config/voice';
 import { toast } from '../../utils/toast';
 import AudioOrb from './AudioOrb';
 import TranscriptSubtitles from './TranscriptSubtitles';
 import ImmersiveControls from './ImmersiveControls';
 import ImmersiveConnectionStatus from './ImmersiveConnectionStatus';
-import VoiceStyleSelector from '../chat/VoiceStyleSelector';
 import { REALTIME_SUBTITLE_LIMIT } from '../../constants/realtime';
 import type { LanguageCode } from '../../types/api';
 import type { RealtimeErrorCode } from '../../types/realtime';
@@ -19,7 +17,6 @@ interface ImmersiveModeProps {
   conversationId: string;
   targetLanguage: LanguageCode;
   voice: string;
-  onVoiceChange: (voice: string) => void;
   onExit: () => void;
   onFallbackToText?: () => void;
 }
@@ -49,7 +46,6 @@ export default function ImmersiveMode({
   conversationId,
   targetLanguage,
   voice,
-  onVoiceChange,
   onExit,
   onFallbackToText,
 }: ImmersiveModeProps) {
@@ -69,14 +65,9 @@ export default function ImmersiveMode({
     connect,
     disconnect,
     toggleMute,
-  } = useRealtimeSession({ conversationId, voice });
+  } = useRealtimeSession({ conversationId, targetLanguage, voice });
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
-  const voiceOptions = useMemo(
-    () => getTtsVoiceOptions(targetLanguage),
-    [targetLanguage],
-  );
 
   const connectRef = useRef(connect);
   const disconnectRef = useRef(disconnect);
@@ -93,7 +84,7 @@ export default function ImmersiveMode({
   useEffect(() => {
     void connectRef.current();
     return () => { disconnectRef.current('ended'); };
-  }, []);
+  }, [conversationId]);
 
   const statusLabel = useMemo(() => {
     if (status === 'connecting') return t('immersiveConnecting');
@@ -140,9 +131,17 @@ export default function ImmersiveMode({
       className="fixed inset-0 z-50 flex select-none flex-col overflow-hidden bg-[radial-gradient(740px_320px_at_50%_18%,rgba(149,224,255,0.16),transparent_42%),radial-gradient(860px_420px_at_50%_100%,rgba(12,124,255,0.10),transparent_50%),linear-gradient(180deg,#02050b_0%,#030812_48%,#040b17_100%)] text-white"
     >
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.015),transparent_58%)]" />
-        <div className="absolute left-1/2 top-[20%] h-[24rem] w-[24rem] -translate-x-1/2 rounded-full bg-cyan-200/[0.04] blur-[110px]" />
-        <div className="absolute left-1/2 top-[58%] h-[26rem] w-[26rem] -translate-x-1/2 rounded-full bg-blue-500/[0.06] blur-[120px]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.018),transparent_58%)]" />
+        <motion.div
+          className="absolute left-1/2 top-[18%] h-[24rem] w-[24rem] -translate-x-1/2 rounded-full bg-cyan-200/[0.035] blur-[118px]"
+          animate={{ scale: [1, 1.08, 1], opacity: [0.5, 0.82, 0.5] }}
+          transition={{ duration: 9.5, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute left-1/2 top-[58%] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-blue-500/[0.055] blur-[126px]"
+          animate={{ scale: [1.02, 0.96, 1.02], opacity: [0.56, 0.9, 0.56] }}
+          transition={{ duration: 10.5, repeat: Infinity, ease: 'easeInOut' }}
+        />
       </div>
 
       <div className="relative z-10 flex items-center justify-between px-5 pt-5 safe-area-inset-top">
@@ -209,6 +208,7 @@ export default function ImmersiveMode({
             </motion.button>
           )}
         </div>
+
       </div>
 
       <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-4 px-5 pb-8 safe-area-inset-bottom">
@@ -236,37 +236,13 @@ export default function ImmersiveMode({
           ) : null}
         </AnimatePresence>
 
-        <AnimatePresence>
-          {settingsOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="rounded-[28px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] px-4 py-4 backdrop-blur-2xl">
-                <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">
-                  {t('immersiveSettingsHint')}
-                </p>
-                <VoiceStyleSelector
-                  value={voice}
-                  onChange={onVoiceChange}
-                  options={voiceOptions}
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         <ImmersiveControls
           isMuted={isMuted}
           captionsEnabled={captionsEnabled}
           onToggleMute={toggleMute}
           onToggleCaptions={() => setCaptionsEnabled((prev) => !prev)}
           onEnd={handleExit}
-          onSettings={() => setSettingsOpen((prev) => !prev)}
           disabled={controlsDisabled}
-          settingsOpen={settingsOpen}
         />
       </div>
     </motion.div>

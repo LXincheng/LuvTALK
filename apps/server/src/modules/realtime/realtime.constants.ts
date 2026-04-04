@@ -5,10 +5,9 @@ export const REALTIME_SESSION_LIMITS = {
 
 export const REALTIME_DEFAULT_TURN_DETECTION = {
   type: "server_vad",
-  threshold: 0.5,
-  prefix_padding_ms: 300,
-  silence_duration_ms: 400,
+  threshold: 0.47,
+  prefix_padding_ms: 280,
+  silence_duration_ms: 650,
 } as const;
 
 export const REALTIME_OFFER_COOLDOWN_MS = 1500;
-export const REALTIME_WS_COOLDOWN_MS = 1500;

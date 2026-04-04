@@ -6,9 +6,6 @@ interface ScenarioSessionHeaderProps {
   backTo: string;
   title: string;
   emoji: string;
-  languageLabel: string;
-  turnLabel: string;
-  stageLabel: string;
   onEnd: () => void;
   endLabel: string;
   settingsContent?: ReactNode;
@@ -18,16 +15,13 @@ export default function ScenarioSessionHeader({
   backTo,
   title,
   emoji,
-  languageLabel,
-  turnLabel,
-  stageLabel,
   onEnd,
   endLabel,
   settingsContent,
 }: ScenarioSessionHeaderProps) {
   return (
     <div className="border-b border-separator bg-[var(--surface-panel)]">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-3 py-3 sm:px-4">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-3 py-3 sm:px-4">
         <div className="flex items-center gap-2.5">
           <Link
             to={backTo}
@@ -42,11 +36,6 @@ export default function ScenarioSessionHeader({
               <h2 className="truncate text-[0.98rem] font-semibold tracking-[-0.03em] text-label sm:text-[1.02rem]">
                 {title}
               </h2>
-            </div>
-            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2 text-[12px] leading-5 text-label-tertiary sm:text-[12.5px]">
-              <span className="page-chip inline-flex h-7 items-center rounded-full px-3">{languageLabel}</span>
-              <span className="page-chip inline-flex h-7 items-center rounded-full px-3">{turnLabel}</span>
-              <span className="page-chip inline-flex h-7 max-w-full items-center truncate rounded-full px-3">{stageLabel}</span>
             </div>
           </div>
 

@@ -11,6 +11,7 @@ import { API_BASE_URL } from '../../../services/apiClient';
 import {
   fetchVoiceConfig,
   fetchConversationById,
+  fetchConversationQuickReplies,
   fetchVoiceOperationStatus,
   generateScenarioFeedback,
   sendConversationMessage,
@@ -24,10 +25,7 @@ import { setVoiceCatalog } from '../../../config/voice';
 import { toast } from '../../../utils/toast';
 import ScenarioSessionHeader from '../components/ScenarioSessionHeader';
 import { getScenarioDefinition } from '../data/scenarioDefinitions';
-import {
-  buildScenarioQuickReplyOptions,
-  buildScenarioStageLabel,
-} from '../data/scenarioDialogueGuidance';
+import { buildChatQuickReplyOptions } from '../../chat/chatQuickReplyGuidance';
 import type {
   ConversationSession,
   LanguageCode,
@@ -176,21 +174,8 @@ export default function ScenarioSessionPage() {
   const translationSyncTimerRef = useRef<number | null>(null);
   const ttsRequestsRef = useRef<Set<string>>(new Set());
   const ttsAudioMapRef = useRef<Record<string, string>>({});
-  const languageLabel = t(
-    normalizedLanguage === 'mandarin'
-      ? 'languageMandarin'
-      : normalizedLanguage === 'cantonese'
-        ? 'languageCantonese'
-        : 'languageEnglish',
-  );
-  const userTurnCount = session?.messages.filter((message) => message.sender === 'user').length ?? 0;
-  const lastAiText = session?.messages
-    .slice()
-    .reverse()
-    .find((message) => message.sender === 'ai')
-    ?.text;
-  const stageLabel = buildScenarioStageLabel(t, userTurnCount, lastAiText);
-  const turnLabel = t('scenarioHeaderTurnsValue').replace('{value}', String(userTurnCount));
+  const quickReplyTimerRef = useRef<number | null>(null);
+  const quickReplyFetchSeqRef = useRef(0);
 
   const syncSession = useCallback((nextSession: ConversationSession) => {
     setSession(nextSession);
@@ -244,6 +229,13 @@ export default function ScenarioSessionPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [optimisticMessages, session?.messages]);
+
+  const clearQuickReplyTimer = useCallback(() => {
+    if (quickReplyTimerRef.current !== null) {
+      window.clearTimeout(quickReplyTimerRef.current);
+      quickReplyTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     const activeScenario = scenario;
@@ -355,16 +347,135 @@ export default function ScenarioSessionPage() {
     [optimisticMessages, session, ttsAudioMap],
   );
 
+  const isNewScenarioSession = useMemo(() => {
+    if (!session) {
+      return false;
+    }
+    return session.messages.filter((message) => message.sender === 'user').length === 0;
+  }, [session]);
+
+  const quickReplySuggestionKey = useMemo(() => {
+    if (!session?.id) {
+      return null;
+    }
+    return `${session.id}:${session.messages.length}:${isNewScenarioSession ? 'starter' : 'reply'}`;
+  }, [isNewScenarioSession, session?.id, session?.messages.length]);
+
+  const quickReplyFallbackContent = useMemo(() => {
+    if (!session) {
+      return [];
+    }
+    return buildChatQuickReplyOptions(session);
+  }, [session]);
+
   useEffect(() => {
-    if (!session || !scenario) {
+    if (!session) {
+      clearQuickReplyTimer();
+      startTransition(() => {
+        setQuickRepliesVisible(false);
+        setQuickReplyOptions([]);
+      });
       return;
     }
-    const nextOptions = buildScenarioQuickReplyOptions(scenario, session, t);
-    startTransition(() => {
-      setQuickReplyOptions(nextOptions);
-      setQuickRepliesVisible(nextOptions.length > 0);
-    });
-  }, [scenario, session, t]);
+    const shouldHideImmediately =
+      Boolean(inputValue.trim()) ||
+      isRecording ||
+      isSending ||
+      isInitializing ||
+      quickReplyFallbackContent.length === 0;
+
+    if (shouldHideImmediately) {
+      clearQuickReplyTimer();
+      startTransition(() => {
+        setQuickRepliesVisible(false);
+        setQuickReplyOptions([]);
+      });
+      return;
+    }
+
+    if (document.visibilityState !== 'visible') {
+      clearQuickReplyTimer();
+      startTransition(() => {
+        setQuickRepliesVisible(false);
+      });
+      return;
+    }
+
+    clearQuickReplyTimer();
+    quickReplyTimerRef.current = window.setTimeout(() => {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      const activeSessionId = session.id;
+      const activeSuggestionKey = quickReplySuggestionKey;
+      const seq = ++quickReplyFetchSeqRef.current;
+      void fetchConversationQuickReplies(activeSessionId, locale)
+        .then((payload) => {
+          if (
+            seq !== quickReplyFetchSeqRef.current ||
+            activeSessionId !== session?.id ||
+            activeSuggestionKey !== quickReplySuggestionKey
+          ) {
+            return;
+          }
+          const source = payload.options.length
+            ? payload.options
+            : quickReplyFallbackContent.map((option) => option.text);
+          startTransition(() => {
+            setQuickReplyOptions(
+              source.map((text, index) => ({
+                id: `scenario-${activeSessionId}-${activeSuggestionKey}-${index}`,
+                text,
+              })),
+            );
+            setQuickRepliesVisible(source.length > 0);
+          });
+        })
+        .catch(() => {
+          if (
+            seq !== quickReplyFetchSeqRef.current ||
+            activeSessionId !== session?.id ||
+            activeSuggestionKey !== quickReplySuggestionKey
+          ) {
+            return;
+          }
+          startTransition(() => {
+            setQuickReplyOptions(quickReplyFallbackContent);
+            setQuickRepliesVisible(quickReplyFallbackContent.length > 0);
+          });
+        });
+    }, isNewScenarioSession ? 1400 : 5000);
+
+    return () => {
+      clearQuickReplyTimer();
+    };
+  }, [
+    clearQuickReplyTimer,
+    inputValue,
+    isInitializing,
+    isRecording,
+    isSending,
+    isNewScenarioSession,
+    locale,
+    quickReplyFallbackContent,
+    quickReplySuggestionKey,
+    session,
+  ]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        clearQuickReplyTimer();
+        startTransition(() => {
+          setQuickRepliesVisible(false);
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [clearQuickReplyTimer]);
 
   const handleSend = useCallback(async (overrideText?: string) => {
     const messageText = (overrideText ?? inputValue).trim();
@@ -539,9 +650,6 @@ export default function ScenarioSessionPage() {
         backTo={`/scenarios/${scenario.key}`}
         title={session?.title || t(scenario.titleKey)}
         emoji={scenario.emoji}
-        languageLabel={languageLabel}
-        turnLabel={turnLabel}
-        stageLabel={stageLabel}
         onEnd={() => {
           void handleOpenScore();
         }}
@@ -553,21 +661,28 @@ export default function ScenarioSessionPage() {
 
       <div className="flex-1 overflow-y-auto px-4 pt-4 pb-36 md:px-5 md:pt-5 md:pb-12">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-          <section className="page-panel rounded-[26px] px-4 py-4 md:px-5">
-            <div className="flex flex-wrap items-start gap-3">
-              <div className="page-panel-soft inline-flex h-11 w-11 items-center justify-center rounded-[16px] text-[1.25rem]">
+          <section className="page-panel relative overflow-hidden rounded-[28px] px-4 py-4 md:px-5">
+            <motion.div
+              aria-hidden="true"
+              className="pointer-events-none absolute right-[-1.5rem] top-[-2rem] h-28 w-28 rounded-full bg-primary/10 blur-3xl"
+              animate={{ scale: [1, 1.06, 1], opacity: [0.4, 0.85, 0.4] }}
+              transition={{ duration: 6.8, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent dark:via-white/10" />
+            <div className="relative flex items-start gap-3">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.28, ease: 'easeOut' }}
+                className="page-panel-soft inline-flex h-11 w-11 items-center justify-center rounded-[16px] text-[1.25rem]"
+              >
                 {scenario.emoji}
-              </div>
+              </motion.div>
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.16em] text-label-tertiary">
-                  <span>{languageLabel}</span>
-                  <span className="text-label-quaternary">·</span>
-                  <span>{turnLabel}</span>
-                </div>
-                <p className="mt-2 text-[0.98rem] font-semibold tracking-[-0.03em] text-label">
-                  {stageLabel}
-                </p>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-label-secondary">
+                <h3 className="text-[1rem] font-semibold tracking-[-0.035em] text-label">
+                  {t(scenario.titleKey)}
+                </h3>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-label-secondary">
                   {t(scenario.summaryKey)}
                 </p>
               </div>

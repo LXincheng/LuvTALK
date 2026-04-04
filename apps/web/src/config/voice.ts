@@ -24,8 +24,8 @@ const DEFAULT_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> = {
     options: ['Kiki', 'Rocky'],
   },
   english: {
-    defaultVoice: 'Jennifer',
-    options: ['Jennifer', 'Aiden'],
+    defaultVoice: 'Aiden',
+    options: ['Aiden', 'Jennifer'],
   },
 };
 
@@ -108,3 +108,61 @@ export const isTtsVoiceSupported = (
 ): voice is string =>
   typeof voice === 'string' &&
   activeVoiceCatalog[language].options.includes(voice.trim());
+
+export const resolveAdaptiveImmersiveVoice = (input?: {
+  preferredLanguage?: LanguageCode;
+  detectedText?: string;
+}): string => {
+  const detectedLanguage = detectVoiceLanguageFromText(input?.detectedText);
+  const language = detectedLanguage ?? input?.preferredLanguage ?? 'english';
+  return getDefaultImmersiveVoice(language);
+};
+
+const detectVoiceLanguageFromText = (
+  text: string | undefined,
+): LanguageCode | undefined => {
+  const normalized = text?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    /[ぁ-んァ-ヶ]/u.test(normalized) ||
+    /[가-힣]/u.test(normalized) ||
+    /[\u0600-\u06FF]/u.test(normalized) ||
+    /[\u0900-\u097F]/u.test(normalized) ||
+    /[\u0E00-\u0E7F]/u.test(normalized) ||
+    /[\u0400-\u04FF]/u.test(normalized)
+  ) {
+    return 'english';
+  }
+
+  if (/[A-Za-zÀ-ÿ]/u.test(normalized)) {
+    return 'english';
+  }
+
+  if (/[\u4E00-\u9FFF]/u.test(normalized)) {
+    const cantoneseHints = [
+      '佢',
+      '哋',
+      '冇',
+      '咗',
+      '喺',
+      '咩',
+      '嘅',
+      '啲',
+      '嚟',
+      '咁',
+      '呀',
+      '啦',
+      '囉',
+      '呢',
+      '唔',
+    ];
+    return cantoneseHints.some((token) => normalized.includes(token))
+      ? 'cantonese'
+      : 'mandarin';
+  }
+
+  return undefined;
+};

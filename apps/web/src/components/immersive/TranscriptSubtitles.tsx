@@ -56,12 +56,20 @@ export default function TranscriptSubtitles({
               className="flex justify-center"
             >
               <div
-                className={`w-full max-w-[94%] rounded-[28px] px-4 py-3 backdrop-blur-2xl ${
+                className={`relative w-full max-w-[94%] overflow-hidden rounded-[28px] px-4 py-3 backdrop-blur-2xl ${
                   isUser
-                    ? 'border border-white/[0.06] bg-white/[0.05] text-white/86 shadow-[0_16px_44px_rgba(0,0,0,0.18)]'
-                    : 'border border-sky-200/[0.10] bg-[linear-gradient(180deg,rgba(111,198,255,0.12),rgba(255,255,255,0.04))] text-white shadow-[0_18px_48px_rgba(12,54,118,0.24)]'
+                    ? 'border border-white/[0.06] bg-white/[0.045] text-white/86 shadow-[0_12px_34px_rgba(0,0,0,0.16)]'
+                    : 'border border-sky-200/[0.08] bg-[linear-gradient(180deg,rgba(111,198,255,0.10),rgba(255,255,255,0.035))] text-white shadow-[0_14px_40px_rgba(12,54,118,0.18)]'
                 }`}
               >
+                <div
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-0 ${
+                    isUser
+                      ? 'bg-[radial-gradient(circle_at_18%_14%,rgba(255,255,255,0.08),transparent_30%)]'
+                      : 'bg-[radial-gradient(circle_at_16%_14%,rgba(203,238,255,0.12),transparent_28%)]'
+                  }`}
+                />
                 <div className="mb-1 flex items-center gap-2">
                   <span
                     className={`text-[10px] font-medium uppercase tracking-[0.16em] ${
@@ -73,7 +81,7 @@ export default function TranscriptSubtitles({
                     {isUser ? 'You' : 'Tutor'}
                   </span>
                 </div>
-                <p className="break-words text-[14px] leading-[1.6] text-balance">
+                <p className="relative break-words text-[14px] leading-[1.68] text-balance">
                   {entry.text}
                   {entry.draft && (
                     <span className="ml-1 inline-block h-3 w-[2px] animate-pulse rounded-full bg-current/55 align-middle" />

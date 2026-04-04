@@ -57,10 +57,8 @@ import type {
   LanguageCode,
 } from '../types/api';
 import {
-  getStoredRealtimeVoice,
   getStoredTtsSpeed,
   getStoredTtsVoice,
-  setStoredRealtimeVoice,
   setStoredTtsSpeed,
   setStoredTtsVoice,
 } from '../utils/voicePreferences';
@@ -388,7 +386,7 @@ export default function ConversationPage() {
     getStoredTtsVoice(getInitialTargetLanguage()),
   );
   const [realtimeVoice, setRealtimeVoice] = useState<string>(() =>
-    getStoredRealtimeVoice(getInitialTargetLanguage()),
+    getDefaultImmersiveVoice(getInitialTargetLanguage()),
   );
   const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(getStoredTtsSpeed);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -866,10 +864,6 @@ export default function ConversationPage() {
   }, [targetLanguage, ttsVoice]);
 
   useEffect(() => {
-    setStoredRealtimeVoice(targetLanguage, realtimeVoice);
-  }, [realtimeVoice, targetLanguage]);
-
-  useEffect(() => {
     setStoredTtsSpeed(ttsSpeed);
   }, [ttsSpeed]);
 
@@ -881,7 +875,7 @@ export default function ConversationPage() {
     setRealtimeVoice((currentVoice) =>
       isTtsVoiceSupported(targetLanguage, currentVoice)
         ? currentVoice
-        : getStoredRealtimeVoice(targetLanguage) || getDefaultImmersiveVoice(targetLanguage),
+        : getDefaultImmersiveVoice(targetLanguage),
     );
   }, [targetLanguage]);
 
@@ -1957,7 +1951,6 @@ export default function ConversationPage() {
           conversationId={session.id}
           targetLanguage={targetLanguage}
           voice={realtimeVoice}
-          onVoiceChange={setRealtimeVoice}
           onExit={() => {
             // Skip existing messages but allow new incoming AI messages after exit.
             ttsBaselineRef.current = session.messages.length;

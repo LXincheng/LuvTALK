@@ -24,7 +24,7 @@ describe("voice tip templater", () => {
     expect(tip).toContain("在意群边界做一次短停顿");
   });
 
-  it("drops generic praise and falls back to scenario-bound tips", () => {
+  it("drops generic praise and keeps fallback tips focused on the learner utterance", () => {
     const output = ensureVoiceTipSet(
       {
         pronunciationTip: "Good job!",
@@ -37,8 +37,8 @@ describe("voice tip templater", () => {
       LanguageCode.English,
       { scenarioId: "business" },
     );
-    expect(output.pronunciationTip).toContain("In business chat");
     expect(output.pronunciationTip).toContain("Focus on stressed syllables.");
+    expect(output.pronunciationTip).not.toContain("business chat");
   });
 
   it("fills missing tips from fallback set", () => {

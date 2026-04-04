@@ -27,22 +27,6 @@ interface VoiceTipOptions {
   kind: TipKind;
 }
 
-const SCENARIO_LABEL_EN: Record<string, string> = {
-  restaurant: "restaurant chat",
-  shopping: "shopping chat",
-  directions: "directions chat",
-  business: "business chat",
-  daily: "daily chat",
-};
-
-const SCENARIO_LABEL_ZH: Record<string, string> = {
-  restaurant: "餐厅交流",
-  shopping: "商店交流",
-  directions: "问路交流",
-  business: "商务交流",
-  daily: "日常交流",
-};
-
 const keepFirstSentence = (text: string, maxLength = 96): string => {
   const sentence = text
     .split(/(?<=[。！？!?.])\s+/u)
@@ -93,39 +77,6 @@ const ensureActionablePrefix = (
   return `建议：${text}`;
 };
 
-const buildScenarioCue = (
-  nativeLanguage: LanguageCode,
-  scenarioId?: string,
-): string => {
-  if (!scenarioId) {
-    return "";
-  }
-  if (nativeLanguage === LanguageCode.English) {
-    const label = SCENARIO_LABEL_EN[scenarioId] ?? SCENARIO_LABEL_EN.daily;
-    return `In ${label}, `;
-  }
-  const label = SCENARIO_LABEL_ZH[scenarioId] ?? SCENARIO_LABEL_ZH.daily;
-  return `在${label}里，`;
-};
-
-const withScenarioCue = (
-  text: string,
-  nativeLanguage: LanguageCode,
-  scenarioId?: string,
-): string => {
-  if (!scenarioId || !text) {
-    return text;
-  }
-  if (nativeLanguage === LanguageCode.English) {
-    if (/\bin\b.+\b(chat|scenario|context)\b/i.test(text)) {
-      return text;
-    }
-  } else if (/在.+(场景|交流|对话)/.test(text)) {
-    return text;
-  }
-  return `${buildScenarioCue(nativeLanguage, scenarioId)}${text}`;
-};
-
 const applyKindHint = (
   text: string,
   nativeLanguage: LanguageCode,
@@ -172,13 +123,8 @@ export const toVoiceMicroTip = (
   }
   const oneSentence = keepFirstSentence(trimmed);
   const actionable = ensureActionablePrefix(oneSentence, nativeLanguage);
-  const scenarioBound = withScenarioCue(
-    actionable,
-    nativeLanguage,
-    options?.scenarioId,
-  );
   return applyKindHint(
-    scenarioBound,
+    actionable,
     nativeLanguage,
     options?.kind ?? "pronunciation",
   );

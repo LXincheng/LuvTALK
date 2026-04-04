@@ -11,7 +11,6 @@ import { ConversationService } from "../conversation/conversation.service";
 import {
   REALTIME_DEFAULT_TURN_DETECTION,
   REALTIME_SESSION_LIMITS,
-  REALTIME_WS_COOLDOWN_MS,
 } from "./realtime.constants";
 import {
   REALTIME_SERVER_ERROR_CODES,
@@ -78,6 +77,7 @@ export class RealtimeWsProxy {
     req: IncomingMessage,
   ): Promise<void> {
     const wsAcceptedAt = Date.now();
+    const traceId = buildTraceId();
     this.realtimeMetrics.recordConnectionAccepted();
 
     try {
@@ -117,16 +117,6 @@ export class RealtimeWsProxy {
         : `guest:${conversationId}`;
       const now = Date.now();
       const last = this.cooldown.get(cooldownKey);
-      if (last && now - last < REALTIME_WS_COOLDOWN_MS) {
-        this.closeWithMetric({
-          client,
-          wsCode: 1013,
-          code: REALTIME_SERVER_ERROR_CODES.RATE_LIMITED,
-          message: "Too many connections",
-          retriable: true,
-        });
-        return;
-      }
       if (last && now - last <= RECONNECT_WINDOW_MS) {
         this.realtimeMetrics.recordReconnectAttempt();
       }
@@ -160,21 +150,70 @@ export class RealtimeWsProxy {
         },
       });
       let upstreamTerminalHandled = false;
+      let lifecycleSampleRecorded = false;
+      let upstreamOpenedAt: number | undefined;
+      let sessionReadyAt: number | undefined;
+      let firstClientAudioAt: number | undefined;
+      let speechStartedAt: number | undefined;
+      let speechStoppedAt: number | undefined;
+      let responseCreatedAt: number | undefined;
+      let firstUserTranscriptAt: number | undefined;
+      let firstAiTranscriptAt: number | undefined;
+      let firstAiAudioAt: number | undefined;
 
       let currentVoice = resolvePreferredVoiceForLanguage(
         session.targetLanguage,
         requestedVoice,
+        { allowCrossLanguage: true },
       );
 
       const maxSessionSeconds = profile
         ? REALTIME_SESSION_LIMITS.authSeconds
         : REALTIME_SESSION_LIMITS.guestSeconds;
 
+      const finalizeLifecycleSample = (reason: string) => {
+        if (lifecycleSampleRecorded) {
+          return;
+        }
+        lifecycleSampleRecorded = true;
+        const sample = {
+          acceptedToUpstreamOpenMs:
+            upstreamOpenedAt != null ? upstreamOpenedAt - wsAcceptedAt : undefined,
+          acceptedToSessionReadyMs:
+            sessionReadyAt != null ? sessionReadyAt - wsAcceptedAt : undefined,
+          acceptedToFirstClientAudioMs:
+            firstClientAudioAt != null ? firstClientAudioAt - wsAcceptedAt : undefined,
+          acceptedToSpeechStartedMs:
+            speechStartedAt != null ? speechStartedAt - wsAcceptedAt : undefined,
+          acceptedToSpeechStoppedMs:
+            speechStoppedAt != null ? speechStoppedAt - wsAcceptedAt : undefined,
+          acceptedToResponseCreatedMs:
+            responseCreatedAt != null ? responseCreatedAt - wsAcceptedAt : undefined,
+          acceptedToFirstUserTranscriptMs:
+            firstUserTranscriptAt != null
+              ? firstUserTranscriptAt - wsAcceptedAt
+              : undefined,
+          acceptedToFirstAiTranscriptMs:
+            firstAiTranscriptAt != null
+              ? firstAiTranscriptAt - wsAcceptedAt
+              : undefined,
+          acceptedToFirstAiAudioMs:
+            firstAiAudioAt != null ? firstAiAudioAt - wsAcceptedAt : undefined,
+        };
+        this.realtimeMetrics.recordLifecycleSample(sample);
+        this.logger.log(
+          `[${traceId}] Realtime lifecycle (${reason}) upstream=${sample.acceptedToUpstreamOpenMs ?? "-"}ms session=${sample.acceptedToSessionReadyMs ?? "-"}ms clientAudio=${sample.acceptedToFirstClientAudioMs ?? "-"}ms speechStarted=${sample.acceptedToSpeechStartedMs ?? "-"}ms speechStopped=${sample.acceptedToSpeechStoppedMs ?? "-"}ms responseCreated=${sample.acceptedToResponseCreatedMs ?? "-"}ms userTranscript=${sample.acceptedToFirstUserTranscriptMs ?? "-"}ms aiTranscript=${sample.acceptedToFirstAiTranscriptMs ?? "-"}ms aiAudio=${sample.acceptedToFirstAiAudioMs ?? "-"}ms`,
+        );
+      };
+
       upstream.on("open", () => {
+        upstreamOpenedAt ??= Date.now();
         this.realtimeMetrics.recordConnectionEstablished(
           Date.now() - wsAcceptedAt,
         );
-        this.logger.log("Realtime upstream connected");
+        this.logger.log(
+          `[${traceId}] Realtime upstream connected in ${upstreamOpenedAt - wsAcceptedAt}ms`,
+        );
         const update = buildSessionUpdate({
           instructions: prompt,
           voice: currentVoice,
@@ -203,6 +242,73 @@ export class RealtimeWsProxy {
         const parsed = safeParseJson(text);
         if (parsed && typeof parsed.type === "string") {
           const eventType = parsed.type;
+          if (
+            (eventType === "session.created" || eventType === "session.updated") &&
+            sessionReadyAt == null
+          ) {
+            sessionReadyAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] Realtime session ready in ${sessionReadyAt - wsAcceptedAt}ms`,
+            );
+          }
+          if (
+            eventType === "input_audio_buffer.speech_started" &&
+            speechStartedAt == null
+          ) {
+            speechStartedAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] Speech started in ${speechStartedAt - wsAcceptedAt}ms`,
+            );
+          }
+          if (
+            eventType === "input_audio_buffer.speech_stopped" &&
+            speechStoppedAt == null
+          ) {
+            speechStoppedAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] Speech stopped in ${speechStoppedAt - wsAcceptedAt}ms`,
+            );
+          }
+          if (eventType === "response.created" && responseCreatedAt == null) {
+            responseCreatedAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] Response created in ${responseCreatedAt - wsAcceptedAt}ms`,
+            );
+          }
+          if (
+            (eventType ===
+              "conversation.item.input_audio_transcription.delta" ||
+              eventType ===
+                "conversation.item.input_audio_transcription.text" ||
+              eventType ===
+                "conversation.item.input_audio_transcription.completed") &&
+            firstUserTranscriptAt == null
+          ) {
+            firstUserTranscriptAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] First user transcript in ${firstUserTranscriptAt - wsAcceptedAt}ms`,
+            );
+          }
+          if (
+            (eventType === "response.audio_transcript.delta" ||
+              eventType === "response.output_audio_transcript.delta") &&
+            firstAiTranscriptAt == null
+          ) {
+            firstAiTranscriptAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] First AI transcript in ${firstAiTranscriptAt - wsAcceptedAt}ms`,
+            );
+          }
+          if (
+            (eventType === "response.audio.delta" ||
+              eventType === "response.output_audio.delta") &&
+            firstAiAudioAt == null
+          ) {
+            firstAiAudioAt = Date.now();
+            this.logger.debug(
+              `[${traceId}] First AI audio in ${firstAiAudioAt - wsAcceptedAt}ms`,
+            );
+          }
           if (
             eventType === "error" ||
             eventType === "session.created" ||
@@ -262,18 +368,26 @@ export class RealtimeWsProxy {
         }
         upstreamTerminalHandled = true;
         this.realtimeMetrics.recordWsClosed(code);
-        this.logger.warn(
-          `Realtime upstream closed (${code}): ${reason.toString()}`,
-        );
+        const reasonText = reason.toString();
+        if (code === 1000) {
+          this.logger.debug(
+            `Realtime upstream closed normally (${code}): ${reasonText || "normal close"}`,
+          );
+        } else {
+          this.logger.warn(
+            `Realtime upstream closed (${code}): ${reasonText}`,
+          );
+        }
         if (code !== 1000) {
           const mapped = mapCloseCodeToErrorCode(code);
           this.realtimeMetrics.recordConnectionFailure({
             errorCode: mapped.code,
             wsCode: code,
             retriable: mapped.retriable,
-            message: reason.toString() || mapped.message,
+            message: reasonText || mapped.message,
           });
         }
+        finalizeLifecycleSample(`upstream-close:${code}`);
         if (client.readyState === WebSocket.OPEN) {
           const mapped = mapCloseCodeToErrorCode(code);
           if (code !== 1000) {
@@ -325,6 +439,7 @@ export class RealtimeWsProxy {
           currentVoice = resolvePreferredVoiceForLanguage(
             session.targetLanguage,
             resolveVoice(payload.session) ?? currentVoice,
+            { allowCrossLanguage: true },
           );
           const update = buildSessionUpdate({
             instructions: prompt,
@@ -335,6 +450,7 @@ export class RealtimeWsProxy {
           return;
         }
         if (type === "input_audio_buffer.append") {
+          firstClientAudioAt ??= Date.now();
           const audio = resolveAudioPayload(payload.audio);
           if (!audio || audio.length > MAX_AUDIO_BASE64_LENGTH) {
             return;
@@ -352,6 +468,8 @@ export class RealtimeWsProxy {
 
       client.on("close", (code) => {
         this.realtimeMetrics.recordWsClosed(code);
+        upstreamTerminalHandled = true;
+        finalizeLifecycleSample(`client-close:${code}`);
         if (upstream.readyState === WebSocket.OPEN) {
           upstream.close(1000, "Client disconnected");
         }
@@ -359,6 +477,7 @@ export class RealtimeWsProxy {
 
       client.on("error", (error) => {
         this.logger.warn(`Realtime client error: ${error.message}`);
+        finalizeLifecycleSample("client-error");
         this.closeWithMetric({
           client,
           upstream,
@@ -420,6 +539,11 @@ export class RealtimeWsProxy {
     return this.authService.verifyAccessToken(accessToken);
   }
 }
+
+const buildTraceId = (): string =>
+  `rt-${Math.random().toString(36).slice(2, 8)}-${Date.now()
+    .toString(36)
+    .slice(-4)}`;
 
 const resolveRealtimeWsUrl = (base: string, model: string): string => {
   const normalized = base.replace(/\/$/, "");
