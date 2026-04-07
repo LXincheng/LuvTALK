@@ -7,7 +7,10 @@ export interface VoiceCatalogItem {
   options: string[];
 }
 
-export const OFFICIAL_TTS_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> = {
+export const OFFICIAL_TTS_VOICE_CATALOG: Record<
+  LanguageCode,
+  VoiceCatalogItem
+> = {
   [LanguageCode.Mandarin]: {
     languageCode: "zh",
     ttsLanguageType: "Chinese",

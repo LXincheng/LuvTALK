@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Lock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLocale } from '../providers/LocaleContext';
@@ -14,6 +14,8 @@ import type {
   LevelWithProgress,
   AchievementSummary,
 } from '../services/achievementService';
+import { useAuth } from '../hooks/useAuth';
+import { toast } from '../utils/toast';
 
 interface Achievement {
   id: string;
@@ -81,39 +83,104 @@ const mapApiLevel = (raw: LevelWithProgress, t: TranslateFn): Level => {
 
 export default function AchievementHallPage() {
   const { t } = useLocale();
+  const { user } = useAuth();
+  const userKey = user?.id ?? 'guest';
   const [activeTab, setActiveTab] = useState<'achievements' | 'levels'>('achievements');
   const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [summary, setSummary] = useState<AchievementSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const retryScheduledRef = useRef(false);
+  const hasRenderableData =
+    achievements.length > 0 || levels.length > 0 || summary !== null;
 
   useEffect(() => {
     let mounted = true;
-    const { cached: cachedA, fresh: freshA } = fetchAchievementsCached();
-    const { cached: cachedL, fresh: freshL } = fetchLevelsCached();
-    const { cached: cachedS, fresh: freshS } = fetchAchievementSummaryCached();
+    const loadData = () => {
+      const { cached: cachedA, fresh: freshA } = fetchAchievementsCached(userKey);
+      const { cached: cachedL, fresh: freshL } = fetchLevelsCached(userKey);
+      const { cached: cachedS, fresh: freshS } = fetchAchievementSummaryCached(userKey);
 
-    if (cachedA && cachedL && cachedS) {
-      void Promise.resolve().then(() => {
-        if (!mounted) return;
+      if (cachedA) {
         setAchievements(cachedA.map((a) => mapApiAchievement(a, t)));
+      }
+      if (cachedL) {
         setLevels(cachedL.map((l) => mapApiLevel(l, t)));
+      }
+      if (cachedS) {
         setSummary(cachedS);
+      }
+      if (cachedA || cachedL || cachedS) {
         setIsLoading(false);
-      });
-    }
+      }
 
-    Promise.all([freshA, freshL, freshS])
-      .then(([rawAchievements, rawLevels, rawSummary]) => {
-        if (!mounted) return;
-        setAchievements(rawAchievements.map((a) => mapApiAchievement(a, t)));
-        setLevels(rawLevels.map((l) => mapApiLevel(l, t)));
-        setSummary(rawSummary);
-      })
-      .catch(() => {})
-      .finally(() => { if (mounted) setIsLoading(false); });
+      Promise.allSettled([freshA, freshL, freshS])
+        .then((results) => {
+          if (!mounted) return;
+          const [achievementsResult, levelsResult, summaryResult] = results;
+          let hasFailure = false;
+
+          if (achievementsResult.status === 'fulfilled') {
+            setAchievements(achievementsResult.value.map((a) => mapApiAchievement(a, t)));
+          } else {
+            hasFailure = true;
+          }
+
+          if (levelsResult.status === 'fulfilled') {
+            setLevels(levelsResult.value.map((l) => mapApiLevel(l, t)));
+          } else {
+            hasFailure = true;
+          }
+
+          if (summaryResult.status === 'fulfilled') {
+            setSummary(summaryResult.value);
+          } else {
+            hasFailure = true;
+          }
+
+          if (hasFailure) {
+            toast.message(t('achievementLoadError'), { id: 'achievement-load' });
+          }
+        })
+        .finally(() => { if (mounted) setIsLoading(false); });
+    };
+    loadData();
     return () => { mounted = false; };
-  }, [t]);
+  }, [t, userKey]);
+
+  useEffect(() => {
+    if (!user || retryScheduledRef.current || isLoading) {
+      return;
+    }
+    const looksLikePlaceholder =
+      (summary?.currentLevel ?? 0) === 0 &&
+      (summary?.totalXp ?? 0) === 0 &&
+      achievements.every((item) => item.progress === 0 && !item.unlocked) &&
+      levels.every((item) => !item.unlocked);
+    if (!looksLikePlaceholder) {
+      return;
+    }
+    retryScheduledRef.current = true;
+    const timer = window.setTimeout(() => {
+      const { fresh: freshA } = fetchAchievementsCached(userKey);
+      const { fresh: freshL } = fetchLevelsCached(userKey);
+      const { fresh: freshS } = fetchAchievementSummaryCached(userKey);
+      Promise.allSettled([freshA, freshL, freshS])
+        .then((results) => {
+          const [achievementsResult, levelsResult, summaryResult] = results;
+          if (achievementsResult.status === 'fulfilled') {
+            setAchievements(achievementsResult.value.map((a) => mapApiAchievement(a, t)));
+          }
+          if (levelsResult.status === 'fulfilled') {
+            setLevels(levelsResult.value.map((l) => mapApiLevel(l, t)));
+          }
+          if (summaryResult.status === 'fulfilled') {
+            setSummary(summaryResult.value);
+          }
+        });
+    }, 1400);
+    return () => window.clearTimeout(timer);
+  }, [achievements, isLoading, levels, summary, t, user, userKey]);
 
   const getRarityTranslation = (rarity: 'common' | 'rare' | 'epic' | 'legendary') => {
     const keys: Record<typeof rarity, LocaleKey> = {
@@ -139,7 +206,7 @@ export default function AchievementHallPage() {
           <p className="text-label-secondary">{t('achievementHallSubtitle')}</p>
         </div>
 
-        {isLoading ? (
+        {isLoading && !hasRenderableData ? (
           <div className="space-y-6 animate-pulse">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               {[1, 2, 3, 4].map((i) => (

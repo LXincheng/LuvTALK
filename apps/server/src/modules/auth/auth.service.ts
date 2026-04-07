@@ -40,6 +40,12 @@ export interface AuthResult {
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly verifiedTokenCache = new Map<
+    string,
+    { profile: AuthUserProfile; expiresAt: number }
+  >();
+  private readonly userSyncInFlight = new Map<string, Promise<void>>();
+  private static readonly VERIFIED_TOKEN_CACHE_TTL_MS = 60_000;
 
   constructor(
     private readonly jwt: JwtService,
@@ -163,6 +169,9 @@ export class AuthService {
     if (supabaseProfile) {
       return supabaseProfile;
     }
+    if (this.looksLikeSupabaseToken(token)) {
+      return undefined;
+    }
     return this.verifyAccessToken(token);
   }
 
@@ -181,6 +190,10 @@ export class AuthService {
   async verifySupabaseAccessToken(
     token: string,
   ): Promise<AuthUserProfile | undefined> {
+    const cached = this.getCachedSupabaseProfile(token);
+    if (cached) {
+      return cached;
+    }
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -201,7 +214,9 @@ export class AuthService {
       if (!payload?.id) {
         return undefined;
       }
-      const profile = await this.upsertSupabaseUser(payload);
+      const profile = this.mapSupabasePayloadToProfile(payload);
+      this.cacheSupabaseProfile(token, profile);
+      this.queueSupabaseUserSync(payload);
       return profile;
     } catch (error) {
       this.logger.warn(
@@ -214,27 +229,113 @@ export class AuthService {
   private async upsertSupabaseUser(
     payload: SupabaseUserPayload,
   ): Promise<AuthUserProfile> {
+    const profile = this.mapSupabasePayloadToProfile(payload);
+    try {
+      const user = await this.prisma.user.upsert({
+        where: { id: payload.id },
+        update: {
+          email: payload.email ?? undefined,
+          name: profile.name,
+          avatarUrl: profile.avatarUrl,
+        },
+        create: {
+          id: payload.id,
+          email: payload.email ?? undefined,
+          name: profile.name,
+          avatarUrl: profile.avatarUrl,
+        },
+      });
+      return this.mapUserToProfile(user);
+    } catch (error) {
+      if (this.prisma.isConnectionError(error)) {
+        this.prisma.markDatabaseUnavailable(
+          "Auth user sync failed because PostgreSQL connections are exhausted.",
+        );
+        return profile;
+      }
+      throw error;
+    }
+  }
+
+  private queueSupabaseUserSync(payload: SupabaseUserPayload): void {
+    if (!this.prisma.canUseDatabase()) {
+      return;
+    }
+    if (this.userSyncInFlight.has(payload.id)) {
+      return;
+    }
+    const syncPromise = this.upsertSupabaseUser(payload)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `Supabase user sync skipped for ${payload.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      })
+      .finally(() => {
+        this.userSyncInFlight.delete(payload.id);
+      });
+    this.userSyncInFlight.set(payload.id, syncPromise);
+  }
+
+  private mapSupabasePayloadToProfile(
+    payload: SupabaseUserPayload,
+  ): AuthUserProfile {
     const displayName =
       payload.user_metadata?.full_name ??
       payload.email ??
       payload.phone ??
       undefined;
-    const avatarUrl = payload.user_metadata?.avatar_url ?? undefined;
-    const user = await this.prisma.user.upsert({
-      where: { id: payload.id },
-      update: {
-        email: payload.email ?? undefined,
-        name: displayName,
-        avatarUrl,
-      },
-      create: {
-        id: payload.id,
-        email: payload.email ?? undefined,
-        name: displayName,
-        avatarUrl,
-      },
+    return {
+      id: payload.id,
+      email: payload.email ?? undefined,
+      name: displayName,
+      avatarUrl: payload.user_metadata?.avatar_url ?? undefined,
+    };
+  }
+
+  private getCachedSupabaseProfile(
+    token: string,
+  ): AuthUserProfile | undefined {
+    const cached = this.verifiedTokenCache.get(token);
+    if (!cached) {
+      return undefined;
+    }
+    if (cached.expiresAt <= Date.now()) {
+      this.verifiedTokenCache.delete(token);
+      return undefined;
+    }
+    return cached.profile;
+  }
+
+  private cacheSupabaseProfile(token: string, profile: AuthUserProfile): void {
+    this.verifiedTokenCache.set(token, {
+      profile,
+      expiresAt: Date.now() + AuthService.VERIFIED_TOKEN_CACHE_TTL_MS,
     });
-    return this.mapUserToProfile(user);
+  }
+
+  private looksLikeSupabaseToken(token: string): boolean {
+    const segments = token.split(".");
+    if (segments.length !== 3) {
+      return false;
+    }
+    try {
+      const base64 = segments[1].replace(/-/g, "+").replace(/_/g, "/");
+      const payload = JSON.parse(
+        Buffer.from(base64, "base64").toString("utf8"),
+      ) as {
+        iss?: string;
+        aud?: string | string[];
+      };
+      return (
+        typeof payload.iss === "string" &&
+        /supabase\.co\/auth\/v1/i.test(payload.iss)
+      );
+    } catch {
+      return false;
+    }
   }
 
   private extractTokenFromHeader(header: string): string | undefined {

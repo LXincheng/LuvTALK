@@ -11,7 +11,8 @@ export const buildWelcomeCopy = (params: {
   nativeLabel: string;
   nativeLanguage: LanguageCode;
 }): string => {
-  const { scenarioId, title, targetLabel, nativeLabel, nativeLanguage } = params;
+  const { scenarioId, title, targetLabel, nativeLabel, nativeLanguage } =
+    params;
   const openingCue = resolveScenarioOpeningCue(scenarioId, nativeLanguage);
   if (nativeLanguage === LanguageCode.English) {
     return `👋 Welcome to the ${title} scenario.\nYou are practicing ${targetLabel}, and support notes will appear in ${nativeLabel}.\nStart with this move: ${openingCue}`;

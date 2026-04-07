@@ -2,7 +2,6 @@ import { Suspense, lazy, startTransition, useCallback, useEffect, useMemo, useRe
 import { AnimatePresence, motion } from 'motion/react';
 import { History, LoaderCircle } from 'lucide-react';
 import ChatQuickReplies, { type QuickReplyOption } from '../components/chat/ChatQuickReplies';
-import { buildChatQuickReplyOptions } from '../components/chat/chatQuickReplyGuidance';
 import MessageBubble from '../components/chat/MessageBubble';
 import VoiceInput from '../components/chat/VoiceInput';
 import ChatModeSwitcher from '../components/chat/ChatModeSwitcher';
@@ -38,7 +37,6 @@ import {
 import { createFavorite } from '../services/favoritesService';
 import { reportLearningFocus } from '../services/learningGoalService';
 import { useLocale } from '../providers/LocaleContext';
-import type { LocaleKey } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
 import {
   getDefaultTtsVoice,
@@ -290,59 +288,6 @@ const normalizeHistoryList = (
       return isMeaningfulHistoryItem(item);
     })
     .slice(0, MAX_STORED_CONVERSATIONS);
-};
-
-const buildLocalSessionSummary = (
-  currentSession: ConversationSession | null,
-  t: (key: LocaleKey) => string,
-): SessionSummaryPayload | null => {
-  if (!currentSession) {
-    return null;
-  }
-  const aiMessages = currentSession.messages.filter((message) => message.sender === 'ai');
-  const userMessages = currentSession.messages.filter((message) => message.sender === 'user');
-  // Ignore pure welcome-only sessions to avoid noisy empty cards.
-  if (userMessages.length < 1 || aiMessages.length < 2) {
-    return null;
-  }
-  const scored = aiMessages
-    .map((message) => message.meta?.score)
-    .filter((score): score is number => typeof score === 'number');
-  const averageScore = scored.length
-    ? Math.round(scored.reduce((sum, score) => sum + score, 0) / scored.length)
-    : null;
-  const latestScore = scored.length ? scored[scored.length - 1] : null;
-  const keyTerms = currentSession.messages
-    .flatMap((message) => message.meta?.keyTerms ?? [])
-    .map((term) => ({ term: term.term, definition: term.definition }))
-    .filter((item) => item.term && item.definition)
-    .slice(0, 6);
-  const meaningfulMessages = currentSession.messages.filter((message) => message.text?.trim());
-  const firstTimestamp = meaningfulMessages[0]?.createdAt ?? currentSession.createdAt;
-  const lastTimestamp =
-    meaningfulMessages[meaningfulMessages.length - 1]?.createdAt ?? currentSession.updatedAt;
-
-  return {
-    conversationId: currentSession.id,
-    durationMinutes: Math.max(
-      1,
-      Math.ceil(
-        (new Date(lastTimestamp).getTime() -
-          new Date(firstTimestamp).getTime()) /
-          60000,
-      ),
-    ),
-    userTurns: userMessages.length,
-    aiTurns: aiMessages.length,
-    averageScore,
-    latestScore,
-    headline: t('sessionSummaryDefaultStrength'),
-    advice: t('sessionSummaryDefaultNextAction'),
-    strengths: [t('sessionSummaryDefaultStrength')],
-    improvements: [t('sessionSummaryDefaultImprovement')],
-    recommendedNextActions: [t('sessionSummaryDefaultNextAction')],
-    keyTerms,
-  };
 };
 
 export default function ConversationPage() {
@@ -910,12 +855,6 @@ export default function ConversationPage() {
     }
     return `${session.id}:${session.messages.length}:${isNewChatSession ? 'starter' : 'reply'}`;
   }, [isNewChatSession, session?.id, session?.messages.length]);
-  const quickReplyFallbackContent = useMemo(() => {
-    if (!session) {
-      return [];
-    }
-    return buildChatQuickReplyOptions(session);
-  }, [session]);
   const refreshSessionSummary = useCallback(async () => {
     if (!session?.id) {
       setSessionSummary(null);
@@ -933,7 +872,6 @@ export default function ConversationPage() {
       if (seq !== summaryFetchSeqRef.current) {
         return;
       }
-      setSessionSummary((prev) => prev ?? buildLocalSessionSummary(session, t));
     } finally {
       if (seq === summaryFetchSeqRef.current) {
         setIsSummaryLoading(false);
@@ -963,7 +901,6 @@ export default function ConversationPage() {
       chatMode === 'immersive' ||
       recoveryState === 'recovering' ||
       recoveryState === 'error' ||
-      quickReplyFallbackContent.length === 0 ||
       dismissedQuickReplyKey === quickReplySuggestionKey;
 
     if (shouldHideImmediately) {
@@ -1001,10 +938,7 @@ export default function ConversationPage() {
           ) {
             return;
           }
-          const source = payload.options.length
-            ? payload.options
-            : quickReplyFallbackContent.map((option) => option.text);
-          const options = source.map((text, index) => ({
+          const options = payload.options.map((text, index) => ({
             id: `chat-${activeSessionId}-${activeSuggestionKey}-${index}`,
             text,
           }));
@@ -1022,8 +956,8 @@ export default function ConversationPage() {
             return;
           }
           startTransition(() => {
-            setQuickReplyOptions(quickReplyFallbackContent);
-            setQuickRepliesVisible(quickReplyFallbackContent.length > 0);
+            setQuickReplyOptions([]);
+            setQuickRepliesVisible(false);
           });
         });
     }, isNewChatSession ? NEW_CHAT_QUICK_REPLY_DELAY_MS : EXISTING_CHAT_QUICK_REPLY_DELAY_MS);
@@ -1041,7 +975,6 @@ export default function ConversationPage() {
     isRecording,
     isSending,
     locale,
-    quickReplyFallbackContent,
     quickReplySuggestionKey,
     quickRepliesVisible,
     recoveryState,

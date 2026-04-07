@@ -1,4 +1,4 @@
-﻿# Tech Notes
+# Tech Notes
 
 ## 开发日志（Report Input）
 
@@ -799,3 +799,23 @@
 | 首响延迟复盘 | 代码复盘量化后确认，上一版 turn detection 使用 `threshold=0.58 / prefix_padding_ms=480 / silence_duration_ms=900`，属于偏保守配置；本轮按官方示例方向回收到 `0.5 / 300 / 800`，减少系统层人为等待。 |
 | 埋点新增 | 新增 immersive 生命周期分阶段指标：`acceptedToUpstreamOpen`、`acceptedToSessionReady`、`acceptedToFirstClientAudio`、`acceptedToFirstUserTranscript`、`acceptedToFirstAiTranscript`、`acceptedToFirstAiAudio`；服务端聚合进入 `/api/realtime/metrics`，前端开发态同步输出本地样本到 `window.__luvtalkRealtimeDebug`。 |
 | 当前量化结论 | 目前能确定的已知“延迟源”有两类：一是状态过早显示，二是过保守的 VAD 窗口；新增埋点后，后续可以明确区分是握手、上游 session ready、首个用户转写还是首个 AI 音频成为瓶颈。 |
+
+### 2026-04-07（数据库设计体检与阶段性结论）
+
+| 维度 | 记录 |
+| --- | --- |
+| 评估范围 | 基于 `Prisma schema`、migration 链、Supabase Auth 持久化链路、Prisma 连接策略与现有数据库相关文档，对当前数据库设计做一次阶段性体检。 |
+| 正向结论 | 当前领域建模总体合理，`User / Conversation / Review / Achievement / LearningGoal / TranslationRecord / ConversationReport` 这组核心实体已经能覆盖 MVP 到早期增长阶段的业务闭环。 |
+| 核心短板 | 当前最大风险不在表结构本身，而在运行时连接可靠性与数据库侧安全边界：Supabase pooler + Prisma 连接对瞬时并发较敏感，数据库层也还未形成以 RLS / policy 为核心的硬隔离体系。 |
+| 适配判断 | 对“单租户、几千到几万 DAU、以个人学习数据 CRUD 为主”的同体量 App 设计是够用的；若后续进入更高并发、更重统计、更强客户端直连场景，需要继续补强。 |
+| 文档沉淀 | 新增 `docs/database-assessment.md`，集中记录数据库结构评估、可靠性判断、安全分析与 P0/P1/P2 演进建议。 |
+
+### 2026-04-07（Availability / Liveness 体验优化）
+
+| 维度 | 记录 |
+| --- | --- |
+| 成就链路 | `AchievementService` 从“读接口同步触发重写入”调整为“读优先 + 后台刷新”，降低 `/achievements`、`/achievements/levels`、`/achievements/summary` 被同步聚合阻塞的概率。 |
+| 外部依赖 | `VoiceTutorService` 为 TTS 请求、音频下载、转写请求补充超时与轻重试，把语音能力视为外部依赖治理，而不是把故障直接传导成页面长时间无响应。 |
+| 前端体感 | Web 端请求层为成就、复习、TTS 等关键路径加入超时控制；成就页改为 `Promise.allSettled` 处理部分成功，避免单个接口抖动导致整页无限等待。 |
+| 交互修复 | `DailyReviewPage` 反馈提交增加前端锁，防止同一卡片在网络抖动时被重复点击与重复写入，修复“点击完成却一直像没反应”的体感问题。 |
+| 当前收益 | 本轮重点提升可用性与顺滑度，不改动持久化主链路；数据库写入仍通过后端统一收口，暂不要求为了可用性先行引入前端直连业务表与 RLS 改造。 |

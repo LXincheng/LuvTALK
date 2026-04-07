@@ -30,8 +30,9 @@
 
 1. 在 Supabase 项目设置中获取数据库连接字符串
 2. 推荐配置：
-   - `DATABASE_URL`：使用 Session Mode pooler（`:5432`），运行时稳定
-   - `DIRECT_URL`：使用 Session Mode pooler（`:5432`）或 Direct 连接，供 Prisma 迁移
+   - `DATABASE_URL`：优先使用 transaction pooler `:6543`，并追加 `?pgbouncer=true&connection_limit=1`
+   - `DIRECT_URL`：优先使用 direct host；如果当前环境不支持 IPv6，再改用 session mode pooler `:5432`
+   - 不要把运行时 `DATABASE_URL` 继续指向 session mode `:5432`，否则高并发下容易再次出现 `MaxClientsInSessionMode`
 3. 验证迁移状态：
    ```bash
    pnpm --filter server prisma:migrate:status
@@ -158,7 +159,7 @@ curl https://your-app.up.railway.app/api/health/db
 | 问题现象                | 优先检查                                                     |
 | ----------------------- | ------------------------------------------------------------ |
 | 服务启动就报数据库错误  | `DATABASE_URL`、`DIRECT_URL` 是否正确                        |
-| 迁移失败                | `DIRECT_URL` 是否误用了 `:6543` transaction pooler           |
+| 迁移失败                | `DIRECT_URL` 是否与当前环境网络能力匹配；无 IPv6 环境不要强行使用 `db.<project-ref>.supabase.co:5432` |
 | 健康接口显示 `degraded` | `/api/health/db` 中 `connected` 和 `reconnectScheduled` 状态 |
 | 文本能聊、语音不能用    | `PRIMARY_AUDIO_API_URL`、`STT_MODEL`、`TTS_MODEL` 是否配置 |
 | chat 一直初始化        | 数据库连接、`/api/health/db`、会话历史接口是否超时或关闭   |
@@ -191,6 +192,6 @@ pnpm --filter web exec vite build
 
 | 用途           | 推荐配置                                     | 说明               |
 | -------------- | -------------------------------------------- | ------------------ |
-| `DATABASE_URL` | Session Mode pooler `:5432`                  | 运行时稳定连接     |
-| `DIRECT_URL`   | Session Mode pooler `:5432` 或 Direct        | Prisma 迁移专用    |
+| `DATABASE_URL` | Transaction pooler `:6543` + `?pgbouncer=true&connection_limit=1` | 运行时首选连接     |
+| `DIRECT_URL`   | Direct host `:5432`；若无 IPv6 则用 session pooler `:5432` | Prisma 迁移首选连接 |
 | 迁移校验       | `pnpm --filter server prisma:migrate:status` | 确认 schema 无漂移 |

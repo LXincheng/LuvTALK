@@ -67,6 +67,9 @@ export interface VoiceCatalogItem {
 export class VoiceTutorService {
   private readonly logger = new Logger(VoiceTutorService.name);
   private readonly storageRoot = DEFAULT_STORAGE_ROOT;
+  private static readonly NETWORK_TIMEOUT_MS = 12_000;
+  private static readonly AUDIO_DOWNLOAD_TIMEOUT_MS = 10_000;
+  private static readonly SYNTH_RETRY_COUNT = 2;
 
   constructor(
     private readonly conversationService: ConversationService,
@@ -441,33 +444,38 @@ export class VoiceTutorService {
     try {
       const buffer = await readFile(upload.filePath);
       const base64 = buffer.toString("base64");
-      const response = await fetch(route.endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${route.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: route.model,
-          stream: false,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "input_audio",
-                  input_audio: {
-                    data: `data:${upload.mimeType || "audio/mpeg"};base64,${base64}`,
-                  },
-                },
-              ],
-            },
-          ],
-          asr_options: {
-            enable_itn: true,
+      const response = await this.fetchWithTimeout(
+        route.endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${route.apiKey}`,
           },
-        }),
-      });
+          body: JSON.stringify({
+            model: route.model,
+            stream: false,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "input_audio",
+                    input_audio: {
+                      data: `data:${upload.mimeType || "audio/mpeg"};base64,${base64}`,
+                    },
+                  },
+                ],
+              },
+            ],
+            asr_options: {
+              enable_itn: true,
+            },
+          }),
+        },
+        VoiceTutorService.NETWORK_TIMEOUT_MS,
+        `transcription request ${upload.operationId}`,
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -528,7 +536,10 @@ export class VoiceTutorService {
     );
     const languageHint = this.resolveLanguageHint(session.targetLanguage);
     const resolvedVoice = this.resolveRequestedVoice(voice, languageHint);
-    const resolvedTtsModel = this.resolveTtsModel(configuredTtsModel, resolvedVoice);
+    const resolvedTtsModel = this.resolveTtsModel(
+      configuredTtsModel,
+      resolvedVoice,
+    );
     const directory = join(this.storageRoot, conversationId);
     const speechInput = buildProsodyReadyTtsInput(
       text,
@@ -551,29 +562,35 @@ export class VoiceTutorService {
       return reusable;
     }
     try {
-      const response = await fetch(
-        resolveDashscopeGenerationEndpoint(audioApiUrl),
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: resolvedTtsModel,
-            input: {
-              text: speechInput,
-              voice: resolvedVoice,
-              language_type: languageHint.ttsLanguageType,
+      const response = await this.fetchWithRetry(
+        () =>
+          this.fetchWithTimeout(
+            resolveDashscopeGenerationEndpoint(audioApiUrl),
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: resolvedTtsModel,
+                input: {
+                  text: speechInput,
+                  voice: resolvedVoice,
+                  language_type: languageHint.ttsLanguageType,
+                },
+                parameters: this.buildTtsParameters(
+                  resolvedTtsModel,
+                  resolvedVoice,
+                  speed,
+                  session.targetLanguage,
+                ),
+              }),
             },
-            parameters: this.buildTtsParameters(
-              resolvedTtsModel,
-              resolvedVoice,
-              speed,
-              session.targetLanguage,
-            ),
-          }),
-        },
+            VoiceTutorService.NETWORK_TIMEOUT_MS,
+            `speech synthesis request for ${conversationId}`,
+          ),
+        VoiceTutorService.SYNTH_RETRY_COUNT,
       );
       if (!response.ok) {
         const errorText = await response.text();
@@ -587,10 +604,21 @@ export class VoiceTutorService {
       };
       const remoteAudioUrl = payload.output?.audio?.url?.trim();
       if (!remoteAudioUrl) {
-        this.logger.error("Primary provider speech synthesis returned empty audio url");
+        this.logger.error(
+          "Primary provider speech synthesis returned empty audio url",
+        );
         return undefined;
       }
-      const audioResponse = await fetch(remoteAudioUrl);
+      const audioResponse = await this.fetchWithRetry(
+        () =>
+          this.fetchWithTimeout(
+            remoteAudioUrl,
+            undefined,
+            VoiceTutorService.AUDIO_DOWNLOAD_TIMEOUT_MS,
+            `speech audio download for ${conversationId}`,
+          ),
+        VoiceTutorService.SYNTH_RETRY_COUNT,
+      );
       if (!audioResponse.ok) {
         const errorText = await audioResponse.text();
         this.logger.error(
@@ -741,15 +769,18 @@ export class VoiceTutorService {
   getVoiceCatalog(): Record<LanguageCode, VoiceCatalogItem> {
     return {
       [LanguageCode.Mandarin]: {
-        defaultVoice: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Mandarin].defaultVoice,
+        defaultVoice:
+          OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Mandarin].defaultVoice,
         options: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Mandarin].options,
       },
       [LanguageCode.Cantonese]: {
-        defaultVoice: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Cantonese].defaultVoice,
+        defaultVoice:
+          OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Cantonese].defaultVoice,
         options: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.Cantonese].options,
       },
       [LanguageCode.English]: {
-        defaultVoice: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.English].defaultVoice,
+        defaultVoice:
+          OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.English].defaultVoice,
         options: OFFICIAL_TTS_VOICE_CATALOG[LanguageCode.English].options,
       },
     };
@@ -842,6 +873,48 @@ export class VoiceTutorService {
       .join("\n")
       .trim();
     return normalized || undefined;
+  }
+
+  private async fetchWithTimeout(
+    input: string,
+    init?: RequestInit,
+    timeoutMs = VoiceTutorService.NETWORK_TIMEOUT_MS,
+    context = "network request",
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`${context} timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async fetchWithRetry(
+    request: () => Promise<Response>,
+    attempts: number,
+  ): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await request();
+      } catch (error) {
+        lastError = error;
+        if (attempt >= attempts) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      }
+    }
+    throw lastError;
   }
 
   private buildFallbackUserText(languageHint: LanguageHint): string {

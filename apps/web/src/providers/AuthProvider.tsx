@@ -3,6 +3,8 @@ import type { Session, User } from '@supabase/supabase-js';
 import { AuthContext } from './auth-context';
 import { getSupabaseClient } from '../services/supabaseClient';
 import { getAuthSnapshot, onAuthStateChange } from '../services/authService';
+import { clearAllCaches } from '../services/apiClient';
+import { invalidateDailyReviewCache } from '../services/reviewService';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -20,6 +22,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setReady(true);
     });
     const { data } = onAuthStateChange((_event, nextSession) => {
+      clearAllCaches();
+      invalidateDailyReviewCache();
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
     });

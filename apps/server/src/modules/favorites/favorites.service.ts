@@ -59,7 +59,8 @@ export class FavoritesService {
               type: favoriteType,
               title: record.title,
               content: record.content,
-              metadata: (record.metadata as Record<string, unknown>) ?? undefined,
+              metadata:
+                (record.metadata as Record<string, unknown>) ?? undefined,
               createdAt: record.createdAt.toISOString(),
               pinned: false,
               authorName:

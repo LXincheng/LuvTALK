@@ -178,17 +178,27 @@ export class RealtimeWsProxy {
         lifecycleSampleRecorded = true;
         const sample = {
           acceptedToUpstreamOpenMs:
-            upstreamOpenedAt != null ? upstreamOpenedAt - wsAcceptedAt : undefined,
+            upstreamOpenedAt != null
+              ? upstreamOpenedAt - wsAcceptedAt
+              : undefined,
           acceptedToSessionReadyMs:
             sessionReadyAt != null ? sessionReadyAt - wsAcceptedAt : undefined,
           acceptedToFirstClientAudioMs:
-            firstClientAudioAt != null ? firstClientAudioAt - wsAcceptedAt : undefined,
+            firstClientAudioAt != null
+              ? firstClientAudioAt - wsAcceptedAt
+              : undefined,
           acceptedToSpeechStartedMs:
-            speechStartedAt != null ? speechStartedAt - wsAcceptedAt : undefined,
+            speechStartedAt != null
+              ? speechStartedAt - wsAcceptedAt
+              : undefined,
           acceptedToSpeechStoppedMs:
-            speechStoppedAt != null ? speechStoppedAt - wsAcceptedAt : undefined,
+            speechStoppedAt != null
+              ? speechStoppedAt - wsAcceptedAt
+              : undefined,
           acceptedToResponseCreatedMs:
-            responseCreatedAt != null ? responseCreatedAt - wsAcceptedAt : undefined,
+            responseCreatedAt != null
+              ? responseCreatedAt - wsAcceptedAt
+              : undefined,
           acceptedToFirstUserTranscriptMs:
             firstUserTranscriptAt != null
               ? firstUserTranscriptAt - wsAcceptedAt
@@ -243,7 +253,8 @@ export class RealtimeWsProxy {
         if (parsed && typeof parsed.type === "string") {
           const eventType = parsed.type;
           if (
-            (eventType === "session.created" || eventType === "session.updated") &&
+            (eventType === "session.created" ||
+              eventType === "session.updated") &&
             sessionReadyAt == null
           ) {
             sessionReadyAt = Date.now();
@@ -374,9 +385,7 @@ export class RealtimeWsProxy {
             `Realtime upstream closed normally (${code}): ${reasonText || "normal close"}`,
           );
         } else {
-          this.logger.warn(
-            `Realtime upstream closed (${code}): ${reasonText}`,
-          );
+          this.logger.warn(`Realtime upstream closed (${code}): ${reasonText}`);
         }
         if (code !== 1000) {
           const mapped = mapCloseCodeToErrorCode(code);
@@ -547,14 +556,13 @@ const buildTraceId = (): string =>
 
 const resolveRealtimeWsUrl = (base: string, model: string): string => {
   const normalized = base.replace(/\/$/, "");
-  const realtimePath =
-    normalized.includes("/api-ws/")
-      ? normalized
-      : normalized.includes("/compatible-mode/")
-        ? normalized.replace("/compatible-mode/", "/api-ws/")
-        : normalized.endsWith("/realtime")
-          ? normalized
-          : `${normalized}/realtime`;
+  const realtimePath = normalized.includes("/api-ws/")
+    ? normalized
+    : normalized.includes("/compatible-mode/")
+      ? normalized.replace("/compatible-mode/", "/api-ws/")
+      : normalized.endsWith("/realtime")
+        ? normalized
+        : `${normalized}/realtime`;
   // Map http(s) to ws(s), or keep ws(s) as-is
   let wsUrl: string;
   if (realtimePath.startsWith("wss://") || realtimePath.startsWith("ws://")) {

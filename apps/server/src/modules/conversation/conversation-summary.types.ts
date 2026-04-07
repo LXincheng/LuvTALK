@@ -18,6 +18,24 @@ export interface SessionSummaryPayload {
   }>;
 }
 
+type LocaleBundle = {
+  shortRound: string;
+  defaultTopic: string;
+  headlineEmpty: string;
+  adviceEmpty: string;
+  strengthTopic: (topic: string) => string;
+  strengthProgress: string;
+  strengthFluency: string;
+  strengthPersistence: string;
+  strengthDefault: string;
+  actionAccuracy: string;
+  actionTopic: (topic: string) => string;
+  actionQuestion: (topic: string) => string;
+  actionPronunciation: string;
+  actionGrammar: string;
+  actionRhythm: string;
+};
+
 const dedupe = (items: string[]): string[] => {
   const seen = new Set<string>();
   const output: string[] = [];
@@ -32,32 +50,159 @@ const dedupe = (items: string[]): string[] => {
   return output;
 };
 
-const LABELS = {
+const cleanText = (value?: string): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized || undefined;
+};
+
+const shorten = (value: string, maxLength: number): string => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength).trimEnd()}...`;
+};
+
+const GENERIC_SUMMARY_PATTERNS = [
+  /继续加油/,
+  /keep it up/i,
+  /做得好/,
+  /good job/i,
+  /整体稳定/,
+  /overall expression is stable/i,
+];
+
+const isMeaningfulTip = (value?: string): value is string => {
+  const normalized = cleanText(value);
+  if (!normalized) {
+    return false;
+  }
+  return !GENERIC_SUMMARY_PATTERNS.some((pattern) => pattern.test(normalized));
+};
+
+const LABELS: Record<"zh" | "en", LocaleBundle> = {
   zh: {
-    stableExpression: "表达整体稳定，沟通流畅度较好。",
-    sufficientPractice: "练习轮次充足，持续输出表现不错。",
-    improvingTrend: "后半段表现提升明显，学习状态在变好。",
-    keepPracticing: "你已保持持续练习，建议继续稳定输出短句。",
-    focusAccuracy: "下一轮先用 2-3 个短句表达，优先保证准确度。",
-    pronunciationDrill: "开启语音模式跟读 3 轮，重点校准发音与停顿。",
-    grammarRewrite: "把本轮错误句改写 2 次，再用于下一轮对话。",
-    reuseExpressions: "进入下一轮场景对话，优先复用本轮高频表达。",
-    headlineEmpty: "这一轮还很短，但你已经开始进入目标语言语境了。",
-    adviceEmpty: "下一轮先说一句完整短句，再补一个细节。",
+    shortRound: "这一轮",
+    defaultTopic: "当前话题",
+    headlineEmpty: "这一轮还比较短，但你已经开始进入目标语言语境了。",
+    adviceEmpty: "下一轮先直接回答问题，再补一个和场景相关的小细节。",
+    strengthTopic: (topic) => `你一直围绕“${topic}”推进，没有偏离当前场景。`,
+    strengthProgress: "后半段回答比前面更完整，说明你在边说边调整。",
+    strengthFluency: "多轮接话都能把意思说清楚，流畅度在往上走。",
+    strengthPersistence: "你愿意连续往下说，而不是停在单句，互动感更自然。",
+    strengthDefault: "你已经能持续用目标语言把意思表达出来了。",
+    actionAccuracy: "下一轮先用更短的句子把核心意思说准，再补细节。",
+    actionTopic: (topic) => `下一轮继续围绕“${topic}”练，先说结论，再补一个具体信息。`,
+    actionQuestion: (topic) => `下一句先正面回应“${topic}”，再顺势补一个原因或细节。`,
+    actionPronunciation: "下一轮用语音再练 2 到 3 句，重点把重音和停顿拉开。",
+    actionGrammar: "把刚才容易卡住的句型改写一遍，再放回同一场景里复用。",
+    actionRhythm: "下一句刻意分成两小段来讲，先把节奏放稳。",
   },
   en: {
-    stableExpression: "Overall expression is stable with good fluency.",
-    sufficientPractice: "Plenty of practice turns with consistent output.",
-    improvingTrend: "Noticeable improvement in the second half of the session.",
-    keepPracticing: "Keep practicing — focus on short, accurate sentences.",
-    focusAccuracy: "Start the next round with 2–3 short sentences, prioritizing accuracy.",
-    pronunciationDrill: "Use voice mode for 3 rounds of shadowing to refine pronunciation.",
-    grammarRewrite: "Rewrite this round's errors twice and reuse them next round.",
-    reuseExpressions: "Move to the next scenario and prioritize reusing key phrases.",
-    headlineEmpty: "This round was brief, but you already stepped into the target language context.",
-    adviceEmpty: "Next round, say one complete short sentence first, then add one detail.",
+    shortRound: "This round",
+    defaultTopic: "this topic",
+    headlineEmpty:
+      "This round was brief, but you already started thinking inside the target language.",
+    adviceEmpty:
+      "Next round, answer directly first and add one scene-relevant detail after that.",
+    strengthTopic: (topic) =>
+      `You stayed anchored on "${topic}" instead of drifting away from the scene.`,
+    strengthProgress:
+      "Your later turns carried more detail than the opening ones, which shows active adjustment.",
+    strengthFluency:
+      "Across multiple turns, you kept the exchange moving and the meaning clear.",
+    strengthPersistence:
+      "You kept extending the conversation instead of stopping at one short sentence.",
+    strengthDefault:
+      "You are already able to express the core idea in the target language.",
+    actionAccuracy:
+      "Next round, keep the first sentence shorter so the core meaning lands cleanly.",
+    actionTopic: (topic) =>
+      `Stay on "${topic}" next round: answer first, then add one concrete detail.`,
+    actionQuestion: (topic) =>
+      `Reply to "${topic}" more directly next time, then add a short reason or detail.`,
+    actionPronunciation:
+      "Use voice mode for 2 or 3 turns and exaggerate stress plus pauses on purpose.",
+    actionGrammar:
+      "Rewrite the sentence pattern that felt shaky, then reuse it in the same scene.",
+    actionRhythm:
+      "Break your next turn into two short chunks so the rhythm feels less rushed.",
   },
-} as const;
+};
+
+const getLatestUserTopic = (
+  messages: ConversationMessage[],
+  locale: "zh" | "en",
+  keyTerms: Array<{ term: string; definition: string }>,
+): string | undefined => {
+  const latestUserText = [...messages]
+    .reverse()
+    .find((message) => message.sender === "user" && cleanText(message.text))
+    ?.text;
+  const normalized = cleanText(latestUserText);
+  if (normalized) {
+    return shorten(normalized, locale === "en" ? 42 : 24);
+  }
+  return keyTerms[0]?.term;
+};
+
+const getLatestAiQuestionFocus = (messages: ConversationMessage[]): string | undefined => {
+  const latestAiText = [...messages]
+    .reverse()
+    .find((message) => message.sender === "ai" && cleanText(message.text))
+    ?.text;
+  const normalized = cleanText(latestAiText);
+  if (!normalized) {
+    return undefined;
+  }
+  if (!/[?？]$/.test(normalized)) {
+    return undefined;
+  }
+  return shorten(normalized.replace(/[?？]+$/, ""), 36);
+};
+
+const buildHeadline = (params: {
+  labels: LocaleBundle;
+  locale: "zh" | "en";
+  userTurns: number;
+  averageScore: number | null;
+  latestScore: number | null;
+  topic?: string;
+}): string => {
+  const { labels, locale, userTurns, averageScore, latestScore, topic } = params;
+  if (userTurns === 0) {
+    return labels.headlineEmpty;
+  }
+
+  const progressDelta =
+    typeof latestScore === "number" && typeof averageScore === "number"
+      ? latestScore - averageScore
+      : null;
+
+  if (topic && progressDelta !== null && progressDelta >= 4) {
+    return locale === "en"
+      ? `You handled "${topic}" with noticeably more control in the later turns.`
+      : `这轮你围绕“${topic}”越说越顺，后半段明显更稳。`;
+  }
+
+  if (topic && userTurns >= 3) {
+    return locale === "en"
+      ? `You kept the conversation on "${topic}" and responded with better continuity.`
+      : `这轮你一直围绕“${topic}”接话，连续表达比前面更自然。`;
+  }
+
+  if (typeof averageScore === "number" && averageScore >= 85) {
+    return locale === "en"
+      ? "Several turns already sounded usable in a real conversation."
+      : "这一轮里已经有几句可以直接放进真实场景里用了。";
+  }
+
+  return locale === "en"
+    ? "You kept turning ideas into complete target-language responses."
+    : "这轮你已经能把自己的意思持续落成完整回应了。";
+};
 
 export function buildSessionSummary(params: {
   conversationId: string;
@@ -66,14 +211,13 @@ export function buildSessionSummary(params: {
   messages: ConversationMessage[];
   locale?: string;
 }): SessionSummaryPayload {
-  const l = params.locale === "en" ? LABELS.en : LABELS.zh;
+  const locale = params.locale === "en" ? "en" : "zh";
+  const labels = LABELS[locale];
 
   const userMessages = params.messages.filter(
     (message) => message.sender === "user",
   );
-  const aiMessages = params.messages.filter(
-    (message) => message.sender === "ai",
-  );
+  const aiMessages = params.messages.filter((message) => message.sender === "ai");
   const scoreMessages = aiMessages.filter(
     (message) => typeof message.meta?.score === "number",
   );
@@ -86,58 +230,6 @@ export function buildSessionSummary(params: {
         )
       : null;
   const latestScore = scores.length > 0 ? scores[scores.length - 1] : null;
-
-  const strengths: string[] = [];
-  if (typeof averageScore === "number" && averageScore >= 85) {
-    strengths.push(l.stableExpression);
-  }
-  if (userMessages.length >= 6) {
-    strengths.push(l.sufficientPractice);
-  }
-  if (
-    latestScore !== null &&
-    averageScore !== null &&
-    latestScore > averageScore
-  ) {
-    strengths.push(l.improvingTrend);
-  }
-  if (!strengths.length) {
-    strengths.push(l.keepPracticing);
-  }
-
-  const improvements = dedupe(
-    aiMessages
-      .flatMap((message) => [
-        message.meta?.grammarTip,
-        message.meta?.pronunciationTip,
-        message.meta?.rhythmTip,
-        message.meta?.scoreReason,
-      ])
-      .filter((value): value is string => typeof value === "string")
-      .slice(0, 8),
-  );
-
-  const recommendedNextActions: string[] = [];
-  if (latestScore !== null && latestScore < 75) {
-    recommendedNextActions.push(l.focusAccuracy);
-  }
-  if (
-    improvements.some(
-      (item) => item.includes("发音") || item.includes("pronunciation"),
-    )
-  ) {
-    recommendedNextActions.push(l.pronunciationDrill);
-  }
-  if (
-    improvements.some(
-      (item) => item.includes("语法") || item.includes("grammar"),
-    )
-  ) {
-    recommendedNextActions.push(l.grammarRewrite);
-  }
-  if (!recommendedNextActions.length) {
-    recommendedNextActions.push(l.reuseExpressions);
-  }
 
   const keyTerms = params.messages
     .flatMap((message) => message.meta?.keyTerms ?? [])
@@ -155,6 +247,18 @@ export function buildSessionSummary(params: {
     })
     .slice(0, 6);
 
+  const improvements = dedupe(
+    aiMessages
+      .flatMap((message) => [
+        message.meta?.grammarTip,
+        message.meta?.pronunciationTip,
+        message.meta?.rhythmTip,
+        message.meta?.scoreReason,
+      ])
+      .filter(isMeaningfulTip)
+      .slice(0, 8),
+  );
+
   const meaningfulMessages = params.messages.filter((message) => {
     const text = message.text?.trim();
     return Boolean(text && text !== "（等待输入）");
@@ -170,16 +274,57 @@ export function buildSessionSummary(params: {
       ? Math.max(1, Math.ceil((end - start) / 60000))
       : 1;
 
-  const headline =
-    userMessages.length === 0
-      ? l.headlineEmpty
-      : params.locale === "en"
-        ? `You produced ${userMessages.length} learner turn${userMessages.length > 1 ? "s" : ""} in ${durationMinutes} minute${durationMinutes > 1 ? "s" : ""}, with an average score of ${averageScore ?? "--"}.`
-        : `本轮你完成了 ${userMessages.length} 次学员输出，用时约 ${durationMinutes} 分钟，平均分 ${averageScore ?? "--"}。`;
+  const topic =
+    getLatestUserTopic(params.messages, locale, keyTerms) ?? labels.defaultTopic;
+  const questionFocus = getLatestAiQuestionFocus(params.messages);
+
+  const strengths = dedupe([
+    userMessages.length >= 2 ? labels.strengthPersistence : "",
+    userMessages.length >= 4 ? labels.strengthFluency : "",
+    typeof latestScore === "number" &&
+    typeof averageScore === "number" &&
+    latestScore >= averageScore + 4
+      ? labels.strengthProgress
+      : "",
+    topic ? labels.strengthTopic(topic) : "",
+    typeof averageScore === "number" && averageScore >= 85
+      ? labels.strengthFluency
+      : "",
+    labels.strengthDefault,
+  ]).slice(0, 3);
+
+  const recommendedNextActions = dedupe([
+    questionFocus ? labels.actionQuestion(questionFocus) : "",
+    improvements.some(
+      (item) => item.includes("发音") || item.includes("pronunciation"),
+    )
+      ? labels.actionPronunciation
+      : "",
+    improvements.some(
+      (item) => item.includes("语法") || item.includes("grammar"),
+    )
+      ? labels.actionGrammar
+      : "",
+    improvements.some(
+      (item) => item.includes("停顿") || item.includes("rhythm") || item.includes("节奏"),
+    )
+      ? labels.actionRhythm
+      : "",
+    latestScore !== null && latestScore < 75 ? labels.actionAccuracy : "",
+    topic ? labels.actionTopic(topic) : "",
+    labels.adviceEmpty,
+  ]).slice(0, 3);
+
+  const headline = buildHeadline({
+    labels,
+    locale,
+    userTurns: userMessages.length,
+    averageScore,
+    latestScore,
+    topic,
+  });
   const advice =
-    recommendedNextActions[0] ??
-    improvements[0] ??
-    l.adviceEmpty;
+    recommendedNextActions[0] ?? improvements[0] ?? labels.adviceEmpty;
 
   return {
     conversationId: params.conversationId,
@@ -192,7 +337,7 @@ export function buildSessionSummary(params: {
     advice,
     strengths,
     improvements: improvements.slice(0, 4),
-    recommendedNextActions: dedupe(recommendedNextActions).slice(0, 3),
+    recommendedNextActions,
     keyTerms,
   };
 }

@@ -43,7 +43,8 @@ export const buildDefaultTeachingTips = (params: {
   interactionMode: TutorInteractionMode;
   scenarioId: string;
 }): ConversationTeachingTips => {
-  const { targetLanguage, nativeLanguage, interactionMode, scenarioId } = params;
+  const { targetLanguage, nativeLanguage, interactionMode, scenarioId } =
+    params;
   const targetLabel = describeLanguage(targetLanguage);
   const scenarioLabel = resolveScenarioLabel(scenarioId, nativeLanguage);
 
@@ -179,7 +180,9 @@ export const buildScenarioHintMessage = (params: {
   const scenarioLabel = resolveScenarioLabel(scenarioId, nativeLanguage);
   const targetLabel = describeLanguage(targetLanguage);
   const aiAskedQuestion = isEnglishQuestion(lastAiText);
-  const alreadyGaveDetail = Boolean(lastUserText && lastUserText.trim().length >= 18);
+  const alreadyGaveDetail = Boolean(
+    lastUserText && lastUserText.trim().length >= 18,
+  );
 
   if (nativeLanguage === LanguageCode.English) {
     if (userTurns === 0) {

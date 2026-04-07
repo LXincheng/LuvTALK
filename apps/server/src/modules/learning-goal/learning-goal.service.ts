@@ -102,6 +102,13 @@ export class LearningGoalService {
           const fallbackKey = `${userId}:${dateKey}`;
           const prev = this.fallbackFocusSecondsByKey.get(fallbackKey) ?? 0;
           this.fallbackFocusSecondsByKey.set(fallbackKey, prev + safeSeconds);
+        } else if (this.prisma.isConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Learning focus persistence failed because PostgreSQL connections are exhausted.",
+          );
+          const fallbackKey = `${userId}:${dateKey}`;
+          const prev = this.fallbackFocusSecondsByKey.get(fallbackKey) ?? 0;
+          this.fallbackFocusSecondsByKey.set(fallbackKey, prev + safeSeconds);
         } else {
           throw error;
         }
@@ -164,6 +171,11 @@ export class LearningGoalService {
             "LearningGoal table not available, switched to in-memory fallback.",
           );
           this.fallbackByUser.set(userId, goal);
+        } else if (this.prisma.isConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Learning goal persistence failed because PostgreSQL connections are exhausted.",
+          );
+          this.fallbackByUser.set(userId, goal);
         } else {
           throw error;
         }
@@ -202,6 +214,10 @@ export class LearningGoalService {
       } catch (error) {
         if (this.isMissingLearningGoalTable(error)) {
           this.learningGoalTableReady = false;
+        } else if (this.prisma.isConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Learning goal query failed because PostgreSQL connections are exhausted.",
+          );
         } else {
           throw error;
         }
@@ -383,6 +399,10 @@ export class LearningGoalService {
       } catch (error) {
         if (this.isMissingLearningActivityTable(error)) {
           this.learningActivityTableReady = false;
+        } else if (this.prisma.isConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Learning activity query failed because PostgreSQL connections are exhausted.",
+          );
         } else {
           this.logger.warn(
             `Failed to query learning focus seconds: ${(error as Error).message}`,

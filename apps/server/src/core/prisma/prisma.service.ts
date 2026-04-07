@@ -83,6 +83,24 @@ export class PrismaService
     }
   }
 
+  isConnectionError(error: unknown): boolean {
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? String((error as { code?: unknown }).code ?? "")
+        : "";
+    const message =
+      error instanceof Error ? error.message : String(error ?? "");
+
+    return (
+      code === "P1001" ||
+      code === "P1002" ||
+      code === "P2028" ||
+      /maxclientsinsessionmode|max clients reached|too many clients|connection pool/i.test(
+        message,
+      )
+    );
+  }
+
   private async tryConnect(context: string): Promise<void> {
     try {
       await this.$connect();
@@ -116,9 +134,7 @@ export class PrismaService
       return;
     }
     const delay = this.reconnectDelayMs;
-    this.logger.warn(
-      `Scheduling Prisma reconnect in ${delay}ms (${reason}).`,
-    );
+    this.logger.warn(`Scheduling Prisma reconnect in ${delay}ms (${reason}).`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.reconnectInFlight = true;

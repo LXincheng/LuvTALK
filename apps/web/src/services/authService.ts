@@ -6,6 +6,22 @@ export interface AuthSnapshot {
   user: User | null;
 }
 
+export type EmailOtpType = 'email' | 'email_change';
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+export function isValidEmail(email: string) {
+  return EMAIL_PATTERN.test(normalizeEmail(email));
+}
+
+export function isAnonymousUser(user: User | null | undefined) {
+  return user?.is_anonymous === true || user?.app_metadata?.provider === 'anonymous';
+}
+
 export async function signInAnonymously() {
   const client = getSupabaseClient();
   if (!client) {
@@ -18,27 +34,70 @@ export async function signInAnonymously() {
   return data;
 }
 
-export async function requestPhoneOtp(phone: string) {
+export async function requestEmailOtp(email: string) {
   const client = getSupabaseClient();
   if (!client) {
     throw new Error('Supabase 未配置');
   }
-  const { data, error } = await client.auth.signInWithOtp({ phone });
+  const normalizedEmail = normalizeEmail(email);
+  const { data, error } = await client.auth.signInWithOtp({
+    email: normalizedEmail,
+    options: {
+      shouldCreateUser: true,
+    },
+  });
   if (error) {
     throw error;
   }
   return data;
 }
 
-export async function verifyPhoneOtp(phone: string, token: string) {
+export async function resendEmailOtp(email: string, type: EmailOtpType) {
+  const client = getSupabaseClient();
+  if (!client) {
+    throw new Error('Supabase 未配置');
+  }
+  const normalizedEmail = normalizeEmail(email);
+  if (type === 'email_change') {
+    const { data, error } = await client.auth.resend({
+      type: 'email_change',
+      email: normalizedEmail,
+    });
+    if (error) {
+      throw error;
+    }
+    return data;
+  }
+  return requestEmailOtp(normalizedEmail);
+}
+
+export async function linkAnonymousEmail(email: string) {
+  const client = getSupabaseClient();
+  if (!client) {
+    throw new Error('Supabase 未配置');
+  }
+  const { data, error } = await client.auth.updateUser({
+    email: normalizeEmail(email),
+  });
+  if (error) {
+    throw error;
+  }
+  return data;
+}
+
+export async function verifyEmailOtp(
+  email: string,
+  token: string,
+  type: EmailOtpType = 'email',
+) {
   const client = getSupabaseClient();
   if (!client) {
     throw new Error('Supabase 未配置');
   }
   const { data, error } = await client.auth.verifyOtp({
-    phone,
+    email: normalizeEmail(email),
     token,
-    type: 'sms',
+    type,
   });
   if (error) {
     throw error;

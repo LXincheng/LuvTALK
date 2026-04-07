@@ -73,7 +73,8 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       en: "Open with polite business small talk, then state today's purpose or next step.",
     },
     learnerRole: "a professional starting a polite business conversation",
-    tutorRole: "a composed business contact who values clarity and good etiquette",
+    tutorRole:
+      "a composed business contact who values clarity and good etiquette",
     taskGoals: [
       "open professionally and politely",
       "state one concrete purpose or agenda item",
@@ -155,7 +156,8 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       en: "Start with the main symptom and duration, then add medicine or temperature details.",
     },
     learnerRole: "a patient explaining a fever or cold-like illness",
-    tutorRole: "a doctor asking focused follow-up questions to understand the symptoms",
+    tutorRole:
+      "a doctor asking focused follow-up questions to understand the symptoms",
     taskGoals: [
       "describe the main symptoms and how long they have lasted",
       "mention medicine, temperature, or related physical condition",
@@ -196,7 +198,8 @@ const SCENARIO_PROMPT_DEFINITIONS: ScenarioPromptDefinition[] = [
       zh: "先点主菜、套餐或饮品，再补充口味或配料要求。",
       en: "Start by ordering a dish, set, or drink, then add one preference or ingredient request.",
     },
-    learnerRole: "a customer ordering food or drinks with one or two preferences",
+    learnerRole:
+      "a customer ordering food or drinks with one or two preferences",
     tutorRole: "a natural, efficient server keeping the order flow moving",
     taskGoals: [
       "order one main item, set, or drink",

@@ -28,9 +28,7 @@ export class CultureService {
         params.nativeLanguage ?? LanguageCode.Mandarin,
       );
     } catch (error) {
-      this.logger.warn(
-        `Culture cards fallback: ${(error as Error).message}`,
-      );
+      this.logger.warn(`Culture cards fallback: ${(error as Error).message}`);
       return this.buildFallback(params.targetLanguage);
     }
   }
@@ -180,7 +178,10 @@ export class CultureService {
                 if ("text" in item && typeof item.text === "string") {
                   return item.text;
                 }
-                if ("input_text" in item && typeof item.input_text === "string") {
+                if (
+                  "input_text" in item &&
+                  typeof item.input_text === "string"
+                ) {
                   return item.input_text;
                 }
                 return "";

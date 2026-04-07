@@ -436,10 +436,20 @@ export class ConversationReportService {
     metrics: ConversationReportMetrics;
     reportLanguage: "zh" | "en";
   }): ConversationReportPromptInput {
-    const { session, summary, sourceMode, voiceStyle, metrics, reportLanguage } =
-      params;
-    const scenarioDefinition = resolveScenarioPromptDefinition(session.scenarioId);
-    const aiMessages = session.messages.filter((message) => message.sender === "ai");
+    const {
+      session,
+      summary,
+      sourceMode,
+      voiceStyle,
+      metrics,
+      reportLanguage,
+    } = params;
+    const scenarioDefinition = resolveScenarioPromptDefinition(
+      session.scenarioId,
+    );
+    const aiMessages = session.messages.filter(
+      (message) => message.sender === "ai",
+    );
     const languageUsage = this.buildUserLanguageUsage(session);
 
     return {
@@ -460,26 +470,29 @@ export class ConversationReportService {
       targetLanguageUserTurns: languageUsage.targetLanguageTurns,
       nativeLanguageUserTurns: languageUsage.nativeLanguageTurns,
       mixedLanguageUserTurns: languageUsage.mixedLanguageTurns,
-      transcriptLines: session.messages
-        .map((message) => {
-          const speaker = message.sender === "user" ? "Learner" : "Tutor";
-          const metaNotes = [
-            message.meta?.score !== undefined
-              ? `score=${message.meta.score}`
-              : undefined,
-            message.meta?.pronunciationTip
-              ? `pronunciation=${message.meta.pronunciationTip}`
-              : undefined,
-            message.meta?.rhythmTip ? `rhythm=${message.meta.rhythmTip}` : undefined,
-            message.meta?.grammarTip ? `grammar=${message.meta.grammarTip}` : undefined,
-            message.meta?.source ? `source=${message.meta.source}` : undefined,
-          ]
-            .filter((item): item is string => Boolean(item))
-            .join("; ");
-          return metaNotes
-            ? `[${speaker}] ${message.text} | ${metaNotes}`
-            : `[${speaker}] ${message.text}`;
-        }),
+      transcriptLines: session.messages.map((message) => {
+        const speaker = message.sender === "user" ? "Learner" : "Tutor";
+        const metaNotes = [
+          message.meta?.score !== undefined
+            ? `score=${message.meta.score}`
+            : undefined,
+          message.meta?.pronunciationTip
+            ? `pronunciation=${message.meta.pronunciationTip}`
+            : undefined,
+          message.meta?.rhythmTip
+            ? `rhythm=${message.meta.rhythmTip}`
+            : undefined,
+          message.meta?.grammarTip
+            ? `grammar=${message.meta.grammarTip}`
+            : undefined,
+          message.meta?.source ? `source=${message.meta.source}` : undefined,
+        ]
+          .filter((item): item is string => Boolean(item))
+          .join("; ");
+        return metaNotes
+          ? `[${speaker}] ${message.text} | ${metaNotes}`
+          : `[${speaker}] ${message.text}`;
+      }),
       pronunciationTips: this.dedupeStrings(
         aiMessages
           .map((message) => message.meta?.pronunciationTip)
@@ -538,7 +551,9 @@ export class ConversationReportService {
     reportLanguage: "zh" | "en";
   }): ScenarioFeedbackPromptInput {
     const { session, summary, metrics, reportLanguage } = params;
-    const scenarioDefinition = resolveScenarioPromptDefinition(session.scenarioId);
+    const scenarioDefinition = resolveScenarioPromptDefinition(
+      session.scenarioId,
+    );
     const languageUsage = this.buildUserLanguageUsage(session);
     return {
       conversationId: session.id,
@@ -565,11 +580,10 @@ export class ConversationReportService {
       rhythmMentions: metrics.rhythmMentions,
       strengths: summary.strengths.slice(0, 3),
       improvements: summary.improvements.slice(0, 3),
-      transcriptLines: session.messages
-        .map((message) => {
-          const speaker = message.sender === "user" ? "Learner" : "Tutor";
-          return `[${speaker}] ${message.text}`;
-        }),
+      transcriptLines: session.messages.map((message) => {
+        const speaker = message.sender === "user" ? "Learner" : "Tutor";
+        return `[${speaker}] ${message.text}`;
+      }),
     };
   }
 
@@ -628,9 +642,7 @@ export class ConversationReportService {
     ] as const;
   }
 
-  private resolveReportLanguage(
-    nativeLanguage: LanguageCode,
-  ): "zh" | "en" {
+  private resolveReportLanguage(nativeLanguage: LanguageCode): "zh" | "en" {
     return nativeLanguage === LanguageCode.English ? "en" : "zh";
   }
 
@@ -646,8 +658,7 @@ export class ConversationReportService {
     }
     const useThinking =
       Boolean(options.enableThinking) && supportsThinkingToggle(route.model);
-    const useJsonMode =
-      !useThinking && supportsJsonObjectResponse(route.model);
+    const useJsonMode = !useThinking && supportsJsonObjectResponse(route.model);
 
     const payload: Record<string, unknown> = {
       model: route.model,
@@ -962,21 +973,33 @@ export class ConversationReportService {
     return {
       headline: partial.headline.trim() || fallback.headline,
       overallSummary: partial.overallSummary.trim() || fallback.overallSummary,
-      learnerSnapshot: partial.learnerSnapshot.trim() || fallback.learnerSnapshot,
+      learnerSnapshot:
+        partial.learnerSnapshot.trim() || fallback.learnerSnapshot,
       strengths: pickArray(partial.strengths, fallback.strengths),
       opportunities: pickArray(partial.opportunities, fallback.opportunities),
-      pronunciation: mergeSection(fallback.pronunciation, partial.pronunciation),
+      pronunciation: mergeSection(
+        fallback.pronunciation,
+        partial.pronunciation,
+      ),
       vocabulary: mergeSection(fallback.vocabulary, partial.vocabulary),
       grammar: mergeSection(fallback.grammar, partial.grammar),
       rhythm: mergeSection(fallback.rhythm, partial.rhythm),
       nextSessionPlan: {
-        focus: partial.nextSessionPlan.focus.trim() || fallback.nextSessionPlan.focus,
-        drills: pickArray(partial.nextSessionPlan.drills, fallback.nextSessionPlan.drills),
+        focus:
+          partial.nextSessionPlan.focus.trim() ||
+          fallback.nextSessionPlan.focus,
+        drills: pickArray(
+          partial.nextSessionPlan.drills,
+          fallback.nextSessionPlan.drills,
+        ),
         checkpoint:
           partial.nextSessionPlan.checkpoint.trim() ||
           fallback.nextSessionPlan.checkpoint,
       },
-      keyMoments: partial.keyMoments.length > 0 ? partial.keyMoments : fallback.keyMoments,
+      keyMoments:
+        partial.keyMoments.length > 0
+          ? partial.keyMoments
+          : fallback.keyMoments,
     };
   }
 
@@ -1020,8 +1043,8 @@ export class ConversationReportService {
 
     const baseScore =
       input.userTurns === 1
-        ? input.latestScore ?? 61
-        : input.averageScore ?? input.latestScore ?? 68;
+        ? (input.latestScore ?? 61)
+        : (input.averageScore ?? input.latestScore ?? 68);
     const clamp = (value: number, min = 45, max = 96) =>
       Math.max(min, Math.min(max, Math.round(value)));
     const taskCompletion = clamp(
@@ -1040,7 +1063,9 @@ export class ConversationReportService {
         Math.min(8, input.mixedLanguageUserTurns * 2),
     );
     const pronunciation = clamp(
-      (input.latestScore ?? baseScore) * 0.8 + 10 - Math.min(18, input.pronunciationMentions * 4),
+      (input.latestScore ?? baseScore) * 0.8 +
+        10 -
+        Math.min(18, input.pronunciationMentions * 4),
     );
     const resilience = clamp(
       baseScore * 0.68 + 8 + Math.min(16, Math.max(0, input.userTurns - 2) * 3),
@@ -1087,22 +1112,20 @@ export class ConversationReportService {
         { key: "pronunciation", score: pronunciation },
         { key: "resilience", score: resilience },
       ],
-      suggestions: this.dedupeStrings(
-        [
-          ...input.improvements,
-          ...(isZh
-            ? [
-                "下一轮先回答，再补一个具体细节。",
-                "把句子缩短一点，会更自然。",
-                "结束前补一次确认或收尾。",
-              ]
-            : [
-                "Answer first, then add one concrete detail.",
-                "Shorter sentences will sound more natural.",
-                "Add one confirmation or closing line before ending.",
-              ]),
-        ],
-      ).slice(0, 3),
+      suggestions: this.dedupeStrings([
+        ...input.improvements,
+        ...(isZh
+          ? [
+              "下一轮先回答，再补一个具体细节。",
+              "把句子缩短一点，会更自然。",
+              "结束前补一次确认或收尾。",
+            ]
+          : [
+              "Answer first, then add one concrete detail.",
+              "Shorter sentences will sound more natural.",
+              "Add one confirmation or closing line before ending.",
+            ]),
+      ]).slice(0, 3),
     };
   }
 
@@ -1141,14 +1164,12 @@ export class ConversationReportService {
       if (userTurns === 1) {
         return report.metrics.latestScore ?? 61;
       }
-      return (
-        report.metrics.averageScore ??
-        report.metrics.latestScore ??
-        68
-      );
+      return report.metrics.averageScore ?? report.metrics.latestScore ?? 68;
     })();
-    const clamp = (value: number) => Math.max(60, Math.min(99, Math.round(value)));
-    const clampLoose = (value: number) => Math.max(45, Math.min(99, Math.round(value)));
+    const clamp = (value: number) =>
+      Math.max(60, Math.min(99, Math.round(value)));
+    const clampLoose = (value: number) =>
+      Math.max(45, Math.min(99, Math.round(value)));
     const taskCompletion = (userTurns <= 1 ? clampLoose : clamp)(
       baseScore * 0.7 +
         Math.min(22, userTurns * 5) -
@@ -1263,36 +1284,56 @@ export class ConversationReportService {
       dimensions: [
         {
           key: "taskCompletion",
-          score: parseScore(dimensions.taskCompletion, fallback.dimensions[0].score),
+          score: parseScore(
+            dimensions.taskCompletion,
+            fallback.dimensions[0].score,
+          ),
         },
         {
           key: "naturalness",
-          score: parseScore(dimensions.naturalness, fallback.dimensions[1].score),
+          score: parseScore(
+            dimensions.naturalness,
+            fallback.dimensions[1].score,
+          ),
         },
         {
           key: "pronunciation",
-          score: parseScore(dimensions.pronunciation, fallback.dimensions[2].score),
+          score: parseScore(
+            dimensions.pronunciation,
+            fallback.dimensions[2].score,
+          ),
         },
         {
           key: "resilience",
-          score: parseScore(dimensions.resilience, fallback.dimensions[3].score),
+          score: parseScore(
+            dimensions.resilience,
+            fallback.dimensions[3].score,
+          ),
         },
       ],
       suggestions: suggestions.length ? suggestions : fallback.suggestions,
     };
 
     if (input.userTurns <= 1) {
-      normalized.overallScore = Math.min(normalized.overallScore, fallback.overallScore);
+      normalized.overallScore = Math.min(
+        normalized.overallScore,
+        fallback.overallScore,
+      );
       normalized.dimensions = normalized.dimensions.map((dimension, index) => ({
         ...dimension,
-        score: Math.min(dimension.score, fallback.dimensions[index]?.score ?? dimension.score),
+        score: Math.min(
+          dimension.score,
+          fallback.dimensions[index]?.score ?? dimension.score,
+        ),
       }));
     }
 
     return normalized;
   }
 
-  private mapReportHistoryItem(record: ReportRecord): ConversationReportHistoryItem {
+  private mapReportHistoryItem(
+    record: ReportRecord,
+  ): ConversationReportHistoryItem {
     const payload = this.mapReportRecord(record);
     return {
       id: payload.id,
@@ -1374,14 +1415,13 @@ export class ConversationReportService {
         summary:
           typeof record.summary === "string" && record.summary.trim()
             ? record.summary.trim()
-            : defaults?.sectionSummary ?? "",
+            : (defaults?.sectionSummary ?? ""),
         highlights: normalizeStringArray(record.highlights, 3),
         actionPlan: normalizeStringArray(record.actionPlan, 3),
       };
     };
 
-    const payload =
-      value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+    const payload = value && typeof value === "object" ? value : {};
     const nextSessionPlan =
       payload.nextSessionPlan && typeof payload.nextSessionPlan === "object"
         ? (payload.nextSessionPlan as Record<string, unknown>)
@@ -1391,15 +1431,15 @@ export class ConversationReportService {
       headline:
         typeof payload.headline === "string" && payload.headline.trim()
           ? payload.headline.trim()
-          : defaults?.headline ?? "",
+          : (defaults?.headline ?? ""),
       overallSummary:
         typeof payload.overallSummary === "string"
           ? payload.overallSummary.trim() || defaults?.overallSummary || ""
-          : defaults?.overallSummary ?? "",
+          : (defaults?.overallSummary ?? ""),
       learnerSnapshot:
         typeof payload.learnerSnapshot === "string"
           ? payload.learnerSnapshot.trim() || defaults?.learnerSnapshot || ""
-          : defaults?.learnerSnapshot ?? "",
+          : (defaults?.learnerSnapshot ?? ""),
       strengths: normalizeStringArray(payload.strengths, 3),
       opportunities: normalizeStringArray(payload.opportunities, 3),
       pronunciation: normalizeSection(payload.pronunciation),
@@ -1410,12 +1450,14 @@ export class ConversationReportService {
         focus:
           typeof nextSessionPlan.focus === "string"
             ? nextSessionPlan.focus.trim() || defaults?.nextSessionFocus || ""
-            : defaults?.nextSessionFocus ?? "",
+            : (defaults?.nextSessionFocus ?? ""),
         drills: normalizeStringArray(nextSessionPlan.drills, 3),
         checkpoint:
           typeof nextSessionPlan.checkpoint === "string"
-            ? nextSessionPlan.checkpoint.trim() || defaults?.nextSessionCheckpoint || ""
-            : defaults?.nextSessionCheckpoint ?? "",
+            ? nextSessionPlan.checkpoint.trim() ||
+              defaults?.nextSessionCheckpoint ||
+              ""
+            : (defaults?.nextSessionCheckpoint ?? ""),
       },
       keyMoments: Array.isArray(payload.keyMoments)
         ? payload.keyMoments
@@ -1440,8 +1482,11 @@ export class ConversationReportService {
             .filter(
               (
                 item,
-              ): item is { speaker: "user" | "ai"; quote: string; note: string } =>
-                item !== null,
+              ): item is {
+                speaker: "user" | "ai";
+                quote: string;
+                note: string;
+              } => item !== null,
             )
             .slice(0, 3)
         : [],
@@ -1514,7 +1559,9 @@ export class ConversationReportService {
           };
         }>;
       };
-      const content = this.extractMessageContent(raw.choices?.[0]?.message?.content);
+      const content = this.extractMessageContent(
+        raw.choices?.[0]?.message?.content,
+      );
       if (!content?.trim()) {
         this.logger.warn("Chat completion request returned empty content.");
         return null;
@@ -1565,7 +1612,9 @@ export class ConversationReportService {
       return true;
     }
     const message =
-      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      error instanceof Error
+        ? error.message.toLowerCase()
+        : String(error).toLowerCase();
     return (
       message.includes("server has closed the connection") ||
       message.includes("connection terminated") ||
@@ -1675,7 +1724,7 @@ export class ConversationReportService {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       targetLanguage: params.session.targetLanguage,
-      nativeLanguage: (params.session.nativeLanguage ?? null) as LanguageCode | null,
+      nativeLanguage: params.session.nativeLanguage ?? null,
       sourceMode: params.sourceMode,
       voiceStyle: params.voiceStyle,
       reportLanguage: params.reportLanguage,

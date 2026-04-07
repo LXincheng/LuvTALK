@@ -138,6 +138,14 @@ export default function App() {
           )}
         />
         <Route
+          path="signup"
+          element={(
+            <LazyPage>
+              <LoginPage />
+            </LazyPage>
+          )}
+        />
+        <Route
           path="achievements"
           element={(
             <LazyPage>

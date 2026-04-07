@@ -152,17 +152,31 @@ const LEVEL_SEED: LevelDefinition[] = [
   },
 ];
 
-type AchievementMetricKey = AchievementDefinition["targetMetric"];
-
-type UserProgressMetrics = Record<AchievementMetricKey, number> & {
+interface UserProgressMetrics {
+  conversation_count: number;
+  streak_days: number;
+  vocab_count: number;
+  perfect_score_count: number;
+  daily_lessons: number;
+  language_mastery: number;
   totalXp: number;
-};
+  averageScore: number | null;
+}
 
 @Injectable()
 export class AchievementService {
   private readonly logger = new Logger(AchievementService.name);
   private readonly syncTimers = new Map<string, NodeJS.Timeout>();
+  private readonly syncInFlight = new Map<
+    string,
+    Promise<UserProgressMetrics | undefined>
+  >();
+  private readonly recentMetricsCache = new Map<
+    string,
+    { metrics: UserProgressMetrics; expiresAt: number }
+  >();
   private static readonly SEED_RETRY_COOLDOWN_MS = 30_000;
+  private static readonly METRICS_CACHE_TTL_MS = 5_000;
   private seedReady = false;
   private seedPromise?: Promise<void>;
   private seedRetryNotBefore = 0;
@@ -188,6 +202,13 @@ export class AchievementService {
       });
     }, delayMs);
     this.syncTimers.set(userId, timer);
+  }
+
+  private triggerBackgroundSync(userId?: string, delayMs = 80): void {
+    if (!userId || !this.prisma.canUseDatabase()) {
+      return;
+    }
+    this.queueUserProgressSync(userId, delayMs);
   }
 
   async listAchievements(userId?: string): Promise<AchievementWithProgress[]> {
@@ -217,7 +238,6 @@ export class AchievementService {
     }
 
     try {
-      await this.syncUserProgressNow(userId);
       const rows = await this.prisma.userAchievement.findMany({
         where: { userId },
         include: {
@@ -271,7 +291,6 @@ export class AchievementService {
 
     if (userId && this.prisma.canUseDatabase()) {
       try {
-        await this.syncUserProgressNow(userId);
         const userLevel = await this.prisma.userLevel.findUnique({
           where: { userId },
           include: { level: true },
@@ -307,18 +326,29 @@ export class AchievementService {
         completionRate: 0,
         currentLevel: 0,
         totalXp: 0,
+        conversationCount: 0,
+        vocabCount: 0,
+        streakDays: 0,
+        averageScore: null,
       };
     }
 
     try {
-      await this.syncUserProgressNow(userId);
-      const unlockedCount = await this.prisma.userAchievement.count({
-        where: { userId, unlockedAt: { not: null } },
-      });
-      const levelRow = await this.prisma.userLevel.findUnique({
-        where: { userId },
-        include: { level: true },
-      });
+      const [unlockedCount, levelRow] = await Promise.all([
+        this.prisma.userAchievement.count({
+          where: { userId, unlockedAt: { not: null } },
+        }),
+        this.prisma.userLevel.findUnique({
+          where: { userId },
+          include: { level: true },
+        }),
+      ]);
+
+      let metrics = this.getCachedMetrics(userId);
+      if (!metrics) {
+        metrics = await this.collectUserMetrics(userId);
+        this.cacheMetrics(userId, metrics);
+      }
 
       const totalXp = levelRow?.currentXp ?? 0;
       const currentLevel = levelRow?.level?.level ?? 0;
@@ -331,6 +361,10 @@ export class AchievementService {
         completionRate,
         currentLevel,
         totalXp,
+        conversationCount: metrics.conversation_count,
+        vocabCount: metrics.vocab_count,
+        streakDays: metrics.streak_days,
+        averageScore: metrics.averageScore,
       };
     } catch (error) {
       if (this.handleDatabaseConnectionError(error, "getSummary")) {
@@ -340,6 +374,10 @@ export class AchievementService {
           completionRate: 0,
           currentLevel: 0,
           totalXp: 0,
+          conversationCount: 0,
+          vocabCount: 0,
+          streakDays: 0,
+          averageScore: null,
         };
       }
       throw error;
@@ -417,46 +455,67 @@ export class AchievementService {
     }
   }
 
-  private async syncUserProgressNow(userId: string): Promise<void> {
+  private async syncUserProgressNow(
+    userId: string,
+  ): Promise<UserProgressMetrics | undefined> {
+    const cachedMetrics = this.getCachedMetrics(userId);
+    if (cachedMetrics) {
+      return cachedMetrics;
+    }
+
+    const existingSync = this.syncInFlight.get(userId);
+    if (existingSync) {
+      return existingSync;
+    }
+
+    const syncPromise = this.performUserProgressSync(userId).finally(() => {
+      this.syncInFlight.delete(userId);
+    });
+    this.syncInFlight.set(userId, syncPromise);
+    return syncPromise;
+  }
+
+  private async performUserProgressSync(
+    userId: string,
+  ): Promise<UserProgressMetrics | undefined> {
     if (!this.prisma.canUseDatabase()) {
-      return;
+      return undefined;
     }
     try {
       await this.ensureSeedData();
       if (!this.prisma.canUseDatabase()) {
-        return;
+        return undefined;
       }
       const definitions = await this.getAchievementDefinitions();
       if (!this.prisma.canUseDatabase()) {
-        return;
+        return undefined;
       }
-      const [metrics, achievements, levelRows] = await Promise.all([
-        this.collectUserMetrics(userId),
-        this.prisma.achievement.findMany({
-          select: { id: true, code: true },
-        }),
-        this.prisma.levelDefinition.findMany({
-          select: { id: true, level: true, minXp: true },
-        }),
-      ]);
+      const metrics = await this.collectUserMetrics(userId);
+      const achievements = await this.prisma.achievement.findMany({
+        select: { id: true, code: true },
+      });
+      const levelRows = await this.prisma.levelDefinition.findMany({
+        select: { id: true, level: true, minXp: true },
+      });
       const achievementIdByCode = new Map(
         achievements.map((item) => [item.code, item.id] as const),
       );
       const now = new Date();
 
-      await this.prisma.$transaction(async (tx) => {
-        for (const definition of definitions) {
-          const achievementId = achievementIdByCode.get(definition.code);
-          if (!achievementId) {
-            continue;
-          }
-          const progress = Math.min(
-            metrics[definition.targetMetric],
-            definition.targetValue,
-          );
-          const unlocked =
-            metrics[definition.targetMetric] >= definition.targetValue;
-          await tx.userAchievement.upsert({
+      const writes: Prisma.PrismaPromise<unknown>[] = [];
+      for (const definition of definitions) {
+        const achievementId = achievementIdByCode.get(definition.code);
+        if (!achievementId) {
+          continue;
+        }
+        const metricValue = this.getMetricValue(
+          metrics,
+          definition.targetMetric,
+        );
+        const progress = Math.min(metricValue, definition.targetValue);
+        const unlocked = metricValue >= definition.targetValue;
+        writes.push(
+          this.prisma.userAchievement.upsert({
             where: {
               userId_achievementId: {
                 userId,
@@ -473,34 +532,41 @@ export class AchievementService {
               progress,
               unlockedAt: unlocked ? now : null,
             },
-          });
-        }
+          }),
+        );
+      }
 
-        const currentLevel =
-          levelRows
-            .slice()
-            .sort((left, right) => left.level - right.level)
-            .reverse()
-            .find((level) => metrics.totalXp >= level.minXp) ?? levelRows[0];
-        if (!currentLevel) {
-          return;
-        }
-        await tx.userLevel.upsert({
-          where: { userId },
-          update: {
-            levelId: currentLevel.id,
-            currentXp: metrics.totalXp,
-          },
-          create: {
-            userId,
-            levelId: currentLevel.id,
-            currentXp: metrics.totalXp,
-          },
-        });
-      });
+      const currentLevel =
+        levelRows
+          .slice()
+          .sort((left, right) => left.level - right.level)
+          .reverse()
+          .find((level) => metrics.totalXp >= level.minXp) ?? levelRows[0];
+      if (currentLevel) {
+        writes.push(
+          this.prisma.userLevel.upsert({
+            where: { userId },
+            update: {
+              levelId: currentLevel.id,
+              currentXp: metrics.totalXp,
+            },
+            create: {
+              userId,
+              levelId: currentLevel.id,
+              currentXp: metrics.totalXp,
+            },
+          }),
+        );
+      }
+
+      if (writes.length > 0) {
+        await this.prisma.$transaction(writes);
+      }
+      this.cacheMetrics(userId, metrics);
+      return metrics;
     } catch (error) {
       if (this.handleDatabaseConnectionError(error, "syncUserProgressNow")) {
-        return;
+        return undefined;
       }
       throw error;
     }
@@ -602,13 +668,13 @@ export class AchievementService {
     error: unknown,
     context: string,
   ): boolean {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      (error.code === "P1001" || error.code === "P1002")
-    ) {
-      const summary = error.message.split("\n").find(Boolean)?.trim();
+    if (this.prisma.isConnectionError(error)) {
+      const summary =
+        error instanceof Error
+          ? error.message.split("\n").find(Boolean)?.trim()
+          : "Unknown database error";
       this.logger.warn(
-        `Achievement service fallback in ${context}: ${error.code}${
+        `Achievement service fallback in ${context}:${
           summary ? ` ${summary}` : ""
         }`,
       );
@@ -623,29 +689,25 @@ export class AchievementService {
   private async collectUserMetrics(
     userId: string,
   ): Promise<UserProgressMetrics> {
-    const [conversations, reviewFeedback, learningActivity] = await Promise.all(
-      [
-        this.prisma.conversation.findMany({
-          where: { userId },
-          select: {
-            targetLanguage: true,
-            messages: true,
-            updatedAt: true,
-          },
-        }),
-        this.prisma.reviewFeedback.findMany({
-          where: { userId },
-          select: { createdAt: true },
-        }),
-        this.prisma.learningActivityDaily.findMany({
-          where: {
-            userId,
-            focusSeconds: { gt: 0 },
-          },
-          select: { dateKey: true },
-        }),
-      ],
-    );
+    const conversations = await this.prisma.conversation.findMany({
+      where: { userId },
+      select: {
+        targetLanguage: true,
+        messages: true,
+        updatedAt: true,
+      },
+    });
+    const reviewFeedback = await this.prisma.reviewFeedback.findMany({
+      where: { userId },
+      select: { createdAt: true },
+    });
+    const learningActivity = await this.prisma.learningActivityDaily.findMany({
+      where: {
+        userId,
+        focusSeconds: { gt: 0 },
+      },
+      select: { dateKey: true },
+    });
 
     const distinctVocabulary = new Set<string>();
     const activeDays = new Set<string>(
@@ -657,6 +719,8 @@ export class AchievementService {
     let conversationCount = 0;
     let perfectScoreCount = 0;
     let conversationsToday = 0;
+    let scoreTotal = 0;
+    let scoreCount = 0;
 
     conversations.forEach((conversation) => {
       const messages = Array.isArray(conversation.messages)
@@ -692,6 +756,10 @@ export class AchievementService {
         }
         if ((message.meta?.score ?? 0) >= 100) {
           perfectScoreCount += 1;
+        }
+        if (typeof message.meta?.score === "number" && message.meta.score > 0) {
+          scoreTotal += message.meta.score;
+          scoreCount += 1;
         }
         message.meta?.keyTerms?.forEach((term) => {
           const normalized = this.normalizeVocabularyToken(term.term);
@@ -730,7 +798,27 @@ export class AchievementService {
       daily_lessons: dailyLessons,
       language_mastery: masteredLanguages.size,
       totalXp,
+      averageScore: scoreCount > 0 ? Math.round(scoreTotal / scoreCount) : null,
     };
+  }
+
+  private getCachedMetrics(userId: string): UserProgressMetrics | undefined {
+    const cached = this.recentMetricsCache.get(userId);
+    if (!cached) {
+      return undefined;
+    }
+    if (cached.expiresAt <= Date.now()) {
+      this.recentMetricsCache.delete(userId);
+      return undefined;
+    }
+    return cached.metrics;
+  }
+
+  private cacheMetrics(userId: string, metrics: UserProgressMetrics): void {
+    this.recentMetricsCache.set(userId, {
+      metrics,
+      expiresAt: Date.now() + AchievementService.METRICS_CACHE_TTL_MS,
+    });
   }
 
   private computeStreakDays(activeDays: Set<string>, todayKey: string): number {
@@ -762,6 +850,27 @@ export class AchievementService {
       .split(/\s+/)
       .map((token) => this.normalizeVocabularyToken(token))
       .filter((token): token is string => Boolean(token));
+  }
+
+  private getMetricValue(
+    metrics: UserProgressMetrics,
+    metric: AchievementDefinition["targetMetric"],
+  ): number {
+    switch (metric) {
+      case "conversation_count":
+        return metrics.conversation_count;
+      case "streak_days":
+        return metrics.streak_days;
+      case "vocab_count":
+        return metrics.vocab_count;
+      case "perfect_score_count":
+        return metrics.perfect_score_count;
+      case "daily_lessons":
+        return metrics.daily_lessons;
+      case "language_mastery":
+        return metrics.language_mastery;
+    }
+    return 0;
   }
 
   private normalizeVocabularyToken(token: string): string | undefined {

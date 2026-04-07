@@ -8,6 +8,11 @@ export class SendMessageDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(["text", "voice", "immersive", "review"] satisfies TutorInteractionMode[])
+  @IsIn([
+    "text",
+    "voice",
+    "immersive",
+    "review",
+  ] satisfies TutorInteractionMode[])
   mode?: TutorInteractionMode;
 }

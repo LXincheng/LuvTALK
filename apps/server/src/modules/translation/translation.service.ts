@@ -369,7 +369,9 @@ export class TranslationService {
         };
       }>;
     };
-    const content = this.extractMessageContent(data.choices?.[0]?.message?.content);
+    const content = this.extractMessageContent(
+      data.choices?.[0]?.message?.content,
+    );
     if (!content) {
       return undefined;
     }

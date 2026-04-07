@@ -17,6 +17,7 @@ import {
   saveLearningGoal,
   type LearningGoalPayload,
 } from '../services/learningGoalService';
+import { getDisplayName, getInitials, getUserMetaLine } from '../utils/userProfile';
 
 /* ─── Font-size scale (decoupled from components) ─── */
 const TXT = {
@@ -36,12 +37,9 @@ export default function ProfilePage() {
   const { t, locale } = useLocale();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isGuest = !user || user.app_metadata?.provider === 'anonymous';
-  const displayName =
-    (user?.user_metadata?.full_name as string | undefined) ||
-    user?.email ||
-    user?.phone ||
-    (isGuest ? t('profileGuest') : t('profileLearner'));
+  const userKey = user?.id ?? 'guest';
+  const displayName = getDisplayName(user, t('profileGuest'), t('profileLearner'));
+  const initials = getInitials(displayName);
 
   /* ─── State ─── */
   const [summary, setSummary] = useState<AchievementSummary | null>(null);
@@ -53,13 +51,13 @@ export default function ProfilePage() {
 
   /* ─── Data fetching ─── */
   useEffect(() => {
-    const { cached: cachedS, fresh: freshS } = fetchAchievementSummaryCached();
-    const { cached: cachedA, fresh: freshA } = fetchAchievementsCached();
+    const { cached: cachedS, fresh: freshS } = fetchAchievementSummaryCached(userKey);
+    const { cached: cachedA, fresh: freshA } = fetchAchievementsCached(userKey);
     if (cachedS) setSummary(cachedS);
     if (cachedA) setRecentUnlocked(cachedA.filter((a) => a.unlocked).slice(0, 3));
     freshS.then(setSummary).catch(() => {});
     freshA.then((all) => setRecentUnlocked(all.filter((a) => a.unlocked).slice(0, 3))).catch(() => {});
-  }, []);
+  }, [userKey]);
 
   const refreshLearningGoal = useCallback(async (showError = true) => {
     setIsGoalRefreshing(true);
@@ -95,18 +93,39 @@ export default function ProfilePage() {
 
   /* ─── Derived ─── */
   const stats: { labelKey: LocaleKey; value: string; icon: typeof Calendar; color: StatColor }[] = [
-    { labelKey: 'profileStatSessions', value: summary ? String(summary.totalXp > 0 ? Math.ceil(summary.totalXp / 10) : 0) : '--', icon: Calendar, color: 'indigo' },
-    { labelKey: 'profileStatWords', value: summary ? String(summary.totalXp > 0 ? Math.ceil(summary.totalXp / 2) : 0) : '--', icon: Award, color: 'green' },
-    { labelKey: 'profileStatStreak', value: summary ? String(summary.unlockedCount) : '--', icon: TrendingUp, color: 'orange' },
+    { labelKey: 'profileStatSessions', value: summary ? String(summary.conversationCount) : '--', icon: Calendar, color: 'indigo' },
+    { labelKey: 'profileStatWords', value: summary ? String(summary.vocabCount) : '--', icon: Award, color: 'green' },
+    { labelKey: 'profileStatStreak', value: summary ? String(summary.streakDays) : '--', icon: TrendingUp, color: 'orange' },
     { labelKey: 'profileStatLevel', value: summary ? String(summary.currentLevel) : '--', icon: Target, color: 'purple' },
   ];
 
-  const completionPct = summary?.completionRate ?? 0;
-  const progressBars: { labelKey: LocaleKey; progressKey: LocaleKey; width: string; color: string }[] = [
-    { labelKey: 'profileVocabulary', progressKey: 'profileVocabularyProgress', width: `${Math.min(completionPct * 1.2, 100)}%`, color: PROGRESS_COLORS.indigo },
-    { labelKey: 'profileGrammar', progressKey: 'profileGrammarProgress', width: `${Math.min(completionPct * 0.8, 100)}%`, color: PROGRESS_COLORS.green },
-    { labelKey: 'profilePronunciation', progressKey: 'profilePronunciationProgress', width: `${Math.min(completionPct, 100)}%`, color: PROGRESS_COLORS.purple },
+  const progressBars = [
+    {
+      label: t('profileVocabulary'),
+      valueLabel: summary ? `${summary.vocabCount} ${t('profileWordsUnit')}` : '--',
+      width: `${Math.min(100, ((summary?.vocabCount ?? 0) / 500) * 100)}%`,
+      color: PROGRESS_COLORS.indigo,
+    },
+    {
+      label: t('profilePractice'),
+      valueLabel: summary ? `${summary.conversationCount} ${t('profileSessionsUnit')}` : '--',
+      width: `${Math.min(100, ((summary?.conversationCount ?? 0) / 100) * 100)}%`,
+      color: PROGRESS_COLORS.green,
+    },
+    {
+      label: t('profilePronunciation'),
+      valueLabel: summary?.averageScore != null ? `${summary.averageScore}/100` : t('profileNotEnoughData'),
+      width: `${Math.min(100, Math.max(0, summary?.averageScore ?? 0))}%`,
+      color: PROGRESS_COLORS.purple,
+    },
   ];
+
+  const metaLine = getUserMetaLine({
+    user,
+    summary,
+    locale,
+    guestLabel: t('profileGuestModeSimple'),
+  });
 
   const goalUpdatedText = useMemo(() => {
     if (!goalData?.goal.updatedAt) return t('profileGoalNotSet');
@@ -141,21 +160,23 @@ export default function ProfilePage() {
       <div className="mx-auto max-w-3xl px-4 py-5 sm:py-6">
 
         {/* ── Hero ── */}
-        <section className="page-panel mb-4 rounded-[28px] p-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#5856D6] text-lg font-bold text-white">
-              {displayName.slice(0, 2).toUpperCase()}
+        <section className="page-panel mb-4 rounded-[28px] p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-4 min-w-0 flex-1">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-[#5856D6] text-lg font-bold text-white">
+              {initials}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h1 className={`${TXT.title} truncate text-label`}>{displayName}</h1>
+                <p className={`${TXT.caption} mt-0.5 truncate text-label-secondary`}>
+                  {metaLine}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <h1 className={`${TXT.title} text-label`}>{displayName}</h1>
-              <p className={`${TXT.caption} mt-0.5 text-label-secondary`}>
-                {isGuest ? t('profileGuestMode') : t('profileLearningStatus')}
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
               <button
                 onClick={() => navigate('/achievements')}
-                className="inline-flex items-center gap-1.5 rounded-2xl bg-warning px-3.5 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(245,158,11,0.18)] transition hover:opacity-90"
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-2xl bg-warning px-3.5 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(245,158,11,0.18)] transition hover:opacity-90 sm:w-auto"
               >
                 <Trophy className="h-4 w-4" />
                 {t('profileAchievementHall')}
@@ -163,7 +184,7 @@ export default function ProfilePage() {
               {user ? (
                 <button
                   onClick={async () => { await signOut(); }}
-                  className="page-chip inline-flex items-center gap-1.5 rounded-2xl px-3.5 py-2 text-sm font-medium text-label-secondary transition hover:bg-fill-secondary dark:text-slate-200"
+                  className="page-chip inline-flex w-full items-center justify-center gap-1.5 rounded-2xl px-3.5 py-2 text-sm font-medium text-label-secondary transition hover:bg-fill-secondary dark:text-slate-200 sm:w-auto"
                 >
                   <LogOut className="h-4 w-4" />
                   {t('profileLogout')}
@@ -171,7 +192,7 @@ export default function ProfilePage() {
               ) : (
                 <button
                   onClick={() => navigate('/login')}
-                  className="rounded-2xl bg-primary px-3.5 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)] transition hover:opacity-90"
+                  className="w-full rounded-2xl bg-primary px-3.5 py-2 text-sm font-medium text-white shadow-[0_12px_28px_rgba(37,99,235,0.2)] transition hover:opacity-90 sm:w-auto"
                 >
                   {t('profileSignIn')}
                 </button>
@@ -204,10 +225,10 @@ export default function ProfilePage() {
           <h2 className={`${TXT.section} text-label mb-3`}>{t('profileProgress')}</h2>
           <div className="space-y-3">
             {progressBars.map((bar) => (
-              <div key={bar.labelKey}>
+              <div key={bar.label}>
                 <div className="mb-1.5 flex items-center justify-between">
-                  <span className={`${TXT.body} font-medium text-label-secondary`}>{t(bar.labelKey)}</span>
-                  <span className={`${TXT.caption} text-label-tertiary`}>{t(bar.progressKey)}</span>
+                  <span className={`${TXT.body} font-medium text-label-secondary`}>{bar.label}</span>
+                  <span className={`${TXT.caption} text-label-tertiary`}>{bar.valueLabel}</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-fill">
                   <div className={`${bar.color} h-full rounded-full transition-all`} style={{ width: bar.width }} />

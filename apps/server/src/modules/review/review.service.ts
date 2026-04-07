@@ -93,10 +93,19 @@ export class ReviewService {
     ) {
       this.prisma.ensurePersistentStorageAvailable();
     }
-    const cards = userId
-      ? (await this.buildDailyReviewFromQueue(userId)) ??
-        (await this.buildReviewCardsFromSources(userId))
-      : await this.buildReviewCardsFromSources();
+    let cards: ReviewCard[] = [];
+    try {
+      cards = userId
+        ? ((await this.buildDailyReviewFromQueue(userId)) ??
+          (await this.buildReviewCardsFromSources(userId)))
+        : await this.buildReviewCardsFromSources();
+    } catch (error) {
+      if (this.handleDatabaseConnectionError(error, "buildDailyReview")) {
+        cards = [];
+      } else {
+        throw error;
+      }
+    }
 
     return {
       date: new Date().toISOString().split("T")[0],
@@ -199,22 +208,29 @@ export class ReviewService {
   private async buildLowScoreCards(userId?: string): Promise<ReviewCard[]> {
     const cards: ReviewCard[] = [];
     if (this.prisma.canUseDatabase()) {
-      const records = await this.prisma.conversation.findMany({
-        where: userId ? { userId } : undefined,
-        orderBy: { updatedAt: "desc" },
-        take: 12,
-        select: {
-          id: true,
-          messages: true,
-        },
-      });
-      records.forEach((record) => {
-        const messages = Array.isArray(record.messages)
-          ? (record.messages as unknown as ConversationMessage[])
-          : [];
-        cards.push(...this.extractLowScoreCards(record.id, messages));
-      });
-      return cards;
+      try {
+        const records = await this.prisma.conversation.findMany({
+          where: userId ? { userId } : undefined,
+          orderBy: { updatedAt: "desc" },
+          take: 12,
+          select: {
+            id: true,
+            messages: true,
+          },
+        });
+        records.forEach((record) => {
+          const messages = Array.isArray(record.messages)
+            ? (record.messages as unknown as ConversationMessage[])
+            : [];
+          cards.push(...this.extractLowScoreCards(record.id, messages));
+        });
+        return cards;
+      } catch (error) {
+        if (this.handleDatabaseConnectionError(error, "buildLowScoreCards")) {
+          return [];
+        }
+        throw error;
+      }
     }
 
     const sessions = this.conversationService.listCachedSessions();
@@ -387,7 +403,9 @@ export class ReviewService {
     const term = this.pickReviewTerm(learnerText);
     const definition =
       this.pickReviewDefinition(scoreReason) ??
-      this.pickReviewDefinition(this.buildFallbackDefinitionFromReply(tutorReply));
+      this.pickReviewDefinition(
+        this.buildFallbackDefinitionFromReply(tutorReply),
+      );
     const example =
       this.pickReviewExample([learnerText]) ??
       this.pickReviewExample([tutorReply]);
@@ -442,7 +460,11 @@ export class ReviewService {
       return undefined;
     }
     const [firstSentence] = cleaned.split(/(?<=[.!?。！？])\s+/);
-    if (!firstSentence || firstSentence.length < 6 || firstSentence.length > 120) {
+    if (
+      !firstSentence ||
+      firstSentence.length < 6 ||
+      firstSentence.length > 120
+    ) {
       return undefined;
     }
     return firstSentence;
@@ -597,6 +619,26 @@ export class ReviewService {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       (error.code === "P2021" || error.code === "P2022")
     );
+  }
+
+  private handleDatabaseConnectionError(
+    error: unknown,
+    context: string,
+  ): boolean {
+    if (!this.prisma.isConnectionError(error)) {
+      return false;
+    }
+    const summary =
+      error instanceof Error
+        ? error.message.split("\n").find(Boolean)?.trim()
+        : "Unknown database error";
+    this.logger.warn(
+      `Review service fallback in ${context}:${summary ? ` ${summary}` : ""}`,
+    );
+    this.prisma.markDatabaseUnavailable(
+      `Review service connection failure in ${context}.`,
+    );
+    return true;
   }
 
   private buildQueueId(userId: string, card: ReviewCard): string {

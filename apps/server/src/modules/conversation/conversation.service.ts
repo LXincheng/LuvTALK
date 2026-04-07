@@ -156,6 +156,19 @@ export interface ConversationQuickRepliesPayload {
   options: string[];
 }
 
+interface ConversationUiArtifactCacheEntry<T> {
+  messageCount: number;
+  value: T;
+}
+
+interface ConversationFastTipPayload {
+  correction?: string;
+  cultureNote?: string;
+  pronunciationTip?: string;
+  rhythmTip?: string;
+  grammarTip?: string;
+}
+
 interface SessionAccessOptions {
   userId?: string;
   conversationKey?: string;
@@ -171,6 +184,15 @@ export class ConversationService {
     string,
     Subject<ConversationSession>
   >();
+  private readonly summaryCopyCache = new Map<
+    string,
+    ConversationUiArtifactCacheEntry<Pick<SessionSummaryPayload, "headline" | "advice">>
+  >();
+  private readonly quickReplyCache = new Map<
+    string,
+    ConversationUiArtifactCacheEntry<string[]>
+  >();
+  private readonly uiArtifactInflight = new Map<string, Promise<void>>();
   private schemaMissingUserColumn = false;
   private readonly avatars = {
     ai: TUTOR_AVATAR,
@@ -422,8 +444,12 @@ export class ConversationService {
     }
 
     await Promise.all([
-      this.removeConversationStorage(join(CONVERSATION_IMAGE_STORAGE_ROOT, conversationId)),
-      this.removeConversationStorage(join(CONVERSATION_VOICE_STORAGE_ROOT, conversationId)),
+      this.removeConversationStorage(
+        join(CONVERSATION_IMAGE_STORAGE_ROOT, conversationId),
+      ),
+      this.removeConversationStorage(
+        join(CONVERSATION_VOICE_STORAGE_ROOT, conversationId),
+      ),
     ]);
   }
 
@@ -459,6 +485,15 @@ export class ConversationService {
       },
     );
     session.messages.push(userMessage);
+    const interactionMode = this.resolveInteractionMode(
+      dto.mode,
+      options?.userMessageMeta,
+    );
+    const fastTipPromise = this.generateFastFeedbackTips({
+      session,
+      latestMessageText: trimmed,
+      interactionMode,
+    });
 
     // Auto-generate title from first user message (replace default scenario title)
     const userMessageCount = session.messages.filter(
@@ -476,11 +511,6 @@ export class ConversationService {
 
     // Early broadcast: user message appears instantly in the UI
     this.broadcastSession(session);
-
-    const interactionMode = this.resolveInteractionMode(
-      dto.mode,
-      options?.userMessageMeta,
-    );
     const rawAiPayload =
       (await this.requestTieredTutorReply(
         session,
@@ -501,6 +531,7 @@ export class ConversationService {
       session.targetLanguage,
       session.nativeLanguage ?? LanguageCode.Mandarin,
       session.scenarioId,
+      await this.resolveFastTipFallback(fastTipPromise),
     );
 
     const normalizedKeyTerms = this.normalizeKeyTerms(
@@ -533,6 +564,10 @@ export class ConversationService {
     // Early broadcast: user sees AI reply before translation is ready
     await this.persistSession(session);
     this.broadcastSession(session);
+    this.prewarmConversationUiArtifacts(
+      session,
+      session.nativeLanguage === LanguageCode.English ? "en" : "zh",
+    );
 
     // Run translation in background, then update the message
     this.translateForNativeLanguage(
@@ -596,12 +631,20 @@ export class ConversationService {
       session.nativeLanguage,
       {
         meta: {
-          imageUrl: this.buildImageReference(conversationId, storedImage.fileName),
+          imageUrl: this.buildImageReference(
+            conversationId,
+            storedImage.fileName,
+          ),
           imageMimeType: storedImage.mimeType,
         },
       },
     );
     session.messages.push(userMessage);
+    const fastTipPromise = this.generateFastFeedbackTips({
+      session,
+      latestMessageText: visibleMessage,
+      interactionMode: "text",
+    });
 
     const userMessageCount = session.messages.filter(
       (message) => message.sender === "user",
@@ -658,6 +701,7 @@ export class ConversationService {
       session.targetLanguage,
       session.nativeLanguage ?? LanguageCode.Mandarin,
       session.scenarioId,
+      await this.resolveFastTipFallback(fastTipPromise),
     );
     const normalizedKeyTerms = this.normalizeKeyTerms(
       aiPayload.reply,
@@ -685,6 +729,10 @@ export class ConversationService {
 
     await this.persistSession(session);
     this.broadcastSession(session);
+    this.prewarmConversationUiArtifacts(
+      session,
+      session.nativeLanguage === LanguageCode.English ? "en" : "zh",
+    );
 
     this.translateForNativeLanguage(
       aiPayload.reply,
@@ -715,7 +763,11 @@ export class ConversationService {
     kind: "hint" | "nudge",
     userId?: string,
     conversationKey?: string,
-  ): Promise<{ kind: "hint" | "nudge"; message: string; translation?: string }> {
+  ): Promise<{
+    kind: "hint" | "nudge";
+    message: string;
+    translation?: string;
+  }> {
     const session = await this.getAccessibleSession(conversationId, {
       userId,
       conversationKey,
@@ -734,10 +786,11 @@ export class ConversationService {
       .find((message) => message.sender === "user");
 
     if (kind === "nudge") {
-      const [primaryPhrase, secondaryPhrase] = this.buildScenarioAssociativePhrases(
-        targetLanguage,
-        session.scenarioId,
-      );
+      const [primaryPhrase, secondaryPhrase] =
+        this.buildScenarioAssociativePhrases(
+          targetLanguage,
+          session.scenarioId,
+        );
       const candidates = buildDynamicScenarioGuidance({
         primaryPhrase,
         secondaryPhrase,
@@ -747,7 +800,10 @@ export class ConversationService {
       });
       const candidate =
         candidates[userTurns % candidates.length] ??
-        this.buildScenarioAssociativePhrases(targetLanguage, session.scenarioId)[0];
+        this.buildScenarioAssociativePhrases(
+          targetLanguage,
+          session.scenarioId,
+        )[0];
       const translation =
         targetLanguage === nativeLanguage
           ? undefined
@@ -1199,15 +1255,30 @@ export class ConversationService {
       });
     };
 
-    enqueueAttempt("primary-quality", primaryModel, envConfig.modelTimeoutMs.primary, {
-      preferJson: true,
-    });
-    enqueueAttempt("secondary-fast", secondaryModel, envConfig.modelTimeoutMs.secondary, {
-      preferJson: true,
-    });
-    enqueueAttempt("third-fallback", thirdModel, envConfig.modelTimeoutMs.third, {
-      preferJson: true,
-    });
+    enqueueAttempt(
+      "primary-quality",
+      primaryModel,
+      envConfig.modelTimeoutMs.primary,
+      {
+        preferJson: true,
+      },
+    );
+    enqueueAttempt(
+      "secondary-fast",
+      secondaryModel,
+      envConfig.modelTimeoutMs.secondary,
+      {
+        preferJson: true,
+      },
+    );
+    enqueueAttempt(
+      "third-fallback",
+      thirdModel,
+      envConfig.modelTimeoutMs.third,
+      {
+        preferJson: true,
+      },
+    );
 
     for (const attempt of attempts) {
       const payload = await this.requestChatModelAi(
@@ -1282,7 +1353,7 @@ export class ConversationService {
           "",
           "QWEN JSON OUTPUT RULES:",
           "- Output exactly one valid JSON object that matches the schema above.",
-          '- The final answer must be pure JSON and must not contain markdown fences such as ```json.',
+          "- The final answer must be pure JSON and must not contain markdown fences such as ```json.",
         ].join("\n");
       }
     }
@@ -1429,6 +1500,7 @@ export class ConversationService {
     targetLanguage: LanguageCode,
     nativeLanguage: LanguageCode,
     scenarioId: string,
+    fastTips?: ConversationFastTipPayload,
   ): AiResponse {
     if (interactionMode === "voice") {
       const fallbackTips = buildDefaultTeachingTips({
@@ -1439,14 +1511,15 @@ export class ConversationService {
       });
       const voiceTips = ensureVoiceTipSet(
         {
-          pronunciationTip: payload.pronunciationTip,
-          rhythmTip: payload.rhythmTip,
-          grammarTip: payload.grammarTip,
+          pronunciationTip: payload.pronunciationTip ?? fastTips?.pronunciationTip,
+          rhythmTip: payload.rhythmTip ?? fastTips?.rhythmTip,
+          grammarTip: payload.grammarTip ?? fastTips?.grammarTip,
         },
         {
-          pronunciationTip: fallbackTips.pronunciationTip,
-          rhythmTip: fallbackTips.rhythmTip,
-          grammarTip: fallbackTips.grammarTip,
+          pronunciationTip:
+            fastTips?.pronunciationTip?.trim() || fallbackTips.pronunciationTip,
+          rhythmTip: fastTips?.rhythmTip?.trim() || fallbackTips.rhythmTip,
+          grammarTip: fastTips?.grammarTip?.trim() || fallbackTips.grammarTip,
         },
         nativeLanguage,
         {
@@ -1471,12 +1544,26 @@ export class ConversationService {
     return {
       ...payload,
       reply: this.stripTextTeachingScaffold(payload.reply),
-      correction: payload.correction?.trim() || fallbackTips.correction,
-      cultureNote: payload.cultureNote?.trim() || fallbackTips.cultureNote,
+      correction:
+        payload.correction?.trim() ||
+        fastTips?.correction?.trim() ||
+        fallbackTips.correction,
+      cultureNote:
+        payload.cultureNote?.trim() ||
+        fastTips?.cultureNote?.trim() ||
+        fallbackTips.cultureNote,
       pronunciationTip:
-        payload.pronunciationTip?.trim() || fallbackTips.pronunciationTip,
-      rhythmTip: payload.rhythmTip?.trim() || fallbackTips.rhythmTip,
-      grammarTip: payload.grammarTip?.trim() || fallbackTips.grammarTip,
+        payload.pronunciationTip?.trim() ||
+        fastTips?.pronunciationTip?.trim() ||
+        fallbackTips.pronunciationTip,
+      rhythmTip:
+        payload.rhythmTip?.trim() ||
+        fastTips?.rhythmTip?.trim() ||
+        fallbackTips.rhythmTip,
+      grammarTip:
+        payload.grammarTip?.trim() ||
+        fastTips?.grammarTip?.trim() ||
+        fallbackTips.grammarTip,
     };
   }
 
@@ -1505,7 +1592,9 @@ export class ConversationService {
     if (!normalized) {
       return normalized;
     }
-    const structuredIndex = normalized.search(/(\n|^)\s*(学习建议|Study Steps)[:：]/i);
+    const structuredIndex = normalized.search(
+      /(\n|^)\s*(学习建议|Study Steps)[:：]/i,
+    );
     const numberedIndex = normalized.search(/(\n|^)\s*1[).]\s+/);
     const cutIndex =
       structuredIndex >= 0 && numberedIndex >= 0
@@ -1517,10 +1606,17 @@ export class ConversationService {
     if (compact) {
       return compact;
     }
-    return normalized
-      .split(/\n+/)
-      .map((line) => line.trim())
-      .find((line) => line && !/^(学习建议|Study Steps)[:：]?$/i.test(line) && !/^\d+[).]/.test(line)) ?? normalized;
+    return (
+      normalized
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .find(
+          (line) =>
+            line &&
+            !/^(学习建议|Study Steps)[:：]?$/i.test(line) &&
+            !/^\d+[).]/.test(line),
+        ) ?? normalized
+    );
   }
 
   private async translateForNativeLanguage(
@@ -1554,11 +1650,15 @@ export class ConversationService {
     const polite = message || "（等待输入）";
     const normalizedLength = polite.replace(/\s+/g, "").length;
     const hasQuestion = /[?？]/.test(polite);
-    const detailBonus = normalizedLength >= 18 ? 8 : normalizedLength >= 10 ? 4 : 0;
+    const detailBonus =
+      normalizedLength >= 18 ? 8 : normalizedLength >= 10 ? 4 : 0;
     const questionBonus = hasQuestion ? 4 : 0;
     const score = Math.max(
       48,
-      Math.min(82, 50 + detailBonus + questionBonus + Math.round(normalizedLength / 12)),
+      Math.min(
+        82,
+        50 + detailBonus + questionBonus + Math.round(normalizedLength / 12),
+      ),
     );
 
     const tips = buildDefaultTeachingTips({
@@ -1673,14 +1773,21 @@ export class ConversationService {
     fileName: string,
     userId?: string,
     conversationKey?: string,
-  ): Promise<{ stream: ReturnType<typeof createReadStream>; mimeType: string }> {
+  ): Promise<{
+    stream: ReturnType<typeof createReadStream>;
+    mimeType: string;
+  }> {
     await this.getAccessibleSession(conversationId, {
       userId,
       conversationKey,
       allowBootstrapMissingAccessKey: true,
     });
     const safeFileName = basename(fileName);
-    const filePath = join(CONVERSATION_IMAGE_STORAGE_ROOT, conversationId, safeFileName);
+    const filePath = join(
+      CONVERSATION_IMAGE_STORAGE_ROOT,
+      conversationId,
+      safeFileName,
+    );
     await access(filePath);
     return {
       stream: createReadStream(filePath),
@@ -1688,7 +1795,10 @@ export class ConversationService {
     };
   }
 
-  private buildImageReference(conversationId: string, fileName: string): string {
+  private buildImageReference(
+    conversationId: string,
+    fileName: string,
+  ): string {
     return `/api/conversation/${conversationId}/image/${fileName}`;
   }
 
@@ -1704,7 +1814,10 @@ export class ConversationService {
     }
   }
 
-  private resolveImageExtension(mimeType?: string, originalName?: string): string {
+  private resolveImageExtension(
+    mimeType?: string,
+    originalName?: string,
+  ): string {
     const normalizedMime = mimeType?.trim().toLowerCase();
     if (normalizedMime === "image/png") {
       return ".png";
@@ -1724,7 +1837,10 @@ export class ConversationService {
     return ".jpg";
   }
 
-  private normalizeImageMimeType(mimeType?: string, extension?: string): string {
+  private normalizeImageMimeType(
+    mimeType?: string,
+    extension?: string,
+  ): string {
     const normalizedMime = mimeType?.trim().toLowerCase();
     if (normalizedMime?.startsWith("image/")) {
       return normalizedMime;
@@ -2128,7 +2244,12 @@ export class ConversationService {
       messages: session.messages,
       locale,
     });
-    const aiCopy = await this.generateAiSessionSummaryCopy(session, baseSummary, locale);
+    const aiCopy =
+      (await this.getCachedOrGenerateSummaryCopy(session, baseSummary, locale)) ??
+      {
+        headline: baseSummary.headline,
+        advice: baseSummary.advice,
+      };
     return {
       ...baseSummary,
       ...aiCopy,
@@ -2146,7 +2267,7 @@ export class ConversationService {
       conversationKey,
       allowBootstrapMissingAccessKey: true,
     });
-    const options = await this.generateAiQuickReplies(session, locale);
+    const options = await this.getCachedOrGenerateQuickReplies(session, locale);
     return {
       conversationId: session.id,
       options,
@@ -2213,7 +2334,9 @@ export class ConversationService {
       return true;
     }
     const message =
-      error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      error instanceof Error
+        ? error.message.toLowerCase()
+        : String(error).toLowerCase();
     return (
       message.includes("server has closed the connection") ||
       message.includes("connection terminated") ||
@@ -2232,6 +2355,194 @@ export class ConversationService {
     );
   }
 
+  private buildUiArtifactKey(
+    kind: "summary" | "quick-replies",
+    conversationId: string,
+    locale?: string,
+  ): string {
+    return `${kind}:${conversationId}:${locale === "en" ? "en" : "zh"}`;
+  }
+
+  private getMessageCountSignature(session: ConversationSession): number {
+    return session.messages.length;
+  }
+
+  private prewarmConversationUiArtifacts(
+    session: ConversationSession,
+    locale?: string,
+  ): void {
+    const normalizedLocale = locale === "en" ? "en" : "zh";
+    const messageCount = this.getMessageCountSignature(session);
+    const summary = buildSessionSummary({
+      conversationId: session.id,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: session.messages,
+      locale: normalizedLocale,
+    });
+    void this.ensureUiArtifactInflight(
+      this.buildUiArtifactKey("summary", session.id, normalizedLocale),
+      async () => {
+        const copy = await this.generateAiSessionSummaryCopy(
+          session,
+          summary,
+          normalizedLocale,
+        );
+        this.summaryCopyCache.set(
+          this.buildUiArtifactKey("summary", session.id, normalizedLocale),
+          { messageCount, value: copy },
+        );
+      },
+    );
+    void this.ensureUiArtifactInflight(
+      this.buildUiArtifactKey("quick-replies", session.id, normalizedLocale),
+      async () => {
+        const options = await this.generateAiQuickReplies(session, normalizedLocale);
+        this.quickReplyCache.set(
+          this.buildUiArtifactKey("quick-replies", session.id, normalizedLocale),
+          { messageCount, value: options },
+        );
+      },
+    );
+  }
+
+  private async getCachedOrGenerateSummaryCopy(
+    session: ConversationSession,
+    summary: SessionSummaryPayload,
+    locale?: string,
+  ): Promise<Pick<SessionSummaryPayload, "headline" | "advice"> | null> {
+    const normalizedLocale = locale === "en" ? "en" : "zh";
+    const cacheKey = this.buildUiArtifactKey(
+      "summary",
+      session.id,
+      normalizedLocale,
+    );
+    const messageCount = this.getMessageCountSignature(session);
+    const cached = this.summaryCopyCache.get(cacheKey);
+    if (cached && cached.messageCount === messageCount) {
+      return cached.value;
+    }
+    await this.ensureUiArtifactInflight(cacheKey, async () => {
+      const value = await this.generateAiSessionSummaryCopy(
+        session,
+        summary,
+        normalizedLocale,
+      );
+      this.summaryCopyCache.set(cacheKey, { messageCount, value });
+    });
+    return this.summaryCopyCache.get(cacheKey)?.value ?? null;
+  }
+
+  private async getCachedOrGenerateQuickReplies(
+    session: ConversationSession,
+    locale?: string,
+  ): Promise<string[]> {
+    const normalizedLocale = locale === "en" ? "en" : "zh";
+    const cacheKey = this.buildUiArtifactKey(
+      "quick-replies",
+      session.id,
+      normalizedLocale,
+    );
+    const messageCount = this.getMessageCountSignature(session);
+    const cached = this.quickReplyCache.get(cacheKey);
+    if (cached && cached.messageCount === messageCount) {
+      return cached.value;
+    }
+    await this.ensureUiArtifactInflight(cacheKey, async () => {
+      const value = await this.generateAiQuickReplies(session, normalizedLocale);
+      this.quickReplyCache.set(cacheKey, { messageCount, value });
+    });
+    return this.quickReplyCache.get(cacheKey)?.value ?? [];
+  }
+
+  private async ensureUiArtifactInflight(
+    key: string,
+    factory: () => Promise<void>,
+  ): Promise<void> {
+    const existing = this.uiArtifactInflight.get(key);
+    if (existing) {
+      await existing;
+      return;
+    }
+    const pending = factory()
+      .catch((error) => {
+        this.logger.warn(
+          `UI artifact generation failed for ${key}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      })
+      .finally(() => {
+        this.uiArtifactInflight.delete(key);
+      });
+    this.uiArtifactInflight.set(key, pending);
+    await pending;
+  }
+
+  private async generateFastFeedbackTips(params: {
+    session: ConversationSession;
+    latestMessageText: string;
+    interactionMode: TutorInteractionMode;
+  }): Promise<ConversationFastTipPayload | null> {
+    const nativeLanguage = params.session.nativeLanguage ?? LanguageCode.Mandarin;
+    const systemPrompt =
+      nativeLanguage === LanguageCode.English
+        ? "You write concise, contextual coaching tips for a language tutor app. Return JSON only."
+        : "你负责为语言学习应用生成简洁且贴合上下文的教学提示。只返回 JSON。";
+    const transcript = params.session.messages
+      .filter((message) => message.sender === "user" || message.sender === "ai")
+      .slice(-8)
+      .map(
+        (message) =>
+          `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`,
+      )
+      .join("\n");
+    const content = await this.requestCompactJsonObject({
+      label: "fast-feedback-tips",
+      modelCandidates: [
+        envConfig.modelRouting.thirdModel,
+        envConfig.modelRouting.secondaryModel,
+      ],
+      timeoutMs: Math.min(envConfig.modelTimeoutMs.third, 1200),
+      systemPrompt,
+      userPrompt: [
+        nativeLanguage === LanguageCode.English
+          ? "Return 5 fields: correction, cultureNote, pronunciationTip, rhythmTip, grammarTip."
+          : "请返回 5 个字段：correction、cultureNote、pronunciationTip、rhythmTip、grammarTip。",
+        nativeLanguage === LanguageCode.English
+          ? "All fields must be grounded in this exact conversation and the learner's latest message."
+          : "所有字段都必须贴合这段真实对话和学习者刚刚那一句。",
+        nativeLanguage === LanguageCode.English
+          ? "Do not use generic filler or praise. Keep each tip actionable and specific."
+          : "不要空泛鼓励，不要套话，每个提示都要具体可执行。",
+        `JSON schema: {"correction":"string","cultureNote":"string","pronunciationTip":"string","rhythmTip":"string","grammarTip":"string"}`,
+        `Interaction mode: ${params.interactionMode}`,
+        `Latest learner message: ${params.latestMessageText}`,
+        "Recent transcript:",
+        transcript,
+      ].join("\n"),
+    });
+    const parsed = this.parseCompactJsonObject<ConversationFastTipPayload>(content);
+    return parsed ?? null;
+  }
+
+  private async resolveFastTipFallback(
+    promise: Promise<ConversationFastTipPayload | null>,
+  ): Promise<ConversationFastTipPayload | undefined> {
+    try {
+      return (
+        (await Promise.race([
+          promise,
+          new Promise<null>((resolve) => {
+            setTimeout(() => resolve(null), 220);
+          }),
+        ])) ?? undefined
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   private async generateAiSessionSummaryCopy(
     session: ConversationSession,
     summary: SessionSummaryPayload,
@@ -2245,7 +2556,10 @@ export class ConversationService {
     const transcript = session.messages
       .filter((message) => message.sender === "user" || message.sender === "ai")
       .slice(-10)
-      .map((message) => `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`)
+      .map(
+        (message) =>
+          `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`,
+      )
       .join("\n");
     if (!transcript.trim()) {
       return fallback;
@@ -2254,11 +2568,11 @@ export class ConversationService {
     const content = await this.requestCompactJsonObject({
       label: "summary-copy",
       modelCandidates: [
+        envConfig.modelRouting.thirdModel,
         envConfig.modelRouting.secondaryModel,
         envConfig.modelRouting.primaryModel,
-        envConfig.modelRouting.thirdModel,
       ],
-      timeoutMs: 2200,
+      timeoutMs: Math.min(envConfig.modelTimeoutMs.third, 1600),
       systemPrompt: isEn
         ? "You write premium, concise session summaries for a language learning app. Return JSON only."
         : "你为语言学习应用撰写高级、简洁的会话总结。只返回 JSON。",
@@ -2273,8 +2587,14 @@ export class ConversationService {
           ? "advice: one short sentence with a concrete next step in the user's system language."
           : "advice：1 句简短建议，用用户当前系统语言给出下一步练习方向。",
         isEn
-          ? "No templates, no score recap boilerplate, no generic praise."
-          : "不要套模板，不要机械复述分数，不要空泛鼓励。",
+          ? "Ground both fields in the recent transcript, key terms, and actual correction signals."
+          : "两个字段都必须落在最近对话、关键词和真实纠错点上。",
+        isEn
+          ? "Do not write score recaps, generic praise, or vague filler like 'keep practicing'."
+          : "不要复述分数，不要空泛鼓励，不要写“继续加油”这类空话。",
+        isEn
+          ? "If the learner was answering a question, reflect that concrete topic instead of abstract performance labels."
+          : "如果学习者是在回应某个具体问题，要写出那个具体话题，不要抽象评价。",
         `JSON schema: {"headline":"string","advice":"string"}`,
         `Session metrics: ${JSON.stringify({
           durationMinutes: summary.durationMinutes,
@@ -2309,28 +2629,33 @@ export class ConversationService {
     session: ConversationSession,
     locale?: string,
   ): Promise<string[]> {
-    const fallback = this.buildFallbackQuickReplies(session);
     const recentMessages = session.messages
       .filter((message) => message.sender === "user" || message.sender === "ai")
       .slice(-8);
     if (!recentMessages.length) {
-      return fallback;
+      return [];
     }
     const transcript = recentMessages
-      .map((message) => `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`)
+      .map(
+        (message) =>
+          `${message.sender === "ai" ? "Tutor" : "Learner"}: ${message.text}`,
+      )
       .join("\n");
     const lastAiScore = [...session.messages]
       .reverse()
-      .find((message) => message.sender === "ai" && typeof message.meta?.score === "number")
-      ?.meta?.score;
+      .find(
+        (message) =>
+          message.sender === "ai" && typeof message.meta?.score === "number",
+      )?.meta?.score;
 
     const content = await this.requestCompactJsonObject({
       label: "quick-replies",
       modelCandidates: [
+        envConfig.modelRouting.thirdModel,
         envConfig.modelRouting.secondaryModel,
         envConfig.modelRouting.primaryModel,
       ],
-      timeoutMs: 1400,
+      timeoutMs: Math.min(envConfig.modelTimeoutMs.third, 1200),
       systemPrompt:
         "You generate smart quick-reply chips for a language tutor app. Return JSON only.",
       userPrompt: [
@@ -2345,6 +2670,8 @@ export class ConversationService {
         "- All replies must be in the target language.",
         "- Keep each reply natural, contextual, and under 16 words.",
         "- Do not explain. Do not output labels. Do not output translations.",
+        "- Use concrete details or intent from the recent transcript whenever possible.",
+        "- Avoid filler like 'let me answer directly first' unless the transcript gives no usable detail.",
         "- Offer variety: one direct reply, one detail-expanding reply, one follow-up style reply.",
         '- JSON schema: {"options":["string","string","string"]}',
         "Recent transcript:",
@@ -2355,45 +2682,14 @@ export class ConversationService {
     const parsed = this.parseCompactJsonObject<{ options?: unknown }>(content);
     const options = Array.isArray(parsed?.options)
       ? parsed.options
-          .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+          .filter(
+            (item): item is string =>
+              typeof item === "string" && Boolean(item.trim()),
+          )
           .map((item) => item.trim())
           .slice(0, 3)
       : [];
-    return options.length ? options : fallback;
-  }
-
-  private buildFallbackQuickReplies(session: ConversationSession): string[] {
-    const targetLanguage = session.targetLanguage;
-    const lastAiText = [...session.messages]
-      .reverse()
-      .find((message) => message.sender === "ai")
-      ?.text
-      ?.trim();
-    const aiAskedQuestion = Boolean(lastAiText && /[?？]$/.test(lastAiText));
-    if (targetLanguage === LanguageCode.English) {
-      if (aiAskedQuestion) {
-        return [
-          "Let me answer that directly.",
-          "I can add one more detail.",
-          "What would sound more natural here?",
-        ];
-      }
-      return [
-        "Could we keep going on this topic?",
-        "Here is one more detail.",
-        "Can I try one more turn?",
-      ];
-    }
-    if (targetLanguage === LanguageCode.Cantonese) {
-      if (aiAskedQuestion) {
-        return ["我先直接答你。", "我再補一個細節。", "母語者通常會點講？"];
-      }
-      return ["我想再講多一句。", "我可以再補充少少。", "可唔可以俾我再試一次？"];
-    }
-    if (aiAskedQuestion) {
-      return ["我先直接回答。", "我再补一个细节。", "母语者通常会怎么说？"];
-    }
-    return ["我想继续这个话题。", "我可以再补充一点。", "你可以让我再试一轮吗？"];
+    return options;
   }
 
   private async requestCompactJsonObject(params: {
@@ -2501,7 +2797,9 @@ export class ConversationService {
           };
         }>;
       };
-      const content = this.extractMessageContent(raw.choices?.[0]?.message?.content);
+      const content = this.extractMessageContent(
+        raw.choices?.[0]?.message?.content,
+      );
       if (!content?.trim()) {
         this.logger.warn("Chat completion returned empty content.");
         return null;

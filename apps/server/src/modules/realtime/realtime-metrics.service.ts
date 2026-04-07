@@ -344,9 +344,7 @@ const recordDuration = (
 
 const buildDurationSnapshot = (aggregate: DurationAggregate) => ({
   avg:
-    aggregate.count > 0
-      ? Math.round(aggregate.totalMs / aggregate.count)
-      : 0,
+    aggregate.count > 0 ? Math.round(aggregate.totalMs / aggregate.count) : 0,
   min: aggregate.count > 0 ? Math.round(aggregate.minMs) : 0,
   max: aggregate.count > 0 ? Math.round(aggregate.maxMs) : 0,
   count: aggregate.count,

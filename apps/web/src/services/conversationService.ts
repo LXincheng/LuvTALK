@@ -393,7 +393,7 @@ export function synthesizeConversationSpeech(
   >(
     `/conversation/${conversationId}/tts`,
     { text, voice, speed },
-    { headers: buildConversationAccessHeaders(conversationId) },
+    { headers: buildConversationAccessHeaders(conversationId), timeoutMs: 12000 },
   ).then((payload) => ({
     ...payload,
     audioUrl: withConversationAccessQuery(payload.audioUrl, conversationId),

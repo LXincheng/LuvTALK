@@ -25,7 +25,6 @@ import { setVoiceCatalog } from '../../../config/voice';
 import { toast } from '../../../utils/toast';
 import ScenarioSessionHeader from '../components/ScenarioSessionHeader';
 import { getScenarioDefinition } from '../data/scenarioDefinitions';
-import { buildChatQuickReplyOptions } from '../../chat/chatQuickReplyGuidance';
 import type {
   ConversationSession,
   LanguageCode,
@@ -361,13 +360,6 @@ export default function ScenarioSessionPage() {
     return `${session.id}:${session.messages.length}:${isNewScenarioSession ? 'starter' : 'reply'}`;
   }, [isNewScenarioSession, session?.id, session?.messages.length]);
 
-  const quickReplyFallbackContent = useMemo(() => {
-    if (!session) {
-      return [];
-    }
-    return buildChatQuickReplyOptions(session);
-  }, [session]);
-
   useEffect(() => {
     if (!session) {
       clearQuickReplyTimer();
@@ -381,8 +373,7 @@ export default function ScenarioSessionPage() {
       Boolean(inputValue.trim()) ||
       isRecording ||
       isSending ||
-      isInitializing ||
-      quickReplyFallbackContent.length === 0;
+      isInitializing;
 
     if (shouldHideImmediately) {
       clearQuickReplyTimer();
@@ -418,17 +409,14 @@ export default function ScenarioSessionPage() {
           ) {
             return;
           }
-          const source = payload.options.length
-            ? payload.options
-            : quickReplyFallbackContent.map((option) => option.text);
           startTransition(() => {
             setQuickReplyOptions(
-              source.map((text, index) => ({
+              payload.options.map((text, index) => ({
                 id: `scenario-${activeSessionId}-${activeSuggestionKey}-${index}`,
                 text,
               })),
             );
-            setQuickRepliesVisible(source.length > 0);
+            setQuickRepliesVisible(payload.options.length > 0);
           });
         })
         .catch(() => {
@@ -440,8 +428,8 @@ export default function ScenarioSessionPage() {
             return;
           }
           startTransition(() => {
-            setQuickReplyOptions(quickReplyFallbackContent);
-            setQuickRepliesVisible(quickReplyFallbackContent.length > 0);
+            setQuickReplyOptions([]);
+            setQuickRepliesVisible(false);
           });
         });
     }, isNewScenarioSession ? 1400 : 5000);
@@ -457,7 +445,6 @@ export default function ScenarioSessionPage() {
     isSending,
     isNewScenarioSession,
     locale,
-    quickReplyFallbackContent,
     quickReplySuggestionKey,
     session,
   ]);

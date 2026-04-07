@@ -34,4 +34,8 @@ export interface AchievementSummary {
   completionRate: number;
   currentLevel: number;
   totalXp: number;
+  conversationCount: number;
+  vocabCount: number;
+  streakDays: number;
+  averageScore: number | null;
 }

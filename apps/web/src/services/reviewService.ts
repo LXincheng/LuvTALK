@@ -60,10 +60,12 @@ export function invalidateDailyReviewCache() {
 }
 
 export function fetchDailyReview() {
-  return apiClient.get<DailyReviewPayload>('/review/daily').then((payload) => {
-    writePersistedDailyReview(payload);
-    return payload;
-  });
+  return apiClient
+    .get<DailyReviewPayload>('/review/daily', { timeoutMs: 10000 })
+    .then((payload) => {
+      writePersistedDailyReview(payload);
+      return payload;
+    });
 }
 
 export function fetchDailyReviewCached() {
@@ -80,5 +82,6 @@ export function submitReviewFeedback(payload: ReviewFeedbackPayload) {
   return apiClient.post<{ status: string }, ReviewFeedbackPayload>(
     '/review/feedback',
     payload,
+    { timeoutMs: 8000 },
   );
 }

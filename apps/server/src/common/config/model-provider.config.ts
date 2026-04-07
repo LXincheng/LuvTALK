@@ -16,7 +16,8 @@ export interface ThinkingTogglePayload {
 const QWEN_MODEL_PREFIX = /^(qwen|qwq)/i;
 const DEEPSEEK_MODEL_PREFIX = /^deepseek/i;
 
-const normalizeBaseUrl = (value?: string): string => value?.replace(/\/$/, "") ?? "";
+const normalizeBaseUrl = (value?: string): string =>
+  value?.replace(/\/$/, "") ?? "";
 
 export const isQwenModel = (model?: string): boolean =>
   Boolean(model?.trim() && QWEN_MODEL_PREFIX.test(model.trim()));
@@ -57,7 +58,9 @@ export const resolveChatCompletionEndpoint = (baseUrl?: string): string => {
   return `${normalized}/chat/completions`;
 };
 
-export const resolveDashscopeGenerationEndpoint = (baseUrl?: string): string => {
+export const resolveDashscopeGenerationEndpoint = (
+  baseUrl?: string,
+): string => {
   const normalized = normalizeBaseUrl(baseUrl);
   if (!normalized) {
     return "";

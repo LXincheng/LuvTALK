@@ -1,9 +1,12 @@
 import { NavLink } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { navItems } from '../../constants/navigation';
 import { useLocale } from '../../providers/LocaleContext';
 import { useTheme } from '../../providers/ThemeContext';
 import { useAuth } from '../../hooks/useAuth';
+import { fetchAchievementSummaryCached, type AchievementSummary } from '../../services/achievementService';
+import { getDisplayName, getInitials, getUserMetaLine } from '../../utils/userProfile';
 
 interface SidebarProps {
   onNavigate?: () => void;
@@ -13,13 +16,24 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
   const { t, locale, setLocale } = useLocale();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
-  const isGuest = user?.app_metadata?.provider === 'anonymous';
-  const displayName =
-    (user?.user_metadata?.full_name as string | undefined) ||
-    user?.email ||
-    user?.phone ||
-    (isGuest ? t('profileGuest') : t('profileLearner'));
-  const initials = displayName.slice(0, 2).toUpperCase();
+  const [summary, setSummary] = useState<AchievementSummary | null>(null);
+  const userKey = user?.id ?? 'guest';
+  const displayName = getDisplayName(user, t('profileGuest'), t('profileLearner'));
+  const initials = getInitials(displayName);
+  const metaLine = getUserMetaLine({
+    user,
+    summary,
+    locale,
+    guestLabel: t('profileGuestModeSimple'),
+  });
+
+  useEffect(() => {
+    const { cached, fresh } = fetchAchievementSummaryCached(userKey);
+    if (cached) {
+      setSummary(cached);
+    }
+    fresh.then(setSummary).catch(() => {});
+  }, [userKey]);
 
   return (
     <aside className="w-64 lg:w-72 h-full glass-sidebar border-r border-separator flex flex-col">
@@ -120,7 +134,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
           onClick={onNavigate}
           className="flex items-center gap-3 p-3 rounded-xl hover:bg-fill-secondary transition-colors"
         >
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-primary)] to-[#5856D6] flex items-center justify-center text-white font-semibold flex-shrink-0">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-primary)] to-[#5856D6] text-sm font-semibold text-white">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
@@ -128,7 +142,7 @@ export default function Sidebar({ onNavigate }: SidebarProps) {
               {displayName}
             </p>
             <p className="text-xs text-label-tertiary truncate">
-              {isGuest ? t('profileGuestMode') : t('profileLearningStatus')}
+              {metaLine}
             </p>
           </div>
         </NavLink>

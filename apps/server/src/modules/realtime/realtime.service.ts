@@ -1,6 +1,4 @@
-import {
-  Injectable,
-} from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { ConversationService } from "../conversation/conversation.service";
 import { SaveRealtimeTranscriptDto } from "./dto/save-realtime-transcript.dto";
 import { RealtimeMetricsService } from "./realtime-metrics.service";
