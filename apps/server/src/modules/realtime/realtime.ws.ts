@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { RawData } from "ws";
 import { envConfig } from "../../common/config/env.config";
 import { buildRealtimeSystemPrompt } from "../../common/config/prompt.config";
-import { resolvePreferredVoiceForLanguage } from "../../common/config/voice.config";
+import { resolvePreferredRealtimeVoiceForLanguage } from "../../common/config/voice.config";
 import { LanguageCode } from "../../common/enums/language-code.enum";
 import { AuthService, AuthUserProfile } from "../auth/auth.service";
 import { ConversationService } from "../conversation/conversation.service";
@@ -161,7 +161,7 @@ export class RealtimeWsProxy {
       let firstAiTranscriptAt: number | undefined;
       let firstAiAudioAt: number | undefined;
 
-      let currentVoice = resolvePreferredVoiceForLanguage(
+      let currentVoice = resolvePreferredRealtimeVoiceForLanguage(
         session.targetLanguage,
         requestedVoice,
         { allowCrossLanguage: true },
@@ -445,7 +445,7 @@ export class RealtimeWsProxy {
           return;
         }
         if (type === "session.update") {
-          currentVoice = resolvePreferredVoiceForLanguage(
+          currentVoice = resolvePreferredRealtimeVoiceForLanguage(
             session.targetLanguage,
             resolveVoice(payload.session) ?? currentVoice,
             { allowCrossLanguage: true },

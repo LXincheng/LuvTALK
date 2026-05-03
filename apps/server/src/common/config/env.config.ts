@@ -37,7 +37,6 @@ export const envConfig = {
       process.env.SECONDARY_MODEL,
     ),
     realtimeModel: readTrimmed(process.env.REALTIME_MODEL),
-    realtimeTranscribeModel: readTrimmed(process.env.REALTIME_TRANSCRIBE_MODEL),
     sttModel: readTrimmed(process.env.STT_MODEL),
     ttsModel: readTrimmed(process.env.TTS_MODEL),
     translationModel: readTrimmed(process.env.TRANSLATION_MODEL),

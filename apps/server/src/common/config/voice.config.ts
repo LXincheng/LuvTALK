@@ -42,6 +42,36 @@ export const OFFICIAL_TTS_VOICES = new Set(
   Object.values(OFFICIAL_TTS_VOICE_CATALOG).flatMap((item) => item.options),
 );
 
+export const OFFICIAL_REALTIME_VOICE_CATALOG: Record<
+  LanguageCode,
+  VoiceCatalogItem
+> = {
+  [LanguageCode.Mandarin]: {
+    languageCode: "zh",
+    ttsLanguageType: "Chinese",
+    defaultVoice: "Serena",
+    options: ["Serena", "Ethan"],
+  },
+  [LanguageCode.Cantonese]: {
+    languageCode: "yue",
+    ttsLanguageType: "Chinese",
+    defaultVoice: "Rocky",
+    options: ["Rocky", "Wil"],
+  },
+  [LanguageCode.English]: {
+    languageCode: "en",
+    ttsLanguageType: "English",
+    defaultVoice: "Aiden",
+    options: ["Aiden", "Jennifer"],
+  },
+};
+
+export const OFFICIAL_REALTIME_VOICES = new Set(
+  Object.values(OFFICIAL_REALTIME_VOICE_CATALOG).flatMap(
+    (item) => item.options,
+  ),
+);
+
 export const resolveLanguageVoiceSettings = (
   language: LanguageCode | string | undefined,
 ): VoiceCatalogItem => {
@@ -67,6 +97,37 @@ export const resolvePreferredVoiceForLanguage = (
     normalized &&
     (settings.options.includes(normalized) ||
       (options?.allowCrossLanguage && OFFICIAL_TTS_VOICES.has(normalized)))
+  ) {
+    return normalized;
+  }
+  return settings.defaultVoice;
+};
+
+export const resolveRealtimeVoiceSettings = (
+  language: LanguageCode | string | undefined,
+): VoiceCatalogItem => {
+  if (language === LanguageCode.Cantonese) {
+    return OFFICIAL_REALTIME_VOICE_CATALOG[LanguageCode.Cantonese];
+  }
+  if (language === LanguageCode.Mandarin) {
+    return OFFICIAL_REALTIME_VOICE_CATALOG[LanguageCode.Mandarin];
+  }
+  return OFFICIAL_REALTIME_VOICE_CATALOG[LanguageCode.English];
+};
+
+export const resolvePreferredRealtimeVoiceForLanguage = (
+  language: LanguageCode | string | undefined,
+  requestedVoice?: string,
+  options?: {
+    allowCrossLanguage?: boolean;
+  },
+): string => {
+  const settings = resolveRealtimeVoiceSettings(language);
+  const normalized = requestedVoice?.trim();
+  if (
+    normalized &&
+    (settings.options.includes(normalized) ||
+      (options?.allowCrossLanguage && OFFICIAL_REALTIME_VOICES.has(normalized)))
   ) {
     return normalized;
   }

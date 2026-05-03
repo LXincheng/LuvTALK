@@ -168,7 +168,8 @@ curl https://your-app.up.railway.app/api/health/db
 | 前端请求 404 / 跨域     | `vercel.json` 中 API 代理地址是否正确                        |
 
 > 音色目录已经固定在服务端官方映射里，部署时不再配置 `TTS_VOICE_*` 或 `VITE_TTS_VOICE_*`。
-> 当前推荐音色为：普通话 `Serena`，粤语 `Kiki / Rocky`，英语 `Ethan`。
+> 普通 TTS 推荐音色：普通话 `Serena / Ethan`，粤语 `Kiki / Rocky`，英语 `Aiden / Jennifer`。
+> Immersive Realtime 使用独立音色目录：普通话 `Serena / Ethan`，粤语 `Rocky / Wil`，英语 `Aiden / Jennifer`。
 
 ---
 

@@ -4,12 +4,12 @@ import {
   REALTIME_AI_SPEAKING_TIMEOUT_MS,
   REALTIME_AUDIO_BUFFER_SIZE,
   REALTIME_AUDIO_PLAYBACK_SUPPRESSION_MS,
-  REALTIME_AUDIO_SAMPLE_RATE,
   REALTIME_ASSISTANT_INTERRUPT_MIN_CHARS,
   REALTIME_CONNECT_TIMEOUT_MS,
-  REALTIME_INPUT_NOISE_GATE_RMS,
+  REALTIME_INPUT_AUDIO_SAMPLE_RATE,
   REALTIME_LOCK_PREFIX,
   REALTIME_MEDIA_CONSTRAINTS,
+  REALTIME_OUTPUT_AUDIO_SAMPLE_RATE,
   REALTIME_RECONNECT_DELAY_MS,
   REALTIME_RECONNECT_MAX_ATTEMPTS,
   REALTIME_TRANSCRIPT_THROTTLE_MS,
@@ -676,9 +676,7 @@ export function useRealtimeSession({
     async (socket: WebSocket) => {
       const stream = await navigator.mediaDevices.getUserMedia(REALTIME_MEDIA_CONSTRAINTS);
       streamRef.current = stream;
-      const audioContext = new AudioContext({
-        sampleRate: REALTIME_AUDIO_SAMPLE_RATE,
-      });
+      const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
       await audioContext.resume();
 
@@ -700,7 +698,8 @@ export function useRealtimeSession({
       lifecycleRef.current.audioCaptureReadyAt = Date.now();
       settleConnectedState();
 
-      // With server_vad, stream audio continuously.
+      // With upstream VAD, stream audio continuously so the provider also
+      // receives trailing silence and can reliably close the user's turn.
       // Suppress sending while AI audio is still playing through speakers
       // to prevent echo feedback. Uses actual playback schedule, not state.
       processor.onaudioprocess = (event) => {
@@ -719,14 +718,10 @@ export function useRealtimeSession({
         const input = event.inputBuffer.getChannelData(0);
         const rms = calculateRms(input);
         setAudioLevel(Math.min(1, Math.max(0, rms * 3.2)));
-        if (rms < REALTIME_INPUT_NOISE_GATE_RMS) {
-          return;
-        }
-
         const resampled = resampleAudio(
           input,
           audioContext.sampleRate,
-          REALTIME_AUDIO_SAMPLE_RATE,
+          REALTIME_INPUT_AUDIO_SAMPLE_RATE,
         );
         const pcm16 = floatToPcm16(resampled);
         const base64 = encodeToBase64(pcm16);
@@ -1351,14 +1346,14 @@ const playOutputAudio = (
   }
   if (!contextRef.current) {
     contextRef.current = new AudioContext({
-      sampleRate: REALTIME_AUDIO_SAMPLE_RATE,
+      sampleRate: REALTIME_OUTPUT_AUDIO_SAMPLE_RATE,
     });
   }
   const context = contextRef.current;
   if (context.state === 'suspended') {
     void context.resume();
   }
-  const buffer = context.createBuffer(1, float32.length, REALTIME_AUDIO_SAMPLE_RATE);
+  const buffer = context.createBuffer(1, float32.length, REALTIME_OUTPUT_AUDIO_SAMPLE_RATE);
   buffer.copyToChannel(float32, 0);
   const source = context.createBufferSource();
   source.buffer = buffer;

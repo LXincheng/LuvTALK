@@ -5,9 +5,12 @@ export const REALTIME_SESSION_LIMITS = {
 
 export const REALTIME_DEFAULT_TURN_DETECTION = {
   type: "server_vad",
-  threshold: 0.47,
-  prefix_padding_ms: 280,
-  silence_duration_ms: 650,
+  threshold: 0.5,
+  silence_duration_ms: 900,
+} as const;
+
+export const REALTIME_INPUT_AUDIO_TRANSCRIPTION = {
+  model: "qwen3-asr-flash-realtime",
 } as const;
 
 export const REALTIME_OFFER_COOLDOWN_MS = 1500;

@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
 import type { RealtimeTranscriptEntry } from '../../types/realtime';
+import { useLocale } from '../../providers/LocaleContext';
 
 interface TranscriptSubtitlesProps {
   entries: RealtimeTranscriptEntry[];
@@ -14,6 +15,7 @@ export default function TranscriptSubtitles({
   activeAiText,
   maxItems = 4,
 }: TranscriptSubtitlesProps) {
+  const { t } = useLocale();
   const normalized = entries.slice(-maxItems);
   const draftEntries: Array<RealtimeTranscriptEntry & { draft?: boolean }> = [
     ...normalized.map((entry) => ({ ...entry, draft: false })),
@@ -78,7 +80,7 @@ export default function TranscriptSubtitles({
                         : 'text-sky-100/72'
                     }`}
                   >
-                    {isUser ? 'You' : 'Tutor'}
+                    {isUser ? t('immersiveCaptionYou') : t('immersiveCaptionTutor')}
                   </span>
                 </div>
                 <p className="relative break-words text-[14px] leading-[1.68] text-balance">

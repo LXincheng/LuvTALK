@@ -1,7 +1,7 @@
 # LuvTALK Immersive Mode
 
-> 更新时间：2026-04-05
-> 当前状态：immersive 继续使用单一 `qwen3-omni-flash-realtime` 主链路，但语言切换 UI 已下线，回复语言与音色跟随实时语音链路自适应。
+> 更新时间：2026-05-03
+> 当前状态：immersive 使用单一 `qwen3.5-omni-plus-realtime` 主链路，回复语言跟随实时语音链路自适应，并提供当前学习语言下的官方自然音色选择。
 
 ## 1. 模式定位
 
@@ -17,9 +17,9 @@
 
 ### 2.1 主模型
 
-- 主模型：`qwen3-omni-flash-realtime`
+- 主模型：`qwen3.5-omni-plus-realtime`
 - turn detection：使用上游 `server_vad`
-- session 中保持 `create_response: true`，避免前端手动 `commit + response.create` 再造一层控制面
+- session 中不再发送前端手动 `commit + response.create`，避免再造一层控制面
 
 ### 2.2 字幕来源
 
@@ -28,7 +28,7 @@
 - 用户字幕：`conversation.item.input_audio_transcription.*`
 - AI 字幕：`response.audio_transcript.*` / `response.output_audio_transcript.*`
 
-这代表当前实现遵循“一个会话完成识别、理解、回复”的主线，不再默认挂载独立 ASR 通道。
+这代表当前实现遵循“一个会话完成识别、理解、回复”的主线，不再默认挂载独立 ASR WebSocket。用户字幕通过 session 内 `input_audio_transcription.model = qwen3-asr-flash-realtime` 开启。
 
 ## 3. 当前实现结论
 
@@ -39,10 +39,11 @@
 | 音频切片 | 前端采集 buffer 保持 `1024`，兼顾实时感与稳定性 |
 | 字幕刷新 | 节流保持 `80ms`，优先保证实时感 |
 | 采集约束 | 浏览器启用 `echoCancellation / noiseSuppression / autoGainControl / channelCount: 1` |
-| 系统限制 | 不额外挂独立 ASR，不再加本地 VAD 状态机，尽量减少系统层干预 |
-| turn detection | 继续按官方 `server_vad` 主路径工作，参数回收到更接近官方示例的 `threshold=0.5 / prefix_padding_ms=300 / silence_duration_ms=800`，减少过度保守带来的首响等待 |
-| 防打断 | 仅保留必要的播放抑制与 noise gate；前端不再在 `speech_started` 就立刻硬打断导师，只有收到足够长度的真实转写后才取消当前回复 |
-| 音色策略 | immersive 不再暴露语言切换和音色切换 UI；会话以当前学习语言默认音色起步，收到明确实时转写后再做最小必要的官方音色自适应 |
+| 系统限制 | 不额外挂独立 ASR WebSocket，不再加本地 VAD 状态机，尽量减少系统层干预 |
+| turn detection | 使用官方 `server_vad`，参数为 `threshold=0.5 / silence_duration_ms=900`，在不抢话和句尾响应之间取平衡 |
+| 防打断 | 仅保留必要的播放抑制与真实转写长度阈值；前端不再在 `speech_started` 就立刻硬打断导师，只有收到足够长度的真实转写后才取消当前回复 |
+| 音频上行 | Qwen3.5 Omni Realtime 输入按官方 16kHz / 16-bit / mono PCM 上行；前端不再用本地 noise gate 截断低音量/句尾静音帧 |
+| 音色策略 | immersive 使用独立 Realtime 音色目录；普通话 `Serena/Ethan`、粤语 `Rocky/Wil`、英语 `Aiden/Jennifer`，不复用普通 TTS 的 `Kiki` |
 
 ### 3.2 UI / UX
 
@@ -50,7 +51,7 @@
 
 - 中央保留单核流体 orb，增加更轻的呼吸与流动层，但去掉脏阴影和厚重描边。
 - 字幕区做轻量 live transcript，不做聊天气泡堆叠，也不再叠加解释性提示小字。
-- 控制区只保留麦克风、字幕、结束等核心操作，不再提供语言切换按钮。
+- 控制区保留麦克风、字幕、官方音色、结束等核心操作，不再提供额外语言切换按钮。
 - 文案尽量短，不在主界面堆教学解释。
 
 > 当前实现判断：omni realtime 仍然需要音频输出音色参数，因此没有完全删除 `voice`；但 immersive 已收敛为系统自动管理，不再给用户一个会打乱体验的手动入口。
@@ -62,7 +63,7 @@
 | 字幕准确率 | 跟随 omni 主链路 | 足够简单直接，但最终上限仍受 realtime 返回质量影响 |
 | 首句响应 | 通过更小 buffer 和更少前端控制改善 | 体感已更灵敏，但仍依赖上游事件节奏 |
 | 重连稳定性 | 去掉额外字幕模型后更简单 | 能明显减少反复重连和双链路竞争 |
-| 极端噪音 | 主要靠浏览器采集约束和轻量 noise gate | 可减轻干扰，但不是强噪音专用 ASR 产品 |
+| 极端噪音 | 主要靠浏览器采集约束与上游 `server_vad` | 可减轻干扰，但不是强噪音专用 ASR 产品 |
 
 ## 5. 生命周期埋点
 
@@ -134,9 +135,10 @@
 
 ### 5.2 本轮针对性优化
 
-- `server_vad` 参数从上一版偏保守的 `0.5 / 300 / 800` 继续收紧到 `threshold=0.47 / prefix_padding_ms=280 / silence_duration_ms=650`，优先缩短句尾等待。
-- 自适应音色切换不再等 `input_audio_transcription.text/completed` 才触发，而是前移到 `input_audio_transcription.delta`，让英语切粤语、普通话切粤语这类场景尽量在本轮回复前完成音色更新。
-- 英语默认音色从 `Jennifer` 切到更克制、官方目录内也更中性的 `Aiden`，减少当前英文导师听感过于 aggressive 的问题。
+- Realtime 主模型切到 `qwen3.5-omni-plus-realtime`，turn detection 使用官方 `server_vad`。
+- 字幕在同一条 session 内启用 `qwen3-asr-flash-realtime`，不再维护额外 `REALTIME_TRANSCRIBE_MODEL`。
+- 前端输入音频按官方要求重采样到 16kHz，输出播放保持 24kHz；同时不再用本地 noise gate 截断句尾静音帧。
+- 粤语 immersive 音色从普通 TTS 的 `Kiki` 切到 Realtime 已验证可用的 `Rocky/Wil`，避免上游生成阶段 400 后循环重连。
 - 前端 connected 状态继续保持“`audio capture ready + session ready` 双条件”才能亮起，避免把还在等待 VAD / 转写的阶段误呈现为已经随时可响应。
 
 ### 5.3 当前局限性
@@ -156,9 +158,10 @@
 ## 7. 本轮收口
 
 - 聊天主模型切到 `qwen3.6-plus`，与最新官方模型表保持一致。
-- immersive 删除语言切换按钮，改为按实时语音内容自适应回复语言与音色。
-- `server_vad` 进一步收紧到 `0.47 / 280 / 650`，优先优化句尾等待和首响速度。
-- 前端只在真实转写达到最小长度后才中断导师回复，避免噪音或吸气触发抢答。
+- immersive 删除语言切换按钮，改为按实时语音内容自适应回复语言，并允许用户选择当前语言的官方音色。
+- realtime 主模型切到 `qwen3.5-omni-plus-realtime`，turn detection 使用官方 `server_vad`。
+- 前端持续发送句尾静音帧给上游，避免本地 noise gate 让模型误以为用户还没完成一轮输入。
+- 前端只在真实转写达到最小长度后才中断导师回复，避免噪音或吸气触发误打断。
 - 前端只有在 `audio capture ready + session ready` 同时满足后才显示真正可说话状态，不再过早显示 connected。
 - 音色自适应前移到转写增量阶段，减少英语切粤语时还沿用旧音色的窗口。
 - 英语默认 immersive 音色切换到 `Aiden`，优先走更克制自然的官方英语音色。

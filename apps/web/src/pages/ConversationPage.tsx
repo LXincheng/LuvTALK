@@ -42,6 +42,7 @@ import {
   getDefaultTtsVoice,
   getDefaultImmersiveVoice,
   getTtsVoiceOptions,
+  isRealtimeVoiceSupported,
   isTtsVoiceSupported,
   setVoiceCatalog,
 } from '../config/voice';
@@ -818,7 +819,7 @@ export default function ConversationPage() {
 
   useEffect(() => {
     setRealtimeVoice((currentVoice) =>
-      isTtsVoiceSupported(targetLanguage, currentVoice)
+      isRealtimeVoiceSupported(targetLanguage, currentVoice)
         ? currentVoice
         : getDefaultImmersiveVoice(targetLanguage),
     );
@@ -1884,6 +1885,7 @@ export default function ConversationPage() {
           conversationId={session.id}
           targetLanguage={targetLanguage}
           voice={realtimeVoice}
+          onVoiceChange={setRealtimeVoice}
           onExit={() => {
             // Skip existing messages but allow new incoming AI messages after exit.
             ttsBaselineRef.current = session.messages.length;

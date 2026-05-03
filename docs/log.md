@@ -5,6 +5,36 @@
 > 目标：该文档用于日常回溯与最终项目报告输入。
 > 原则：保留关键事实、关键决策、关键价值；删除重复描述与低价值过程噪音。
 
+## 2026-05：Realtime 官方链路升级
+
+### 2026-05-03（Qwen3.5 Omni Plus Realtime + 字幕/音色/UI 收口）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 当前 `.env` 实际指向旧 GPT Realtime / Yunwu 线路，与 Qwen Realtime 事件处理不匹配；前端本地 noise gate 会截断句尾静音帧，容易造成“用户说完但上游 VAD 不触发回复”。 |
+| 官方对齐 | realtime 主模型切到 `qwen3.5-omni-plus-realtime`；字幕走同一 session 内 `input_audio_transcription.model = qwen3-asr-flash-realtime`。 |
+| 音频链路 | 前端不再因低 RMS 直接停止上行音频，只在静音或 AI 播放期抑制上行，确保上游能收到句尾静音并完成 turn handoff。 |
+| 音色/UI | immersive 新增当前学习语言下的官方音色选择；普通话 `Serena/Ethan`、粤语 `Kiki/Rocky`、英语 `Aiden/Jennifer`；字幕角色进入 i18n，界面继续往极简 live room 收口。 |
+| Env 收口 | `.env` / `.env.example` 改为百炼官方 `PRIMARY_REALTIME_API_URL=https://dashscope.aliyuncs.com/api-ws/v1/realtime` 与 `REALTIME_MODEL=qwen3.5-omni-plus-realtime`，删除旧 `REALTIME_TRANSCRIBE_MODEL` 配置。 |
+
+### 2026-05-03（Realtime 无响应根因修复）
+
+| 维度 | 记录 |
+| --- | --- |
+| 现象 | 日志显示 `session.created/session.updated` 和 `clientAudio` 正常，但没有 `speech_started / userTranscript / aiAudio`，说明上游没有识别到有效语音 turn。 |
+| 根因 | Qwen3.5 Omni Realtime 输入音频应为 16kHz / 16-bit / mono PCM；前端此前按 24kHz 上行，且 `semantic_vad` 不是当前官方 Realtime turn detection 类型。 |
+| 修复 | 前端拆分输入/输出采样率：输入重采样到 `16000`，输出播放保持 `24000`；服务端 session 改回官方 `server_vad`，参数为 `threshold=0.5 / silence_duration_ms=900`。 |
+| 验证 | 使用本地 TTS 生成英文语音并转为 16k PCM，直连百炼 `qwen3.5-omni-plus-realtime` 烟测通过，收到 `speech_started`、用户转写、AI 字幕与 `response.audio.delta`。 |
+
+### 2026-05-03（粤语 Realtime 音色重连修复）
+
+| 维度 | 记录 |
+| --- | --- |
+| 现象 | 粤语 immersive 能识别到 `speech_started/speech_stopped`，但生成阶段上游返回 `<400> Voice 'Kiki' is not supported`，随后 WS 以 `1007` 关闭并触发前端重连。 |
+| 根因 | `Kiki/Rocky` 原本来自普通 TTS / 旧 Omni Flash 音色目录；切到 `qwen3.5-omni-plus-realtime` 后，`Kiki` 在 session 阶段可能被接受，但实际音频生成不支持。 |
+| 修复 | 拆分普通 TTS 音色目录与 immersive Realtime 音色目录；粤语 immersive 默认改为 `Rocky`，备选 `Wil`；服务端对旧的 `Kiki` 请求强制兜底为 `Rocky`。 |
+| 验证 | 直连百炼带音频输出烟测确认：`Kiki` 失败，`Rocky/Wil/Tina/Cindy/Serena/Ethan/Aiden/Jennifer/Raymond` 可生成 `response.audio.delta`；新增单测防止 Kiki 再进入 realtime。 |
+
 ## 2025-11：语音能力从 0 到 1
 
 ### 2025-11-16（SSE 与基础交互稳定）

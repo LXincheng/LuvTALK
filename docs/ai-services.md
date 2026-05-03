@@ -1,6 +1,6 @@
 # LuvTALK 模型服务方案
 
-> 更新时间：2026-04-05
+> 更新时间：2026-05-03
 
 ## 1. 结论
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | 是否可直接只用一个 `qwen3.5-omni` 覆盖全系统 | **不可以** |
 | 主要原因 | `realtime` 与非实时 Omni 是不同模型；普通 Omni 要求 `stream=true`；`Qwen3.5-Omni` 官方标注**不支持深度思考** |
-| 当前建议 | 保持 **Qwen 分模块接入**：文本、翻译、STT、TTS 分开，`realtime` 暂不改 |
+| 当前建议 | 保持 **Qwen 分模块接入**：文本、翻译、STT、TTS 分开；`realtime` 单独升级到 `qwen3.5-omni-plus-realtime` |
 | 最后一级兜底 | 保留 `deepseek-chat` |
 
 ## 1.1 当前配置原则
@@ -28,7 +28,7 @@
 | 需求 | 官方能力情况 | 结论 |
 | --- | --- | --- |
 | 普通文本/图像/音频/视频理解 | `qwen3.5-omni-plus` 支持 | 可覆盖 |
-| 实时音视频对话 | 使用 `qwen3.5-omni-plus-realtime` | **不是同一个模型 ID** |
+| 实时音视频对话 | 使用 `qwen3.5-omni-plus-realtime` | 已作为 immersive 主链路 |
 | 深度思考 | `Qwen3.5-Omni` 官方表中为“不支持” | **不能满足当前深度思考按钮需求** |
 | 非流式 JSON 接口 | `Qwen3.5-Omni` 官方要求 `stream` 必须为 `true` | **与当前大量非流式接口不兼容** |
 | 独立 STT/TTS 服务 | Omni 家族偏“多模态对话一体化”；当前系统是独立 STT、TTS、Report、Culture 服务 | 需要协议级重构 |
@@ -57,7 +57,7 @@
 | STT | `qwen3-asr-flash` | 已接入、已实测 | 混合语言语音默认不再强绑单一语言，避免英文/普通话/粤语夹杂时误识别 |
 | TTS | `qwen3-tts-instruct-flash`，`Jennifer / Aiden / Kiki / Rocky` 自动走 `qwen3-tts-flash` | 已接入、已实测 | 英文/普通话/粤语均已跑通；音色由服务端 `voice-config` 单点下发 |
 | Chat 图像理解 | `qwen3.6-plus`（主） → `qwen3.5-flash`（补位） | 已接入、已实测 | 支持图片上传、预览、识别与语言教学解释 |
-| Realtime | 现有方案保留 | **本轮不改** | 不迁到 Omni Realtime |
+| Realtime | `qwen3.5-omni-plus-realtime` | 已接入、已完成上游音频烟测 | 使用官方 WS 协议、`server_vad` 与 session 内字幕转写 |
 
 ## 3.3 Scenario 当前规则
 
@@ -79,7 +79,10 @@
 | `THIRD_MODEL` | `deepseek-chat` | 最后一级兜底 |
 | `STT_MODEL` | `qwen3-asr-flash` | 语音识别 |
 | `TTS_MODEL` | `qwen3-tts-instruct-flash` | 语音合成 |
+| `REALTIME_MODEL` | `qwen3.5-omni-plus-realtime` | 沉浸模式实时语音对话 |
 | `TRANSLATION_MODEL` | `qwen-mt-flash` | 翻译 |
+
+> Realtime 字幕不再通过额外 `REALTIME_TRANSCRIBE_MODEL` 配置；当前在同一条 session 内启用官方 `input_audio_transcription.model = qwen3-asr-flash-realtime`，避免双链路 ASR 带来的重连、卡顿和状态竞争。
 
 ## 3.2 官方音色映射
 
@@ -90,6 +93,16 @@
 | 英语 | `Jennifer` | `Jennifer, Aiden` |
 
 > 现在以服务端固定映射为唯一音色事实源。英语已移除用户反馈不自然的 `Cherry`；聊天页只展示当前学习语言下的两种自然音色，并用简短特征词按钮展示；场景页不再提供音色切换。
+
+## 3.2.1 Realtime 专用音色映射
+
+| 语言 | 默认音色 | 推荐候选 |
+| --- | --- | --- |
+| 普通话 | `Serena` | `Serena, Ethan` |
+| 粤语 | `Rocky` | `Rocky, Wil` |
+| 英语 | `Aiden` | `Aiden, Jennifer` |
+
+> `Kiki` 可继续作为普通 TTS 粤语音色，但在 `qwen3.5-omni-plus-realtime` 生成阶段会返回 `Voice 'Kiki' is not supported`，所以 immersive 不再展示或透传该音色。
 
 ## 4. 运行结论
 
@@ -126,7 +139,7 @@
 | --- | --- |
 | 是否现在切单一 Omni | **不建议** |
 | 是否可以后续做成“单一 Omni 家族” | **可以评估**，但至少仍要区分 `qwen3.5-omni-plus` 与 `qwen3.5-omni-plus-realtime` |
-| 当前最稳方案 | 继续使用已验证的 Qwen 分模块方案 |
+| 当前最稳方案 | 非实时能力继续分模块；immersive 单独使用 `qwen3.5-omni-plus-realtime` |
 | 下一步 | 若未来要上 Omni，单独做流式协议重构，不要在现有非流式接口上硬替换 |
 
 ## 7. 官方参考

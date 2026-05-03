@@ -1,4 +1,7 @@
-import { REALTIME_DEFAULT_TURN_DETECTION } from "./realtime.constants";
+import {
+  REALTIME_DEFAULT_TURN_DETECTION,
+  REALTIME_INPUT_AUDIO_TRANSCRIPTION,
+} from "./realtime.constants";
 import {
   REALTIME_SERVER_ERROR_CODES,
   RealtimeServerErrorCode,
@@ -16,12 +19,10 @@ export const buildSessionUpdate = (params: {
       voice: params.voice,
       turn_detection: {
         ...params.turnDetection,
-        create_response: true,
-        interrupt_response: true,
       },
       input_audio_format: "pcm",
       output_audio_format: "pcm",
-      smooth_output: true,
+      input_audio_transcription: REALTIME_INPUT_AUDIO_TRANSCRIPTION,
       modalities: ["audio", "text"],
     },
   };

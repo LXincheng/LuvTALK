@@ -29,6 +29,21 @@ const DEFAULT_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> = {
   },
 };
 
+const DEFAULT_REALTIME_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> = {
+  mandarin: {
+    defaultVoice: 'Serena',
+    options: ['Serena', 'Ethan'],
+  },
+  cantonese: {
+    defaultVoice: 'Rocky',
+    options: ['Rocky', 'Wil'],
+  },
+  english: {
+    defaultVoice: 'Aiden',
+    options: ['Aiden', 'Jennifer'],
+  },
+};
+
 const VOICE_LABELS: Record<string, { labelKey: LocaleKey; descriptionKey: LocaleKey }> = {
   Aiden: { labelKey: 'voiceAidenLabel', descriptionKey: 'voiceAidenDescription' },
   Ethan: { labelKey: 'voiceEthanLabel', descriptionKey: 'voiceEthanDescription' },
@@ -36,6 +51,7 @@ const VOICE_LABELS: Record<string, { labelKey: LocaleKey; descriptionKey: Locale
   Kiki: { labelKey: 'voiceKikiLabel', descriptionKey: 'voiceKikiDescription' },
   Rocky: { labelKey: 'voiceRockyLabel', descriptionKey: 'voiceRockyDescription' },
   Serena: { labelKey: 'voiceSerenaLabel', descriptionKey: 'voiceSerenaDescription' },
+  Wil: { labelKey: 'voiceWilLabel', descriptionKey: 'voiceWilDescription' },
 };
 
 let activeVoiceCatalog: Record<LanguageCode, VoiceCatalogItem> = {
@@ -96,11 +112,23 @@ export const getTtsVoiceOptions = (
     : { label: voiceId }),
 }));
 
+export const getRealtimeVoiceOptions = (
+  language: LanguageCode,
+): VoiceOption[] => DEFAULT_REALTIME_VOICE_CATALOG[language].options.map((voiceId) => ({
+  id: voiceId,
+  ...(VOICE_LABELS[voiceId]
+    ? {
+        labelKey: VOICE_LABELS[voiceId].labelKey,
+        descriptionKey: VOICE_LABELS[voiceId].descriptionKey,
+      }
+    : { label: voiceId }),
+}));
+
 export const getDefaultTtsVoice = (language: LanguageCode): string =>
   activeVoiceCatalog[language].defaultVoice;
 
 export const getDefaultImmersiveVoice = (language: LanguageCode): string =>
-  activeVoiceCatalog[language].defaultVoice;
+  DEFAULT_REALTIME_VOICE_CATALOG[language].defaultVoice;
 
 export const isTtsVoiceSupported = (
   language: LanguageCode,
@@ -108,6 +136,13 @@ export const isTtsVoiceSupported = (
 ): voice is string =>
   typeof voice === 'string' &&
   activeVoiceCatalog[language].options.includes(voice.trim());
+
+export const isRealtimeVoiceSupported = (
+  language: LanguageCode,
+  voice: string | null | undefined,
+): voice is string =>
+  typeof voice === 'string' &&
+  DEFAULT_REALTIME_VOICE_CATALOG[language].options.includes(voice.trim());
 
 export const resolveAdaptiveImmersiveVoice = (input?: {
   preferredLanguage?: LanguageCode;

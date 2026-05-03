@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageSquareText, X } from 'lucide-react';
+import { MessageSquareText, Volume2, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useLocale } from '../../providers/LocaleContext';
 import type { LocaleKey } from '../../providers/LocaleContext';
@@ -10,6 +10,7 @@ import TranscriptSubtitles from './TranscriptSubtitles';
 import ImmersiveControls from './ImmersiveControls';
 import ImmersiveConnectionStatus from './ImmersiveConnectionStatus';
 import { REALTIME_SUBTITLE_LIMIT } from '../../constants/realtime';
+import { getDefaultImmersiveVoice, getRealtimeVoiceOptions } from '../../config/voice';
 import type { LanguageCode } from '../../types/api';
 import type { RealtimeErrorCode } from '../../types/realtime';
 
@@ -19,6 +20,7 @@ interface ImmersiveModeProps {
   voice: string;
   onExit: () => void;
   onFallbackToText?: () => void;
+  onVoiceChange?: (voice: string) => void;
 }
 
 const resolveErrorMessage = (
@@ -48,8 +50,10 @@ export default function ImmersiveMode({
   voice,
   onExit,
   onFallbackToText,
+  onVoiceChange,
 }: ImmersiveModeProps) {
   const { t } = useLocale();
+  const [selectedVoice, setSelectedVoice] = useState(voice);
   const {
     status,
     isMuted,
@@ -65,9 +69,13 @@ export default function ImmersiveMode({
     connect,
     disconnect,
     toggleMute,
-  } = useRealtimeSession({ conversationId, targetLanguage, voice });
+  } = useRealtimeSession({ conversationId, targetLanguage, voice: selectedVoice });
 
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
+  const voiceOptions = useMemo(
+    () => getRealtimeVoiceOptions(targetLanguage),
+    [targetLanguage],
+  );
 
   const connectRef = useRef(connect);
   const disconnectRef = useRef(disconnect);
@@ -75,6 +83,22 @@ export default function ImmersiveMode({
     connectRef.current = connect;
     disconnectRef.current = disconnect;
   }, [connect, disconnect]);
+
+  useEffect(() => {
+    setSelectedVoice(voice);
+  }, [voice]);
+
+  const handleVoiceChange = useCallback((nextVoice: string) => {
+    setSelectedVoice(nextVoice);
+    onVoiceChange?.(nextVoice);
+  }, [onVoiceChange]);
+
+  useEffect(() => {
+    if (voiceOptions.some((option) => option.id === selectedVoice)) {
+      return;
+    }
+    handleVoiceChange(getDefaultImmersiveVoice(targetLanguage));
+  }, [handleVoiceChange, selectedVoice, targetLanguage, voiceOptions]);
 
   const handleExit = useCallback(() => {
     disconnectRef.current('ended');
@@ -128,7 +152,7 @@ export default function ImmersiveMode({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35 }}
-      className="fixed inset-0 z-50 flex select-none flex-col overflow-hidden bg-[radial-gradient(740px_320px_at_50%_18%,rgba(149,224,255,0.16),transparent_42%),radial-gradient(860px_420px_at_50%_100%,rgba(12,124,255,0.10),transparent_50%),linear-gradient(180deg,#02050b_0%,#030812_48%,#040b17_100%)] text-white"
+      className="fixed inset-0 z-50 flex select-none flex-col overflow-hidden bg-[radial-gradient(760px_360px_at_50%_12%,rgba(125,211,252,0.14),transparent_44%),radial-gradient(860px_420px_at_50%_106%,rgba(10,132,255,0.12),transparent_54%),linear-gradient(180deg,#010409_0%,#030711_50%,#030914_100%)] text-white"
     >
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.018),transparent_58%)]" />
@@ -218,7 +242,7 @@ export default function ImmersiveMode({
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
-              className="rounded-[30px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.025))] px-4 py-4 backdrop-blur-2xl"
+              className="rounded-[26px] border border-white/[0.055] bg-white/[0.035] px-3 py-3 backdrop-blur-2xl"
             >
               <div className="mb-3 flex items-center justify-between">
                 <div className="inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-white/40">
@@ -235,6 +259,32 @@ export default function ImmersiveMode({
             </motion.div>
           ) : null}
         </AnimatePresence>
+
+        <div
+          className="mx-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-full border border-white/[0.06] bg-white/[0.04] px-2 py-2 backdrop-blur-2xl scrollbar-none"
+          aria-label={t('immersiveVoice')}
+        >
+          <Volume2 className="ml-1 h-4 w-4 shrink-0 text-white/48" />
+          {voiceOptions.map((option) => {
+            const active = option.id === selectedVoice;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => handleVoiceChange(option.id)}
+                disabled={controlsDisabled}
+                title={option.descriptionKey ? t(option.descriptionKey) : option.description}
+                className={`h-8 shrink-0 rounded-full px-3 text-[12px] font-medium transition-colors ${
+                  active
+                    ? 'bg-white text-slate-950'
+                    : 'bg-white/[0.04] text-white/66 hover:bg-white/[0.08] hover:text-white'
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                {option.labelKey ? t(option.labelKey) : (option.label ?? option.id)}
+              </button>
+            );
+          })}
+        </div>
 
         <ImmersiveControls
           isMuted={isMuted}
