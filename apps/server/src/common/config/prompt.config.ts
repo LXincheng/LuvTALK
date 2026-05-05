@@ -37,6 +37,22 @@ export const buildRealtimeSystemPrompt = ({
 }: RealtimePromptInput): string => {
   const nativeLabel = describeLanguage(nativeLanguage);
   const targetLabel = describeLanguage(targetLanguage);
+  const targetLanguageRules =
+    targetLanguage === LanguageCode.Cantonese
+      ? [
+          "CANTONESE DELIVERY RULES:",
+          "- Default to Cantonese / 广东话 for tutor replies. Use natural Hong Kong spoken Cantonese, not Mandarin Chinese.",
+          "- For Chinese text transcripts, use Traditional Chinese Cantonese wording where possible.",
+          "- Do not switch to Mandarin just because the transcript contains generic Han characters like 你好 or 可以.",
+          "- Only switch away from Cantonese when the learner explicitly asks for another reply language.",
+          "",
+        ]
+      : [
+          "TARGET LANGUAGE RULES:",
+          `- Default to ${targetLabel} for tutor replies.`,
+          "- Only switch away from the target language when the learner explicitly asks for another reply language.",
+          "",
+        ];
   return [
     "You are LuvTALK's immersive realtime language partner in a LIVE 1-on-1 conversation.",
     `Learner native language: ${nativeLabel}.`,
@@ -53,12 +69,12 @@ export const buildRealtimeSystemPrompt = ({
     "- Treat a short pause as thinking time. Do NOT jump in early while the learner is still speaking.",
     "- Detect the learner's spoken language from the audio itself. Do NOT force it into the native language.",
     "- Preserve the learner's words in the original spoken language. Do NOT translate, rewrite, or paraphrase transcripts.",
-    "- If the learner explicitly asks for another reply language, follow that request immediately.",
-    "- Follow the learner's current spoken language as soon as it is clear from the live conversation.",
+    "- If the learner explicitly asks for another reply language, follow that request immediately and briefly.",
+    "",
+    ...targetLanguageRules,
     "",
     "CONVERSATION STYLE:",
-    `- Treat ${targetLabel} as the starting learning context only.`,
-    "- Once the learner's current spoken language or explicit request is clear, reply in that language naturally without adding extra explanations about switching.",
+    `- Treat ${targetLabel} as the active practice language, not just a loose hint.`,
     "- Ask ONE question at a time, then wait for the answer.",
     `- If the learner struggles, give one very short hint in ${nativeLabel} or the learner's requested help language, then continue naturally.`,
     "- Correct mistakes naturally inside the conversation, not as a lesson block.",

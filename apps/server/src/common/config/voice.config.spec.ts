@@ -9,22 +9,26 @@ describe("realtime voice config", () => {
     const settings = resolveRealtimeVoiceSettings(LanguageCode.Cantonese);
 
     expect(settings.defaultVoice).toBe("Rocky");
-    expect(settings.options).toEqual(["Rocky", "Wil"]);
+    expect(settings.options).toEqual(["Rocky"]);
   });
 
-  it("does not pass unsupported legacy Cantonese TTS voices to realtime", () => {
+  it("does not pass unsupported Cantonese TTS voices to realtime", () => {
     expect(
-      resolvePreferredRealtimeVoiceForLanguage(
-        LanguageCode.Cantonese,
-        "Kiki",
-        { allowCrossLanguage: true },
-      ),
+      resolvePreferredRealtimeVoiceForLanguage(LanguageCode.Cantonese, "Kiki", {
+        allowCrossLanguage: true,
+      }),
+    ).toBe("Rocky");
+  });
+
+  it("keeps Cantonese realtime requests inside the Cantonese voice catalog", () => {
+    expect(
+      resolvePreferredRealtimeVoiceForLanguage(LanguageCode.Cantonese, "Aiden"),
     ).toBe("Rocky");
   });
 
   it("keeps supported Cantonese realtime voices", () => {
     expect(
-      resolvePreferredRealtimeVoiceForLanguage(LanguageCode.Cantonese, "Wil"),
-    ).toBe("Wil");
+      resolvePreferredRealtimeVoiceForLanguage(LanguageCode.Cantonese, "Rocky"),
+    ).toBe("Rocky");
   });
 });

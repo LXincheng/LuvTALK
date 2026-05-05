@@ -40,9 +40,7 @@ import { useLocale } from '../providers/LocaleContext';
 import { toast } from '../utils/toast';
 import {
   getDefaultTtsVoice,
-  getDefaultImmersiveVoice,
   getTtsVoiceOptions,
-  isRealtimeVoiceSupported,
   isTtsVoiceSupported,
   setVoiceCatalog,
 } from '../config/voice';
@@ -56,8 +54,10 @@ import type {
   LanguageCode,
 } from '../types/api';
 import {
+  getStoredRealtimeVoice,
   getStoredTtsSpeed,
   getStoredTtsVoice,
+  setStoredRealtimeVoice,
   setStoredTtsSpeed,
   setStoredTtsVoice,
 } from '../utils/voicePreferences';
@@ -332,7 +332,7 @@ export default function ConversationPage() {
     getStoredTtsVoice(getInitialTargetLanguage()),
   );
   const [realtimeVoice, setRealtimeVoice] = useState<string>(() =>
-    getDefaultImmersiveVoice(getInitialTargetLanguage()),
+    getStoredRealtimeVoice(getInitialTargetLanguage()),
   );
   const [ttsSpeed, setTtsSpeed] = useState<'slow' | 'normal' | 'fast'>(getStoredTtsSpeed);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -810,6 +810,10 @@ export default function ConversationPage() {
   }, [targetLanguage, ttsVoice]);
 
   useEffect(() => {
+    setStoredRealtimeVoice(targetLanguage, realtimeVoice);
+  }, [targetLanguage, realtimeVoice]);
+
+  useEffect(() => {
     setStoredTtsSpeed(ttsSpeed);
   }, [ttsSpeed]);
 
@@ -818,11 +822,7 @@ export default function ConversationPage() {
   }, [targetLanguage]);
 
   useEffect(() => {
-    setRealtimeVoice((currentVoice) =>
-      isRealtimeVoiceSupported(targetLanguage, currentVoice)
-        ? currentVoice
-        : getDefaultImmersiveVoice(targetLanguage),
-    );
+    setRealtimeVoice(getStoredRealtimeVoice(targetLanguage));
   }, [targetLanguage]);
 
   useEffect(() => {

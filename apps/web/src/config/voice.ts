@@ -36,7 +36,7 @@ const DEFAULT_REALTIME_VOICE_CATALOG: Record<LanguageCode, VoiceCatalogItem> = {
   },
   cantonese: {
     defaultVoice: 'Rocky',
-    options: ['Rocky', 'Wil'],
+    options: ['Rocky'],
   },
   english: {
     defaultVoice: 'Aiden',
@@ -148,6 +148,10 @@ export const resolveAdaptiveImmersiveVoice = (input?: {
   preferredLanguage?: LanguageCode;
   detectedText?: string;
 }): string => {
+  if (input?.preferredLanguage === 'cantonese') {
+    return getDefaultImmersiveVoice('cantonese');
+  }
+
   const detectedLanguage = detectVoiceLanguageFromText(input?.detectedText);
   const language = detectedLanguage ?? input?.preferredLanguage ?? 'english';
   return getDefaultImmersiveVoice(language);

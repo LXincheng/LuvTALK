@@ -8,6 +8,7 @@ import { DEFAULT_TTS_SPEED } from '../constants/ui';
 import {
   getDefaultImmersiveVoice,
   getDefaultTtsVoice,
+  isRealtimeVoiceSupported,
   isTtsVoiceSupported,
 } from '../config/voice';
 import type { LanguageCode } from '../types/api';
@@ -103,12 +104,12 @@ export const getStoredRealtimeVoice = (language: LanguageCode): string => {
   }
 
   const mapped = readRealtimeVoiceMap()[language];
-  if (isTtsVoiceSupported(language, mapped)) {
+  if (isRealtimeVoiceSupported(language, mapped)) {
     return mapped;
   }
 
   const legacy = window.localStorage.getItem(REALTIME_VOICE_STORAGE_KEY);
-  if (isTtsVoiceSupported(language, legacy)) {
+  if (isRealtimeVoiceSupported(language, legacy)) {
     return legacy;
   }
 
@@ -119,7 +120,7 @@ export const setStoredRealtimeVoice = (
   language: LanguageCode,
   voice: string,
 ) => {
-  if (typeof window === 'undefined' || !isTtsVoiceSupported(language, voice)) {
+  if (typeof window === 'undefined' || !isRealtimeVoiceSupported(language, voice)) {
     return;
   }
   const next = readRealtimeVoiceMap();

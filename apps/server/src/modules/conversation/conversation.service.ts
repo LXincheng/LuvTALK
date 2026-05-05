@@ -421,7 +421,7 @@ export class ConversationService {
       } catch (error) {
         if (this.isDatabaseConnectionError(error)) {
           this.prisma.markDatabaseUnavailable(
-            "Database connection lost (P1001/P1002).",
+            "Database connection unavailable while deleting conversation.",
           );
           if (!this.prisma.allowsInMemoryFallback()) {
             this.prisma.ensurePersistentStorageAvailable();
@@ -868,6 +868,14 @@ export class ConversationService {
       } catch (error) {
         if (this.isMissingUserColumnError(error)) {
           this.logMissingUserColumnWarning();
+          record = null;
+        } else if (this.isDatabaseConnectionError(error)) {
+          this.prisma.markDatabaseUnavailable(
+            "Database connection unavailable while loading conversation.",
+          );
+          if (!this.prisma.allowsInMemoryFallback()) {
+            this.prisma.ensurePersistentStorageAvailable();
+          }
           record = null;
         } else {
           throw error;
@@ -2038,7 +2046,7 @@ export class ConversationService {
         }
         if (this.isDatabaseConnectionError(error)) {
           this.prisma.markDatabaseUnavailable(
-            "Database connection lost (P1001/P1002).",
+            "Database connection unavailable while persisting conversation.",
           );
           return;
         }
@@ -2091,7 +2099,7 @@ export class ConversationService {
       } catch (error) {
         if (this.isDatabaseConnectionError(error)) {
           this.prisma.markDatabaseUnavailable(
-            "Database connection lost (P1001/P1002).",
+            "Database connection unavailable while listing conversations.",
           );
           if (!this.prisma.allowsInMemoryFallback()) {
             this.prisma.ensurePersistentStorageAvailable();
@@ -2172,7 +2180,7 @@ export class ConversationService {
     } catch (error) {
       if (this.isDatabaseConnectionError(error)) {
         this.prisma.markDatabaseUnavailable(
-          "Database connection lost (P1001/P1002).",
+          "Database connection unavailable while listing user history.",
         );
         if (!this.prisma.allowsInMemoryFallback()) {
           this.prisma.ensurePersistentStorageAvailable();
@@ -2327,6 +2335,9 @@ export class ConversationService {
   }
 
   private isDatabaseConnectionError(error: unknown): boolean {
+    if (this.prisma.isConnectionError(error)) {
+      return true;
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       (error.code === "P1001" || error.code === "P1002")

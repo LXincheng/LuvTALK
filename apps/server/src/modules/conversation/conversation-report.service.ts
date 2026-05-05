@@ -1605,6 +1605,9 @@ export class ConversationReportService {
   }
 
   private isDatabaseConnectionError(error: unknown): boolean {
+    if (this.prisma.isConnectionError(error)) {
+      return true;
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       (error.code === "P1001" || error.code === "P1002")

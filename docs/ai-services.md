@@ -99,10 +99,10 @@
 | 语言 | 默认音色 | 推荐候选 |
 | --- | --- | --- |
 | 普通话 | `Serena` | `Serena, Ethan` |
-| 粤语 | `Rocky` | `Rocky, Wil` |
+| 粤语 | `Rocky` | `Rocky` |
 | 英语 | `Aiden` | `Aiden, Jennifer` |
 
-> `Kiki` 可继续作为普通 TTS 粤语音色，但在 `qwen3.5-omni-plus-realtime` 生成阶段会返回 `Voice 'Kiki' is not supported`，所以 immersive 不再展示或透传该音色。
+> `Kiki` 继续作为普通 TTS / chat 粤语音色；但在当前 `qwen3.5-omni-plus-realtime` 生成阶段会返回 `Voice 'Kiki' is not supported`，所以 immersive 粤语固定使用已验证可生成音频的 `Rocky`。服务端拒绝把普通话或英语音色透传进粤语 Realtime 会话。
 
 ## 4. 运行结论
 

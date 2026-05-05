@@ -94,8 +94,9 @@ export class PrismaService
     return (
       code === "P1001" ||
       code === "P1002" ||
+      code === "P2024" ||
       code === "P2028" ||
-      /maxclientsinsessionmode|max clients reached|too many clients|connection pool/i.test(
+      /maxclientsinsessionmode|max clients reached|too many clients|connection pool|timed out fetching a new connection/i.test(
         message,
       )
     );

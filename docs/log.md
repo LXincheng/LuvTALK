@@ -7,6 +7,26 @@
 
 ## 2026-05：Realtime 官方链路升级
 
+### 2026-05-05（粤语 Immersive 音色与回复语言收口）
+
+| 维度 | 记录 |
+| --- | --- |
+| 问题点 | 粤语 immersive 会根据实时字幕自动换音色；像“你好/可以”这类通用汉字短句缺少粤语标记，容易被前端误判为普通话，进而把 Realtime 音色切到普通话并放大回复语言跑偏。 |
+| 复测修正 | `qwen3.5-omni-plus-realtime` 在生成阶段仍会对 `Kiki` 返回 `<400> Voice 'Kiki' is not supported`；因此 chat 可继续用普通 TTS 的 `Kiki`，但 immersive Realtime 必须避开 `Kiki`。 |
+| 修复 | 服务端 Realtime 不再接受跨语言音色透传；粤语 immersive 固定使用已验证可生成音频的 `Rocky`，`Kiki` 或其他语言音色请求统一兜底到 `Rocky`。 |
+| Prompt | 粤语 immersive prompt 明确要求默认使用广东话 / 香港粤语口语，不因通用中文转写切到普通话；只有用户明确要求时才切换回复语言。 |
+| 前端 | Realtime 音色存取改用 Realtime 专用目录，粤语 immersive 只展示 `Rocky`，并且自动音色逻辑始终优先保持粤语默认音色。 |
+| 验证 | `server prompt.config.spec.ts + voice.config.spec.ts` 通过；`web typecheck` 通过；`server build` 通过。 |
+
+### 2026-05-05（Prisma P2024 连接池超时降级）
+
+| 维度 | 记录 |
+| --- | --- |
+| 现象 | 开发环境数据库连接池 `connection_limit=1` 时，沉浸模式重连、会话读取、会话持久化并发触发 `Prisma P2024: Timed out fetching a new connection from the connection pool`，随后 Nest 全局异常打印 500。 |
+| 根因 | `P2024` 没被纳入数据库连接类错误，`getSession` 的 `findUnique` 遇到连接池耗尽时直接向外抛错；`persistSession` 也无法走现有的“标记数据库不可用 + 内存/缓存降级 + 后台重连”路径。 |
+| 修复 | `PrismaService.isConnectionError` 增加 `P2024` 和连接池超时文案识别；`ConversationService.getSession` 遇到连接类错误时标记数据库暂不可用，并按现有配置走内存 fallback 或持久化不可用异常。 |
+| 验证 | 新增 `prisma.service.spec.ts` 覆盖 `P2024`；`server prisma/prompt/voice` 相关单测通过；`server build` 与 `web typecheck` 通过。 |
+
 ### 2026-05-03（Qwen3.5 Omni Plus Realtime + 字幕/音色/UI 收口）
 
 | 维度 | 记录 |

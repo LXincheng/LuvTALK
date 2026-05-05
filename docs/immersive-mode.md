@@ -43,7 +43,7 @@
 | turn detection | 使用官方 `server_vad`，参数为 `threshold=0.5 / silence_duration_ms=900`，在不抢话和句尾响应之间取平衡 |
 | 防打断 | 仅保留必要的播放抑制与真实转写长度阈值；前端不再在 `speech_started` 就立刻硬打断导师，只有收到足够长度的真实转写后才取消当前回复 |
 | 音频上行 | Qwen3.5 Omni Realtime 输入按官方 16kHz / 16-bit / mono PCM 上行；前端不再用本地 noise gate 截断低音量/句尾静音帧 |
-| 音色策略 | immersive 使用独立 Realtime 音色目录；普通话 `Serena/Ethan`、粤语 `Rocky/Wil`、英语 `Aiden/Jennifer`，不复用普通 TTS 的 `Kiki` |
+| 音色策略 | immersive 使用独立 Realtime 音色目录；普通话 `Serena/Ethan`、粤语 `Rocky`、英语 `Aiden/Jennifer`；粤语不复用普通 TTS / chat 的 `Kiki`，且不再因通用中文短句自动切到普通话音色 |
 
 ### 3.2 UI / UX
 
@@ -138,14 +138,14 @@
 - Realtime 主模型切到 `qwen3.5-omni-plus-realtime`，turn detection 使用官方 `server_vad`。
 - 字幕在同一条 session 内启用 `qwen3-asr-flash-realtime`，不再维护额外 `REALTIME_TRANSCRIBE_MODEL`。
 - 前端输入音频按官方要求重采样到 16kHz，输出播放保持 24kHz；同时不再用本地 noise gate 截断句尾静音帧。
-- 粤语 immersive 音色从普通 TTS 的 `Kiki` 切到 Realtime 已验证可用的 `Rocky/Wil`，避免上游生成阶段 400 后循环重连。
+- 粤语 immersive 固定使用当前 `qwen3.5-omni-plus-realtime` 已验证可生成音频的 `Rocky`；普通 TTS / chat 可继续使用 `Kiki`，但 Realtime 生成阶段不能透传 `Kiki`。
 - 前端 connected 状态继续保持“`audio capture ready + session ready` 双条件”才能亮起，避免把还在等待 VAD / 转写的阶段误呈现为已经随时可响应。
 
 ### 5.3 当前局限性
 
 - 这组数据仍然无法单独拆出“用户真实说话时长”，因此 `first client audio -> first user transcript` 里既包含模型等待，也包含用户自己正在说话的时长。
 - 在本轮补充埋点之前，没有单独记录 `speech_stopped -> response.created` 的耗时；新版本上线后，下一轮日志才可以把“VAD 收口时间”和“上游生成启动时间”继续拆细。
-- 音色自适应仍依赖实时转写事件，而不是直接读取音频语种标签；这已经比等完整文本更快，但还不是完全零延迟。
+- 非粤语模式的音色自适应仍依赖实时转写事件，而不是直接读取音频语种标签；粤语模式已优先锁定官方 Realtime 粤语音色，避免“你好/可以”这类通用汉字误触发普通话音色。
 
 ## 6. 后续优化方向
 

@@ -56,7 +56,7 @@ export const OFFICIAL_REALTIME_VOICE_CATALOG: Record<
     languageCode: "yue",
     ttsLanguageType: "Chinese",
     defaultVoice: "Rocky",
-    options: ["Rocky", "Wil"],
+    options: ["Rocky"],
   },
   [LanguageCode.English]: {
     languageCode: "en",

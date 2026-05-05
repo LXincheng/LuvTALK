@@ -164,7 +164,6 @@ export class RealtimeWsProxy {
       let currentVoice = resolvePreferredRealtimeVoiceForLanguage(
         session.targetLanguage,
         requestedVoice,
-        { allowCrossLanguage: true },
       );
 
       const maxSessionSeconds = profile
@@ -448,7 +447,6 @@ export class RealtimeWsProxy {
           currentVoice = resolvePreferredRealtimeVoiceForLanguage(
             session.targetLanguage,
             resolveVoice(payload.session) ?? currentVoice,
-            { allowCrossLanguage: true },
           );
           const update = buildSessionUpdate({
             instructions: prompt,
